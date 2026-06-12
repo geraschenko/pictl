@@ -75,7 +75,12 @@ const THINKING_LEVELS = [
   "xhigh",
 ] as const;
 
-// TDC: does it make sense to use the type directly from packages/ai/src/types.ts of the pi repo?
+/**
+ * pi-ai's ImageContent. Derived from the prompt command's `images` field
+ * rather than imported: the coding-agent package index does not re-export
+ * it, and @earendil-works/pi-ai is a transitive dependency that does not
+ * resolve from pi-ctl's node_modules.
+ */
 type ImageContent = NonNullable<
   Extract<RpcCommand, { type: "prompt" }>["images"]
 >[number];
