@@ -124,6 +124,7 @@ function ptyEnv(agentId: string): Record<string, string> {
  * core service is the only place xterm tracks it. Guarded so an xterm
  * internals change degrades to "cursor visible", not a crash.
  */
+// TDC: the name of this function doesn't make the meaning completely clear. Should it be called "hideCursorSequence" instead?
 function cursorVisibilitySequence(terminal: xterm.Terminal): string {
   const core = (
     terminal as unknown as {

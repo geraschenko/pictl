@@ -82,6 +82,7 @@ export class TtyServer {
     const exitFrame = encodeExit({ reason });
     const flushes = [...this.clients].map(
       (client) =>
+        // TDC: A review agent says: "shutdown() calls socket.end(exitFrame, ...), but a pending serializeScreen().then(...) may later try to write snapshot/output to the same socket. Usually destroyed will become true quickly, but there is a small window where writes-after-end could happen. A server-level shuttingDown flag or per-client closed flag would make this cleaner." What do you think?
         new Promise<void>((resolve) => client.socket.end(exitFrame, resolve)),
     );
     let flushDeadline: NodeJS.Timeout | undefined;
@@ -110,6 +111,7 @@ export class TtyServer {
 
     // Buffering (registration above) and the serialize parse barrier must be
     // enqueued in the same synchronous step — see TtyServerHooks.
+    // TDC: if serializeScreen() rejects, there is no .catch(). That can produce an unhandled rejection and leave the client in pendingOutput mode forever.
     void this.hooks.serializeScreen().then((snapshot) => {
       if (client.pendingOutput === null || socket.destroyed) {
         return;

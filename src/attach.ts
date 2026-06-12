@@ -30,9 +30,11 @@ export const DETACH_KEY_NAME = "ctrl+]";
  * cursor-hidden with bracketed paste on, and output may end mid-SGR.
  * (show cursor, bracketed paste off, SGR reset)
  */
+// TDC: separate out the three constants (show cursor, etc) and build this constant by concatenating them
 const TERMINAL_RESTORE_SEQUENCE = "\x1b[?25h\x1b[?2004l\x1b[0m";
 
 /** Render the snapshot from the holder's emulator origin: home, clear. */
+// TDC: same here
 const CLEAR_SCREEN_SEQUENCE = "\x1b[H\x1b[2J";
 
 /**
@@ -73,6 +75,7 @@ export async function runAttach(argv: string[]): Promise<void> {
   }
 
   const socket = await connectToTty(ttySocketPath(agentDir), agentId);
+  // TDC: I don't ever see this text. I think the screen is being cleared immediately after it's written. Is there some way we could write it underneath all the lines from pi? It'll get overwritten, but at least the user will see it on attach.
   console.log(`attached to ${agentId}; detach: ${DETACH_KEY_NAME}`);
   process.stdin.setRawMode(true);
   process.stdin.resume();

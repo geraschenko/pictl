@@ -14,6 +14,7 @@
  * protocol and nothing else.
  */
 
+// TDC: FrameType exported as both value and type is kind of confusing, isn't it? Is this normal?
 export const FrameType = {
   input: 1,
   resize: 2,
@@ -25,7 +26,7 @@ export const FrameType = {
 export type FrameType = (typeof FrameType)[keyof typeof FrameType];
 
 const FRAME_TYPE_VALUES = new Set<number>(Object.values(FrameType));
-const HEADER_LENGTH = 5;
+const HEADER_LENGTH = 5;  // TDC: why 5? I think this is 1 byte for frame type and 4 bytes for payload size, but we should be explicit about where the 5 comes from.
 
 export interface Frame {
   type: FrameType;
@@ -100,6 +101,7 @@ export class FrameDecoder {
       }
       const payloadLength = this.buffer.readUInt32BE(1);
       if (this.buffer.length < HEADER_LENGTH + payloadLength) {
+        // TDC: when would this happen? This encoding/decoding scheme seems kind of dodgy, the sort of thing buffer overflow security stories are made of. What do you think?
         break;
       }
       frames.push({
