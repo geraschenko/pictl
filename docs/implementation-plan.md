@@ -37,7 +37,7 @@ Notes:
 
 - Getting the session file path into `agent.json`: the `session_changed` event received right after `hello` carries it (`get_state` remains the fallback if the holder runs against a pi predating the event). Await the socket appearing / connecting with retry — never a fixed sleep.
 - Daemonization: detach the holder fully (setsid, stdio to a log file in the agent dir). The holder must survive the spawning terminal closing.
-- Revival mechanism: pi's CLI resumes a specific session via `--session <path|id>`, so revival is `pi --rpc-socket <dir>/pi.sock --session <most recent confirmed entry in sessions history> <recorded spawn args...>`. Skip pending entries (their file was never flushed); as an ENOENT backstop, fall back to the next most recent entry whose file exists, and start without `--session` if none do.
+- Revival mechanism: pi's CLI resumes a specific session via `--session <path|id>`, so revival is `pi --rpc-socket <dir>/pi.sock --session <most recent sessions entry whose file exists on disk> <recorded spawn args...>`, starting without `--session` if no entry's file exists. File existence is the only criterion; the confirmed flag is informational (whether an assistant message was ever observed in the session).
 
 Verification pause: spawn an agent and confirm `list` shows it running; kill -9 the holder and confirm `list` reports it dormant and `resume` revives it on the same session; round-trip `suspend`/`resume`; `kill` removes it; `gc` cleans a hand-tombstoned dir and leaves a dormant one alone.
 
@@ -108,6 +108,17 @@ Each phase is implemented by a fresh agent; this section (plus the docs generall
 - **Trust dialog gotcha**: pi shows an interactive "Trust project folder?" prompt before binding the RPC socket when the cwd has `.pi` inputs and no stored trust decision — a headless spawn then hangs until the 30s holder deadline and fails. pi's `--approve`/`-a` flag overrides (session-only); verification used `pi-ctl spawn -- --approve`. Whether pi-ctl should surface this more directly (flag, better error, docs) is an open question for the user — see Open questions.
 - Verification checklist all passed on 2026-06-12: spawn→list idle; prompt over socket flips the session entry pending→confirmed; SIGKILL holder→dormant→resume revives the same session (no duplicate history entry); suspend/resume round trip + resume no-op on running; kill (graceful and `--force`) removes; gc removes tombstoned+corrupt dirs and leaves a dormant agent alone; ambiguous prefix errors with candidates; holders survive their spawning shell exiting.
 - For phase 2: the tty.sock stub lives in `src/holder.ts` (`ttyServer` — currently accepts and immediately closes); the @xterm/headless `Terminal` instance is already fed all PTY output. The xterm serialize addon is not yet a dependency.
+
+### 2026-06-12: review round 1 (commit 710f49a) addressed
+
+- Naming: bare `dir`/`id` locals and params renamed to `agentDir`/`agentId` throughout; registry's `agentDir(id)` function became `agentDirPath(agentId)` so call sites can use `agentDir` as a local. `AgentRecord.id` (the agent.json field) kept as `id` — inside a type named AgentRecord it is self-describing, and renaming would churn the serialized format.
+- Revival selection simplified to a single pass (review argument accepted): the most recent entry whose file exists on disk, regardless of confirmed. The old confirmed-first two-pass could revive an *older* confirmed session over a newer existing-but-pending one (common after resume → suspend with no prompt in between). Docs updated.
+- Session history is now duplicate-free: on `session_changed`, any existing entry with the same sessionId is removed and the session re-appended at the end, adopting the removed entry's confirmed value (re-announcement does not change whether an assistant message was ever observed). Verified: prompt → suspend → resume keeps exactly one confirmed entry.
+- `status`/`kill`/`suspend`/`resume` accept multiple agents; ids are resolved up front (typo aborts before anything is touched), then processed in order, collecting per-agent failures. `status --json` now always prints an array.
+- `kill --force` waits for both pi and holder pids to vanish (previously only the holder).
+- Duplicated helpers consolidated in `src/util.ts` (`fileExists`, `splitAtDoubleDash`).
+- `writeAgentRecord` now fsyncs the temp file before rename (durability without the write-file-atomic dependency; see review reply for the trade-off).
+- Misc: `while (true)` over `for (;;)`; type guard `isSessionChangedEvent` instead of double assertion; `allowProposedApi` dropped (nothing uses proposed APIs yet — revisit if the phase-2 serialize addon needs it); holder SIGINT→SIGTERM forwarding got an explanatory comment (interactive pi treats SIGINT as "abort turn", not "exit").
 
 ## Open questions (resolve with the user before or during the relevant phase)
 

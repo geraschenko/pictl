@@ -19,13 +19,13 @@ function usage(): never {
 	console.error(`usage: pi-ctl <command> [args]
 
 commands:
-  spawn [--cwd <dir>] [--id <id>] [-- <pi args...>]   start a new agent, print its id
-  list [--json]                                       list agents and their status
-  status <agent> [--json]                             detailed status of one agent
-  kill <agent> [--timeout <secs>] [--now] [--force]   wait for quiescence, then kill and remove
-  suspend <agent> [--timeout <secs>]                  wait for quiescence, then stop (agent goes dormant)
-  resume <agent>                                      revive a dormant agent on its last session
-  gc                                                  remove tombstoned or corrupt agent dirs
+  spawn [--cwd <dir>] [--id <id>] [-- <pi args...>]     start a new agent, print its id
+  list [--json]                                         list agents and their status
+  status <agent>... [--json]                            detailed status of agents
+  kill <agent>... [--timeout <secs>] [--now] [--force]  wait for quiescence, then kill and remove
+  suspend <agent>... [--timeout <secs>]                 wait for quiescence, then stop (agent goes dormant)
+  resume <agent>...                                     revive dormant agents on their last sessions
+  gc                                                    remove tombstoned or corrupt agent dirs
 
 <agent> accepts any unique id prefix.`);
 	process.exit(2);

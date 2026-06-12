@@ -122,12 +122,11 @@ export class PiSocketClient {
 			return;
 		}
 		if (record.type === "response") {
-			// TDC: can we convert record to RpcResponse _once_ here to avoid doing it again in the resolve?
-			const id = (record as unknown as RpcResponse).id;
-			const pending = id === undefined ? undefined : this.pending.get(id);
+			const response = record as unknown as RpcResponse;
+			const pending = response.id === undefined ? undefined : this.pending.get(response.id);
 			if (pending) {
-				this.pending.delete(id!);
-				pending.resolve(record as unknown as RpcResponse);
+				this.pending.delete(response.id!);
+				pending.resolve(response);
 			}
 			return;
 		}
@@ -140,7 +139,8 @@ export class PiSocketClient {
 		if (this.closed) {
 			throw new Error("pi socket closed");
 		}
-		// TDC: why use a request counter here instead of a uuid?
+		// Ids only correlate request/response within this private connection, so
+		// a counter suffices; it is also ordered, which helps when reading traces.
 		const id = `pi-ctl-${++this.requestCounter}`;
 		const response = await new Promise<RpcResponse>((resolve, reject) => {
 			this.pending.set(id, { resolve, reject });
@@ -194,7 +194,7 @@ export async function connectWithRetry(
 ): Promise<PiSocketClient> {
 	const deadline = Date.now() + deadlineMs;
 	let delay = 50;
-	for (;;) {  // TDC: `while (true)`?
+	while (true) {
 		try {
 			return await PiSocketClient.connect(socketPath, onEvent);
 		} catch (error) {
@@ -209,7 +209,11 @@ export async function connectWithRetry(
 	}
 }
 
-// TDC: why is this a free function rather than a method of PiSocketClient?
+/**
+ * Free function rather than a PiSocketClient method to keep the client purely
+ * transport-level: phase 3 adds a module mapping all CLI subcommands to typed
+ * RPC calls, and command-specific helpers belong there, not on the client.
+ */
 export async function getState(client: PiSocketClient): Promise<RpcSessionState> {
 	const response = await client.request({ type: "get_state" });
 	return (response as Extract<RpcResponse, { command: "get_state"; success: true }>).data;

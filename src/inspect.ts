@@ -3,12 +3,12 @@
  * None of these revive dormant agents: a dead holder is not garbage.
  */
 
-import { access, rm } from "node:fs/promises";
+import { rm } from "node:fs/promises";
 import { parseArgs } from "node:util";
 import type { RpcSessionState } from "@earendil-works/pi-coding-agent";
 import {
 	type AgentRecord,
-	agentDir,
+	agentDirPath,
 	isPidAlive,
 	listAgentIds,
 	piSocketPath,
@@ -17,52 +17,43 @@ import {
 	tombstonePath,
 } from "./registry.js";
 import { connectWithRetry, getState } from "./rpc.js";
+import { fileExists } from "./util.js";
 
 const PROBE_CONNECT_DEADLINE_MS = 2_000;
 
 export type AgentStatus = "idle" | "streaming" | "dormant" | "tombstoned" | "corrupt" | "unreachable";
 
 export interface AgentProbe {
-	id: string;  // TDC: agentId?
+	agentId: string;
 	status: AgentStatus;
 	record?: AgentRecord;
 	state?: RpcSessionState;
 	error?: string;
 }
 
-// TDC: this function is duplicated in its entirety in holder.ts. Is there a common utility we can rely on or some way to share the code? Are there any other duplicated utilities? Duplication of code like this makes maintenance a nightmare, so I really want to avoid it.
-async function fileExists(path: string): Promise<boolean> {
-	try {
-		await access(path);
-		return true;
-	} catch {
-		return false;
+export async function probeAgent(agentId: string): Promise<AgentProbe> {
+	const agentDir = agentDirPath(agentId);
+	if (await fileExists(tombstonePath(agentDir))) {
+		return { agentId, status: "tombstoned" };
 	}
-}
-
-export async function probeAgent(id: string): Promise<AgentProbe> {
-	const dir = agentDir(id);
-	if (await fileExists(tombstonePath(dir))) {
-		return { id, status: "tombstoned" };
-	}
-	const read = await readAgentRecord(dir);
+	const read = await readAgentRecord(agentDir);
 	if (read.kind !== "ok") {
-		return { id, status: "corrupt", error: read.kind === "missing" ? "no agent.json" : read.error };
+		return { agentId, status: "corrupt", error: read.kind === "missing" ? "no agent.json" : read.error };
 	}
 	const record = read.record;
 	if (!isPidAlive(record.holderPid)) {
-		return { id, status: "dormant", record };
+		return { agentId, status: "dormant", record };
 	}
 	try {
-		const client = await connectWithRetry(piSocketPath(dir), PROBE_CONNECT_DEADLINE_MS);
+		const client = await connectWithRetry(piSocketPath(agentDir), PROBE_CONNECT_DEADLINE_MS);
 		try {
 			const state = await getState(client);
-			return { id, status: state.isStreaming ? "streaming" : "idle", record, state };
+			return { agentId, status: state.isStreaming ? "streaming" : "idle", record, state };
 		} finally {
 			client.close();
 		}
 	} catch (error) {
-		return { id, status: "unreachable", record, error: String(error) };
+		return { agentId, status: "unreachable", record, error: String(error) };
 	}
 }
 
@@ -78,8 +69,8 @@ function formatTable(rows: string[][]): string {
 
 export async function runList(argv: string[]): Promise<void> {
 	const { values } = parseArgs({ args: argv, options: { json: { type: "boolean", default: false } } });
-	const ids = await listAgentIds();
-	const probes = await Promise.all(ids.map(probeAgent));
+	const agentIds = await listAgentIds();
+	const probes = await Promise.all(agentIds.map(probeAgent));
 	probes.sort((a, b) => (a.record?.createdAt ?? "").localeCompare(b.record?.createdAt ?? ""));
 
 	if (values.json) {
@@ -93,7 +84,7 @@ export async function runList(argv: string[]): Promise<void> {
 	const rows = [["ID", "STATUS", "CWD", "CREATED"]];
 	for (const probe of probes) {
 		rows.push([
-			probe.id.slice(0, 8),
+			probe.agentId.slice(0, 8),
 			probe.status,
 			probe.record?.cwd ?? "-",
 			probe.record?.createdAt ?? "-",
@@ -102,24 +93,8 @@ export async function runList(argv: string[]): Promise<void> {
 	console.log(formatTable(rows));
 }
 
-export async function runStatus(argv: string[]): Promise<void> {
-	const { values, positionals } = parseArgs({
-		args: argv,
-		allowPositionals: true,
-		options: { json: { type: "boolean", default: false } },
-	});
-	if (positionals.length !== 1) {
-		// TDC: why not allow fetching the status of multiple agents in one request?
-		throw new Error("expected exactly one agent id");
-	}
-	const id = await resolveAgentId(positionals[0]!);
-	const probe = await probeAgent(id);
-
-	if (values.json) {
-		console.log(JSON.stringify(probe, null, 2));
-		return;
-	}
-	console.log(`id:       ${probe.id}`);
+function printProbe(probe: AgentProbe): void {
+	console.log(`id:       ${probe.agentId}`);
 	console.log(`status:   ${probe.status}${probe.error ? ` (${probe.error})` : ""}`);
 	if (probe.record) {
 		console.log(`cwd:      ${probe.record.cwd}`);
@@ -142,15 +117,42 @@ export async function runStatus(argv: string[]): Promise<void> {
 	}
 }
 
+export async function runStatus(argv: string[]): Promise<void> {
+	const { values, positionals } = parseArgs({
+		args: argv,
+		allowPositionals: true,
+		options: { json: { type: "boolean", default: false } },
+	});
+	if (positionals.length === 0) {
+		throw new Error("expected at least one agent id");
+	}
+	const agentIds: string[] = [];
+	for (const prefix of positionals) {
+		agentIds.push(await resolveAgentId(prefix));
+	}
+	const probes = await Promise.all(agentIds.map(probeAgent));
+
+	if (values.json) {
+		console.log(JSON.stringify(probes, null, 2));
+		return;
+	}
+	probes.forEach((probe, index) => {
+		if (index > 0) {
+			console.log("");
+		}
+		printProbe(probe);
+	});
+}
+
 export async function runGc(argv: string[]): Promise<void> {
 	parseArgs({ args: argv, options: {} });
-	const ids = await listAgentIds();
+	const agentIds = await listAgentIds();
 	let removed = 0;
-	for (const id of ids) {
-		const probe = await probeAgent(id);
+	for (const agentId of agentIds) {
+		const probe = await probeAgent(agentId);
 		if (probe.status === "tombstoned" || probe.status === "corrupt") {
-			await rm(agentDir(id), { recursive: true, force: true });
-			console.log(`removed ${id} (${probe.status})`);
+			await rm(agentDirPath(agentId), { recursive: true, force: true });
+			console.log(`removed ${agentId} (${probe.status})`);
 			removed += 1;
 		}
 	}

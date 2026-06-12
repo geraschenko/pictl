@@ -5,13 +5,17 @@
  * streaming AND pending message queue empty), SIGTERM pi, SIGKILL escalation
  * if it lingers. kill additionally tombstones and removes the directory;
  * suspend leaves it, making the agent dormant.
+ *
+ * All three accept multiple agents; ids are resolved up front (so a typo
+ * aborts before anything is touched), then agents are processed in order,
+ * continuing past per-agent failures and reporting them at the end.
  */
 
 import { rm, writeFile } from "node:fs/promises";
 import { parseArgs } from "node:util";
 import {
 	type AgentRecord,
-	agentDir,
+	agentDirPath,
 	isPidAlive,
 	piSocketPath,
 	readAgentRecord,
@@ -26,23 +30,31 @@ const SIGKILL_ESCALATION_MS = 5_000;
 const PROCESS_EXIT_DEADLINE_MS = 10_000;
 
 interface LoadedAgent {
-	id: string;
-	dir: string;
+	agentId: string;
+	agentDir: string;
 	record: AgentRecord;
 }
 
 async function loadAgent(prefix: string): Promise<LoadedAgent> {
-	const id = await resolveAgentId(prefix);
-	const dir = agentDir(id);
-	const read = await readAgentRecord(dir);
+	const agentId = await resolveAgentId(prefix);
+	const agentDir = agentDirPath(agentId);
+	const read = await readAgentRecord(agentDir);
 	if (read.kind !== "ok") {
 		throw new Error(
 			read.kind === "missing"
-				? `agent '${id}' has no agent.json (failed spawn?); run \`pi-ctl gc\``
-				: `agent '${id}' has a corrupt agent.json: ${read.error}; run \`pi-ctl gc\``,
+				? `agent '${agentId}' has no agent.json (failed spawn?); run \`pi-ctl gc\``
+				: `agent '${agentId}' has a corrupt agent.json: ${read.error}; run \`pi-ctl gc\``,
 		);
 	}
-	return { id, dir, record: read.record };
+	return { agentId, agentDir, record: read.record };
+}
+
+function killSilently(pid: number, signal: NodeJS.Signals): void {
+	try {
+		process.kill(pid, signal);
+	} catch {
+		// Already gone.
+	}
 }
 
 export class QuiescenceTimeoutError extends Error {}
@@ -54,7 +66,7 @@ export class QuiescenceTimeoutError extends Error {}
  */
 export async function waitQuiescent(client: PiSocketClient, timeoutMs: number | undefined): Promise<void> {
 	const deadline = timeoutMs === undefined ? undefined : Date.now() + timeoutMs;
-	for (;;) {  // TDC: is this the standard way to do "while true" in typescript?
+	while (true) {
 		const nextAgentEnd = new Promise<"agent_end" | "closed">((resolve) => {
 			client.onEvent((event) => {
 				if (event.type === "agent_end") {
@@ -104,11 +116,7 @@ async function terminatePi(client: PiSocketClient, piPid: number): Promise<void>
 	const closed = client.waitClosed().then(() => "closed" as const);
 	const escalation = new Promise<"escalate">((resolve) => setTimeout(() => resolve("escalate"), SIGKILL_ESCALATION_MS));
 	if ((await Promise.race([closed, escalation])) === "escalate") {
-		try {
-			process.kill(piPid, "SIGKILL");
-		} catch {
-			// Already gone.
-		}
+		killSilently(piPid, "SIGKILL");
 		await closed;
 	}
 }
@@ -131,19 +139,20 @@ async function waitPidGone(pid: number, deadlineMs: number): Promise<void> {
 	}
 }
 
-function parseStopArgs(argv: string[], extraOptions: Record<string, { type: "boolean" }>): {
-	agent: string;  // TDC: is this agentId?
+interface StopArgs {
+	agentPrefixes: string[];
 	timeoutMs: number | undefined;
 	flags: Record<string, boolean | undefined>;
-} {
+}
+
+function parseStopArgs(argv: string[], extraOptions: Record<string, { type: "boolean" }>): StopArgs {
 	const { values, positionals } = parseArgs({
 		args: argv,
 		allowPositionals: true,
 		options: { timeout: { type: "string" }, ...extraOptions },
 	});
-	if (positionals.length !== 1) {
-		// TDC: why not allow stopping multiple agents in one command?
-		throw new Error("expected exactly one agent id");
+	if (positionals.length === 0) {
+		throw new Error("expected at least one agent id");
 	}
 	const timeoutMs = values.timeout === undefined ? undefined : Number(values.timeout) * 1000;
 	if (timeoutMs !== undefined && !Number.isFinite(timeoutMs)) {
@@ -153,12 +162,31 @@ function parseStopArgs(argv: string[], extraOptions: Record<string, { type: "boo
 	for (const key of Object.keys(extraOptions)) {
 		flags[key] = (values as Record<string, boolean | string | undefined>)[key] as boolean | undefined;
 	}
-	return { agent: positionals[0]!, timeoutMs, flags };
+	return { agentPrefixes: positionals, timeoutMs, flags };
+}
+
+/** Resolve all prefixes before acting, then run `action` per agent, collecting failures. */
+async function forEachAgent(prefixes: string[], action: (agent: LoadedAgent) => Promise<void>): Promise<void> {
+	const agents: LoadedAgent[] = [];
+	for (const prefix of prefixes) {
+		agents.push(await loadAgent(prefix));
+	}
+	const failures: string[] = [];
+	for (const agent of agents) {
+		try {
+			await action(agent);
+		} catch (error) {
+			failures.push(`${agent.agentId}: ${error instanceof Error ? error.message : String(error)}`);
+		}
+	}
+	if (failures.length > 0) {
+		throw new Error(failures.join("\n"));
+	}
 }
 
 /** The quiescence-wait → SIGTERM → escalate → holder-gone sequence shared by kill and suspend. */
 async function stopRunningAgent(agent: LoadedAgent, timeoutMs: number | undefined, abortFirst: boolean): Promise<void> {
-	const client = await connectWithRetry(piSocketPath(agent.dir), SOCKET_CONNECT_DEADLINE_MS);
+	const client = await connectWithRetry(piSocketPath(agent.agentDir), SOCKET_CONNECT_DEADLINE_MS);
 	try {
 		if (abortFirst) {
 			await client.request({ type: "abort" });
@@ -171,82 +199,81 @@ async function stopRunningAgent(agent: LoadedAgent, timeoutMs: number | undefine
 	await waitPidGone(agent.record.holderPid, PROCESS_EXIT_DEADLINE_MS);
 }
 
-export async function runKill(argv: string[]): Promise<void> {
-	const { agent: prefix, timeoutMs, flags } = parseStopArgs(argv, {
-		now: { type: "boolean" },
-		force: { type: "boolean" },
-	});
-	const agent = await loadAgent(prefix);
-
-	if (flags.force) {
-		for (const pid of [agent.record.piPid, agent.record.holderPid]) {
-			try {
-				process.kill(pid, "SIGKILL");
-			} catch {
-				// Already gone.
-			}
-		}
-		await waitPidGone(agent.record.holderPid, PROCESS_EXIT_DEADLINE_MS);
-		await rm(agent.dir, { recursive: true, force: true });
-		// TDC: what about piPid? Should we also wait for it to be gone?
-		console.log(`killed ${agent.id} (forced)`);
+async function killOne(agent: LoadedAgent, timeoutMs: number | undefined, now: boolean, force: boolean): Promise<void> {
+	if (force) {
+		killSilently(agent.record.piPid, "SIGKILL");
+		killSilently(agent.record.holderPid, "SIGKILL");
+		await Promise.all([
+			waitPidGone(agent.record.piPid, PROCESS_EXIT_DEADLINE_MS),
+			waitPidGone(agent.record.holderPid, PROCESS_EXIT_DEADLINE_MS),
+		]);
+		await rm(agent.agentDir, { recursive: true, force: true });
+		console.log(`killed ${agent.agentId} (forced)`);
 		return;
 	}
 
 	if (isPidAlive(agent.record.holderPid)) {
 		try {
-			await stopRunningAgent(agent, timeoutMs, flags.now ?? false);
+			await stopRunningAgent(agent, timeoutMs, now);
 		} catch (error) {
 			if (error instanceof QuiescenceTimeoutError) {
-				throw new Error(`agent ${agent.id} is still busy after ${timeoutMs! / 1000}s; not killed`);
+				throw new Error(`still busy after ${timeoutMs! / 1000}s; not killed`);
 			}
 			throw error;
 		}
 	}
 
 	// Tombstone before removal so an interrupted rm leaves a gc-able dir.
-	await writeFile(tombstonePath(agent.dir), `${new Date().toISOString()}\n`);
-	await rm(agent.dir, { recursive: true, force: true });
-	console.log(`killed ${agent.id}`);
+	await writeFile(tombstonePath(agent.agentDir), `${new Date().toISOString()}\n`);
+	await rm(agent.agentDir, { recursive: true, force: true });
+	console.log(`killed ${agent.agentId}`);
+}
+
+export async function runKill(argv: string[]): Promise<void> {
+	const { agentPrefixes, timeoutMs, flags } = parseStopArgs(argv, {
+		now: { type: "boolean" },
+		force: { type: "boolean" },
+	});
+	await forEachAgent(agentPrefixes, (agent) => killOne(agent, timeoutMs, flags.now ?? false, flags.force ?? false));
 }
 
 export async function runSuspend(argv: string[]): Promise<void> {
-	const { agent: prefix, timeoutMs } = parseStopArgs(argv, {});
-	const agent = await loadAgent(prefix);
-
-	if (!isPidAlive(agent.record.holderPid)) {
-		console.log(`${agent.id} is already dormant`);
-		return;
-	}
-	try {
-		await stopRunningAgent(agent, timeoutMs, false);
-	} catch (error) {
-		if (error instanceof QuiescenceTimeoutError) {
-			throw new Error(`agent ${agent.id} is still busy after ${timeoutMs! / 1000}s; not suspended`);
+	const { agentPrefixes, timeoutMs } = parseStopArgs(argv, {});
+	await forEachAgent(agentPrefixes, async (agent) => {
+		if (!isPidAlive(agent.record.holderPid)) {
+			console.log(`${agent.agentId} is already dormant`);
+			return;
 		}
-		throw error;
-	}
-	console.log(`suspended ${agent.id}`);
+		try {
+			await stopRunningAgent(agent, timeoutMs, false);
+		} catch (error) {
+			if (error instanceof QuiescenceTimeoutError) {
+				throw new Error(`still busy after ${timeoutMs! / 1000}s; not suspended`);
+			}
+			throw error;
+		}
+		console.log(`suspended ${agent.agentId}`);
+	});
 }
 
 export async function runResume(argv: string[]): Promise<void> {
 	const { positionals } = parseArgs({ args: argv, allowPositionals: true, options: {} });
-	if (positionals.length !== 1) {
-		throw new Error("expected exactly one agent id");
+	if (positionals.length === 0) {
+		throw new Error("expected at least one agent id");
 	}
-	const agent = await loadAgent(positionals[0]!);
-
-	if (isPidAlive(agent.record.holderPid)) {
-		console.log(`${agent.id} is already running`);
-		return;
-	}
-	await launchHolder({
-		dir: agent.dir,
-		id: agent.id,
-		cwd: agent.record.cwd,
-		piBin: agent.record.piBin,
-		piArgs: agent.record.spawnArgs,
-		resume: true,
+	await forEachAgent(positionals, async (agent) => {
+		if (isPidAlive(agent.record.holderPid)) {
+			console.log(`${agent.agentId} is already running`);
+			return;
+		}
+		await launchHolder({
+			agentDir: agent.agentDir,
+			agentId: agent.agentId,
+			cwd: agent.record.cwd,
+			piBin: agent.record.piBin,
+			piArgs: agent.record.spawnArgs,
+			resume: true,
+		});
+		console.log(`resumed ${agent.agentId}`);
 	});
-	console.log(`resumed ${agent.id}`);
 }

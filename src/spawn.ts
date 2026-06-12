@@ -11,11 +11,12 @@ import { delimiter, isAbsolute, join, resolve } from "node:path";
 import type { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { agentDir, holderLogPath, piCtlBaseDir } from "./registry.js";
+import { agentDirPath, holderLogPath, piCtlBaseDir } from "./registry.js";
+import { splitAtDoubleDash } from "./util.js";
 
 export interface HolderLaunch {
-	dir: string;
-	id: string;
+	agentDir: string;
+	agentId: string;
 	cwd: string;
 	piBin: string;
 	piArgs: string[];
@@ -72,14 +73,14 @@ async function readAll(stream: Readable): Promise<string> {
  * after the agent is actually reachable — no fixed sleeps.
  */
 export async function launchHolder(launch: HolderLaunch): Promise<void> {
-	const logFd = openSync(holderLogPath(launch.dir), "a");
+	const logFd = openSync(holderLogPath(launch.agentDir), "a");
 	const holdArgs = [
 		mainEntryPath(),
 		"_hold",
-		"--dir",
-		launch.dir,
-		"--id",
-		launch.id,
+		"--agent-dir",
+		launch.agentDir,
+		"--agent-id",
+		launch.agentId,
 		"--cwd",
 		launch.cwd,
 		"--pi-bin",
@@ -110,40 +111,38 @@ export async function launchHolder(launch: HolderLaunch): Promise<void> {
 	}
 	if (!ready?.ok) {
 		throw new Error(
-			`holder failed to start: ${ready?.error ?? "exited before signaling ready"} (log: ${holderLogPath(launch.dir)})`,
+			`holder failed to start: ${ready?.error ?? "exited before signaling ready"} (log: ${holderLogPath(launch.agentDir)})`,
 		);
 	}
 }
 
 export async function runSpawn(argv: string[]): Promise<void> {
-	const separatorIndex = argv.indexOf("--");
-	const own = separatorIndex === -1 ? argv : argv.slice(0, separatorIndex);
-	const piArgs = separatorIndex === -1 ? [] : argv.slice(separatorIndex + 1);
+	const { ownArgs, passthroughArgs: piArgs } = splitAtDoubleDash(argv);
 	const { values } = parseArgs({
-		args: own,
+		args: ownArgs,
 		options: {
 			cwd: { type: "string" },
 			id: { type: "string" },
 		},
 	});
 
-	const id = values.id ?? randomUUID();
+	const agentId = values.id ?? randomUUID();
 	const cwd = resolve(values.cwd ?? process.cwd());
 	const piBin = resolvePiBin();
-	const dir = agentDir(id);
+	const agentDir = agentDirPath(agentId);
 
 	await mkdir(piCtlBaseDir(), { recursive: true });
 	try {
-		await mkdir(dir);
+		await mkdir(agentDir);
 	} catch (error) {
 		if ((error as NodeJS.ErrnoException).code === "EEXIST") {
-			throw new Error(`agent '${id}' already exists`);
+			throw new Error(`agent '${agentId}' already exists`);
 		}
 		throw error;
 	}
 
 	// On failure the dir is left in place so holder.log can be inspected;
 	// `pi-ctl gc` removes dirs that never got an agent.json.
-	await launchHolder({ dir, id, cwd, piBin, piArgs, resume: false });
-	console.log(id);
+	await launchHolder({ agentDir, agentId, cwd, piBin, piArgs, resume: false });
+	console.log(agentId);
 }

@@ -1,10 +1,10 @@
 /**
- * The agent registry is a directory of agent dirs: $PI_CTL_DIR/<id>/ with
+ * The agent registry is a directory of agent dirs: $PI_CTL_DIR/<agentId>/ with
  * agent.json (written only by the holder), pi.sock, tty.sock, holder.log,
  * and optionally a tombstone file marking the dir for gc.
  */
 
-import { readdir, readFile, rename, writeFile } from "node:fs/promises";
+import { open, readdir, readFile, rename } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -35,28 +35,29 @@ export function piCtlBaseDir(): string {
 	return process.env.PI_CTL_DIR ?? join(homedir(), ".pi", "agents");
 }
 
-export function agentDir(id: string): string {
-	return join(piCtlBaseDir(), id);
+/** The agent's own directory within the registry. */
+export function agentDirPath(agentId: string): string {
+	return join(piCtlBaseDir(), agentId);
 }
 
-export function agentJsonPath(dir: string): string {
-	return join(dir, "agent.json");
+export function agentJsonPath(agentDir: string): string {
+	return join(agentDir, "agent.json");
 }
 
-export function piSocketPath(dir: string): string {
-	return join(dir, "pi.sock");
+export function piSocketPath(agentDir: string): string {
+	return join(agentDir, "pi.sock");
 }
 
-export function ttySocketPath(dir: string): string {
-	return join(dir, "tty.sock");
+export function ttySocketPath(agentDir: string): string {
+	return join(agentDir, "tty.sock");
 }
 
-export function tombstonePath(dir: string): string {
-	return join(dir, "tombstone");
+export function tombstonePath(agentDir: string): string {
+	return join(agentDir, "tombstone");
 }
 
-export function holderLogPath(dir: string): string {
-	return join(dir, "holder.log");
+export function holderLogPath(agentDir: string): string {
+	return join(agentDir, "holder.log");
 }
 
 export type AgentRecordReadResult =
@@ -64,10 +65,10 @@ export type AgentRecordReadResult =
 	| { kind: "missing" }
 	| { kind: "corrupt"; error: string };
 
-export async function readAgentRecord(dir: string): Promise<AgentRecordReadResult> {
+export async function readAgentRecord(agentDir: string): Promise<AgentRecordReadResult> {
 	let raw: string;
 	try {
-		raw = await readFile(agentJsonPath(dir), "utf8");
+		raw = await readFile(agentJsonPath(agentDir), "utf8");
 	} catch (error) {
 		if ((error as NodeJS.ErrnoException).code === "ENOENT") {
 			return { kind: "missing" };
@@ -85,11 +86,21 @@ export async function readAgentRecord(dir: string): Promise<AgentRecordReadResul
 	}
 }
 
-export async function writeAgentRecord(dir: string, record: AgentRecord): Promise<void> {
-	const target = agentJsonPath(dir);
-	// TDC: should we use write-file-atomic here?
+/**
+ * Atomic write: write + fsync a temp file, then rename over the target.
+ * Without the fsync a crash shortly after rename can leave an empty file on
+ * some filesystems; with it, readers see either the old or the new content.
+ */
+export async function writeAgentRecord(agentDir: string, record: AgentRecord): Promise<void> {
+	const target = agentJsonPath(agentDir);
 	const tmp = `${target}.tmp`;
-	await writeFile(tmp, `${JSON.stringify(record, null, "\t")}\n`);
+	const handle = await open(tmp, "w");
+	try {
+		await handle.writeFile(`${JSON.stringify(record, null, "\t")}\n`);
+		await handle.sync();
+	} finally {
+		await handle.close();
+	}
 	await rename(tmp, target);
 }
 
@@ -107,11 +118,11 @@ export async function listAgentIds(): Promise<string[]> {
 
 /** Resolve a (possibly partial) agent id. Ambiguity is an error, never a guess. */
 export async function resolveAgentId(prefix: string): Promise<string> {
-	const ids = await listAgentIds();
-	if (ids.includes(prefix)) {
+	const agentIds = await listAgentIds();
+	if (agentIds.includes(prefix)) {
 		return prefix;
 	}
-	const matches = ids.filter((id) => id.startsWith(prefix));
+	const matches = agentIds.filter((agentId) => agentId.startsWith(prefix));
 	if (matches.length === 1) {
 		return matches[0]!;
 	}
