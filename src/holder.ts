@@ -191,6 +191,7 @@ export async function runHold(argv: string[]): Promise<void> {
         terminal.write("", () =>
           resolve(
             serializeAddon.serialize() +
+            // TDC: huh? If we want the cursor to end up hidden, why would we ever do SHOW_CURSOR here?
               (isCursorHidden(terminal) ? HIDE_CURSOR : SHOW_CURSOR),
           ),
         );
