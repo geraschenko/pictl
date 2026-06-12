@@ -63,7 +63,7 @@ export class TtyServer {
 
   /**
    * PTY size = elementwise min over all attached clients' reported sizes
-   * (tmux's policy), recomputed on every resize, attach, and detach: every
+   * (like tmux), recomputed on every resize, attach, and detach: every
    * attacher renders correctly, larger ones with unused margin. Last-writer-
    * wins was tried first and garbles every other differently-sized attacher —
    * one byte stream cannot render at two geometries. When the last client
