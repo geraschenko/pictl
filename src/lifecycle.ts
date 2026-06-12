@@ -169,11 +169,13 @@ function parseStopArgs(argv: string[], extraOptions: Record<string, { type: "boo
 async function forEachAgent(prefixes: string[], action: (agent: LoadedAgent) => Promise<void>): Promise<void> {
 	const agents: LoadedAgent[] = [];
 	for (const prefix of prefixes) {
+		// TDC: why await sequentially instead of in parallel?
 		agents.push(await loadAgent(prefix));
 	}
 	const failures: string[] = [];
 	for (const agent of agents) {
 		try {
+			// TDC: why await sequentially instead of in parallel?
 			await action(agent);
 		} catch (error) {
 			failures.push(`${agent.agentId}: ${error instanceof Error ? error.message : String(error)}`);

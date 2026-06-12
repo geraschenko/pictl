@@ -139,8 +139,6 @@ export class PiSocketClient {
 		if (this.closed) {
 			throw new Error("pi socket closed");
 		}
-		// Ids only correlate request/response within this private connection, so
-		// a counter suffices; it is also ordered, which helps when reading traces.
 		const id = `pi-ctl-${++this.requestCounter}`;
 		const response = await new Promise<RpcResponse>((resolve, reject) => {
 			this.pending.set(id, { resolve, reject });

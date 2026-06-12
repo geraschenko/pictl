@@ -128,6 +128,7 @@ export async function runStatus(argv: string[]): Promise<void> {
 	}
 	const agentIds: string[] = [];
 	for (const prefix of positionals) {
+		// TDC: why await sequentially instead of in parallel?
 		agentIds.push(await resolveAgentId(prefix));
 	}
 	const probes = await Promise.all(agentIds.map(probeAgent));
