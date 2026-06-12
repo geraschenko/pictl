@@ -21,9 +21,9 @@ import {
   readAgentRecord,
   resolveAgentId,
   tombstonePath,
-} from "./registry.js";
-import { connectWithRetry, getState, type PiSocketClient } from "./rpc.js";
-import { launchHolder } from "./spawn.js";
+} from "./registry.ts";
+import { connectWithRetry, getState, type PiSocketClient } from "./rpc.ts";
+import { launchHolder } from "./spawn.ts";
 
 const SOCKET_CONNECT_DEADLINE_MS = 5_000;
 const SIGKILL_ESCALATION_MS = 5_000;

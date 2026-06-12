@@ -7,8 +7,8 @@
 
 import { closeSync, writeSync } from "node:fs";
 import { rm } from "node:fs/promises";
-import { createServer, type Server } from "node:net";
 import { parseArgs } from "node:util";
+import { SerializeAddon } from "@xterm/addon-serialize";
 import xterm from "@xterm/headless";
 import pty from "node-pty";
 import {
@@ -19,13 +19,14 @@ import {
   type SessionHistoryEntry,
   ttySocketPath,
   writeAgentRecord,
-} from "./registry.js";
+} from "./registry.ts";
 import {
   connectWithRetry,
   type SessionChangedEvent,
   type SocketEvent,
-} from "./rpc.js";
-import { fileExists, splitAtDoubleDash } from "./util.js";
+} from "./rpc.ts";
+import { TtyServer } from "./tty-server.ts";
+import { fileExists, splitAtDoubleDash } from "./util.ts";
 
 const PTY_COLS = 80;
 const PTY_ROWS = 24;
@@ -116,6 +117,22 @@ function ptyEnv(agentId: string): Record<string, string> {
   return env;
 }
 
+/**
+ * The serialize addon does not capture cursor visibility (DECTCEM), and pi
+ * runs cursor-hidden, so a raw snapshot would show a phantom cursor on
+ * attach. The public `terminal.modes` API lacks DECTCEM too; the internal
+ * core service is the only place xterm tracks it. Guarded so an xterm
+ * internals change degrades to "cursor visible", not a crash.
+ */
+function cursorVisibilitySequence(terminal: xterm.Terminal): string {
+  const core = (
+    terminal as unknown as {
+      _core?: { coreService?: { isCursorHidden?: boolean } };
+    }
+  )._core;
+  return core?.coreService?.isCursorHidden ? "\x1b[?25l" : "\x1b[?25h";
+}
+
 function isSessionChangedEvent(
   event: SocketEvent,
 ): event is SocketEvent & SessionChangedEvent {
@@ -153,8 +170,40 @@ export async function runHold(argv: string[]): Promise<void> {
     },
   );
 
-  const terminal = new xterm.Terminal({ cols: PTY_COLS, rows: PTY_ROWS });
-  piProcess.onData((data) => terminal.write(data));
+  // allowProposedApi is required by the serialize addon.
+  const terminal = new xterm.Terminal({
+    cols: PTY_COLS,
+    rows: PTY_ROWS,
+    allowProposedApi: true,
+  });
+  const serializeAddon = new SerializeAddon();
+  terminal.loadAddon(serializeAddon);
+
+  const ttyServer = new TtyServer({
+    // terminal.write("") is the parse barrier; serializing inside its
+    // callback (not in a then() after it) keeps the snapshot exactly at the
+    // barrier — xterm may parse further queued chunks before a microtask runs.
+    serializeScreen: () =>
+      new Promise((resolve) => {
+        terminal.write("", () =>
+          resolve(
+            serializeAddon.serialize() + cursorVisibilitySequence(terminal),
+          ),
+        );
+      }),
+    writeInput: (data) => piProcess.write(data),
+    // Last-writer-wins: every resize is applied. The emulator must track the
+    // PTY size or snapshots drift from what pi is rendering.
+    resize: (cols, rows) => {
+      piProcess.resize(cols, rows);
+      terminal.resize(cols, rows);
+    },
+  });
+
+  piProcess.onData((data) => {
+    terminal.write(data);
+    ttyServer.broadcastOutput(data);
+  });
 
   const record: AgentRecord = {
     id: agentId,
@@ -178,17 +227,7 @@ export async function runHold(argv: string[]): Promise<void> {
     );
   };
 
-  // Stub until phase 2. Attach will work like this: on connect, a snapshot of
-  // `terminal`'s screen state is serialized to the client, after which raw
-  // PTY output bytes are relayed (from piProcess.onData, not from `terminal`)
-  // and client input bytes go to piProcess.write.
-  const ttyServer: Server = createServer((socket) => {
-    socket.end();
-  });
-  await new Promise<void>((resolve, reject) => {
-    ttyServer.once("error", reject);
-    ttyServer.listen(ttySocketPath(agentDir), resolve);
-  });
+  await ttyServer.listen(ttySocketPath(agentDir));
 
   let exiting = false;
   const cleanupAndExit = (code: number): void => {
@@ -199,7 +238,7 @@ export async function runHold(argv: string[]): Promise<void> {
     void writeQueue
       .catch(() => undefined)
       .then(async () => {
-        ttyServer.close();
+        await ttyServer.shutdown(`pi exited (code ${code})`);
         await Promise.all([
           rm(piSocketPath(agentDir), { force: true }),
           rm(ttySocketPath(agentDir), { force: true }),

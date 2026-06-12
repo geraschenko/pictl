@@ -17,8 +17,8 @@ import { delimiter, isAbsolute, join, resolve } from "node:path";
 import type { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { agentDirPath, holderLogPath, piCtlBaseDir } from "./registry.js";
-import { splitAtDoubleDash } from "./util.js";
+import { agentDirPath, holderLogPath, piCtlBaseDir } from "./registry.ts";
+import { splitAtDoubleDash } from "./util.ts";
 
 export interface HolderLaunch {
   agentDir: string;

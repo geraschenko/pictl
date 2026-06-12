@@ -15,9 +15,9 @@ import {
   readAgentRecord,
   resolveAgentId,
   tombstonePath,
-} from "./registry.js";
-import { connectWithRetry, getState } from "./rpc.js";
-import { fileExists } from "./util.js";
+} from "./registry.ts";
+import { connectWithRetry, getState } from "./rpc.ts";
+import { fileExists } from "./util.ts";
 
 const PROBE_CONNECT_DEADLINE_MS = 2_000;
 
