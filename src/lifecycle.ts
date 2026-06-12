@@ -90,8 +90,13 @@ export async function waitQuiescent(client: PiSocketClient, timeoutMs: number | 
 			if (remaining <= 0) {
 				throw new QuiescenceTimeoutError();
 			}
-			const timeout = new Promise<"timeout">((resolve) => setTimeout(() => resolve("timeout"), remaining));
+			// Cleared after the race; see the timer comment in terminatePi.
+			let timeoutTimer: NodeJS.Timeout | undefined;
+			const timeout = new Promise<"timeout">((resolve) => {
+				timeoutTimer = setTimeout(() => resolve("timeout"), remaining);
+			});
 			const winner = await Promise.race([nextAgentEnd, timeout]);
+			clearTimeout(timeoutTimer);
 			if (winner === "timeout") {
 				throw new QuiescenceTimeoutError();
 			}
@@ -114,8 +119,16 @@ async function terminatePi(client: PiSocketClient, piPid: number): Promise<void>
 		return;
 	}
 	const closed = client.waitClosed().then(() => "closed" as const);
-	const escalation = new Promise<"escalate">((resolve) => setTimeout(() => resolve("escalate"), SIGKILL_ESCALATION_MS));
-	if ((await Promise.race([closed, escalation])) === "escalate") {
+	// The timer must be cleared after the race: a pending timer is an active
+	// handle that keeps node's event loop (and thus the CLI process) alive
+	// until it fires, even though the losing promise is discarded.
+	let escalationTimer: NodeJS.Timeout | undefined;
+	const escalation = new Promise<"escalate">((resolve) => {
+		escalationTimer = setTimeout(() => resolve("escalate"), SIGKILL_ESCALATION_MS);
+	});
+	const winner = await Promise.race([closed, escalation]);
+	clearTimeout(escalationTimer);
+	if (winner === "escalate") {
 		killSilently(piPid, "SIGKILL");
 		await closed;
 	}
