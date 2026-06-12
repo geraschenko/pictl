@@ -53,12 +53,25 @@ No central index file or registry daemon (lock-contention and staleness magnets)
 
 - Root: `$PI_CTL_DIR`, defaulting to `~/.pi/agents/` (nests under pi's existing `~/.pi/`).
 - Per agent: `$PI_CTL_DIR/<agent-id>/` containing:
-  - `agent.json` — holder pid, pi pid, cwd, session file path, spawn args, created-at;
+  - `agent.json` — see authority split below;
   - `pi.sock` — pi's RPC socket;
   - `tty.sock` — the holder's attach socket.
-- Agent ids are short, random, and meaningless (no semantic names at the registry level).
-- `pi-ctl list` = readdir + per-agent liveness probe (holder pid alive, then `get_state` over `pi.sock`). Dead holder + leftover dir = "stale"; `pi-ctl gc` removes stale dirs.
+- `agent.json` authority split:
+  - Authoritative for holder-owned facts the socket cannot provide: holder pid, pi pid, cwd, the pi binary path and spawn args used (needed for revival), created-at.
+  - Session facts (current session file, model, streaming state) are queried live over `pi.sock` whenever the agent is running. `agent.json` additionally records `sessions` — the history of session files this agent has hosted, most recent last. The holder maintains it by connecting to its own `pi.sock` as a client and appending whenever the session is replaced (`/new`, `/resume`, `switch_session`). This history enables dormant-agent revival and agent↔session mapping.
+  - Single-writer rule: only the holder writes `agent.json`; CLI commands treat it as read-only.
+- Agent ids are random uuids, deliberately independent of pi session ids. They cannot *be* session ids because agent ≠ session: one agent hosts many sessions over its lifetime (`/new`, `/resume`, `switch_session` replace the session while the sockets survive), and the agent directory must exist before pi starts — i.e. before any session id exists.
+- Name resolution: any unique prefix of an agent id addresses it (tmux/docker style). Session ids work as a secondary resolver: pi-ctl can map a session id or prefix to the agent that hosts (or last hosted) it, and list an agent's session history, via the `sessions` histories in `agent.json`.
+- `pi-ctl list` = readdir + per-agent probe (holder pid alive, then `get_state` over `pi.sock`). Statuses: running (idle/streaming), dormant, tombstoned — see "Agents outlive processes" below.
 - Working directories are tracked in `agent.json`: agents default to the spawner's cwd, but workflows may spawn agents into worktrees, so cwd is per-agent data, not an assumption.
+
+## Agents outlive processes
+
+An agent is its directory plus its session lineage; the holder/pi process is ephemeral. There is no reason to keep an idle agent's process running.
+
+- **Dormant**: directory present, no holder process. Not an error state. Any pi-ctl command that needs the socket (prompt, attach, wait, ...) transparently revives the agent first: a new holder is started from the pi binary, spawn args, and cwd recorded in `agent.json`, resuming the most recent session in the `sessions` history. `pi-ctl resume <agent>` revives explicitly; `list`/`status` report dormancy without reviving.
+- **Suspended on purpose**: `pi-ctl suspend <agent>` gracefully stops the process (same quiescence rules as `kill`) but keeps the directory — the agent goes dormant. Holders may additionally auto-suspend after a configurable idle period (optional; not required for v1).
+- **Killed**: `pi-ctl kill` is the only way an agent ceases to exist — graceful shutdown, tombstone marker written, directory removed. Consequently `pi-ctl gc` does NOT reap crashed agents (a dead holder just means dormant); it only removes tombstoned directories left by interrupted kills and unreadably corrupt ones.
 
 ## Workflows hold references; agents are global
 
