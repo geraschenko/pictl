@@ -49,12 +49,12 @@ export class QuiescenceTimeoutError extends Error {}
 
 /**
  * Wait until the agent is fully quiescent. State is re-checked only on
- * agent_end (once per turn), never per event. The waiter is registered before
+ * agent_end (once per turn), not per event. The waiter is registered before
  * each get_state so an agent_end landing between the two is not missed.
  */
 export async function waitQuiescent(client: PiSocketClient, timeoutMs: number | undefined): Promise<void> {
 	const deadline = timeoutMs === undefined ? undefined : Date.now() + timeoutMs;
-	for (;;) {
+	for (;;) {  // TDC: is this the standard way to do "while true" in typescript?
 		const nextAgentEnd = new Promise<"agent_end" | "closed">((resolve) => {
 			client.onEvent((event) => {
 				if (event.type === "agent_end") {
@@ -132,7 +132,7 @@ async function waitPidGone(pid: number, deadlineMs: number): Promise<void> {
 }
 
 function parseStopArgs(argv: string[], extraOptions: Record<string, { type: "boolean" }>): {
-	agent: string;
+	agent: string;  // TDC: is this agentId?
 	timeoutMs: number | undefined;
 	flags: Record<string, boolean | undefined>;
 } {
@@ -142,6 +142,7 @@ function parseStopArgs(argv: string[], extraOptions: Record<string, { type: "boo
 		options: { timeout: { type: "string" }, ...extraOptions },
 	});
 	if (positionals.length !== 1) {
+		// TDC: why not allow stopping multiple agents in one command?
 		throw new Error("expected exactly one agent id");
 	}
 	const timeoutMs = values.timeout === undefined ? undefined : Number(values.timeout) * 1000;
@@ -187,6 +188,7 @@ export async function runKill(argv: string[]): Promise<void> {
 		}
 		await waitPidGone(agent.record.holderPid, PROCESS_EXIT_DEADLINE_MS);
 		await rm(agent.dir, { recursive: true, force: true });
+		// TDC: what about piPid? Should we also wait for it to be gone?
 		console.log(`killed ${agent.id} (forced)`);
 		return;
 	}

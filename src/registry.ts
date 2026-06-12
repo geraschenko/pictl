@@ -87,6 +87,7 @@ export async function readAgentRecord(dir: string): Promise<AgentRecordReadResul
 
 export async function writeAgentRecord(dir: string, record: AgentRecord): Promise<void> {
 	const target = agentJsonPath(dir);
+	// TDC: should we use write-file-atomic here?
 	const tmp = `${target}.tmp`;
 	await writeFile(tmp, `${JSON.stringify(record, null, "\t")}\n`);
 	await rename(tmp, target);

@@ -122,6 +122,7 @@ export class PiSocketClient {
 			return;
 		}
 		if (record.type === "response") {
+			// TDC: can we convert record to RpcResponse _once_ here to avoid doing it again in the resolve?
 			const id = (record as unknown as RpcResponse).id;
 			const pending = id === undefined ? undefined : this.pending.get(id);
 			if (pending) {
@@ -139,6 +140,7 @@ export class PiSocketClient {
 		if (this.closed) {
 			throw new Error("pi socket closed");
 		}
+		// TDC: why use a request counter here instead of a uuid?
 		const id = `pi-ctl-${++this.requestCounter}`;
 		const response = await new Promise<RpcResponse>((resolve, reject) => {
 			this.pending.set(id, { resolve, reject });
@@ -192,7 +194,7 @@ export async function connectWithRetry(
 ): Promise<PiSocketClient> {
 	const deadline = Date.now() + deadlineMs;
 	let delay = 50;
-	for (;;) {
+	for (;;) {  // TDC: `while (true)`?
 		try {
 			return await PiSocketClient.connect(socketPath, onEvent);
 		} catch (error) {
@@ -207,6 +209,7 @@ export async function connectWithRetry(
 	}
 }
 
+// TDC: why is this a free function rather than a method of PiSocketClient?
 export async function getState(client: PiSocketClient): Promise<RpcSessionState> {
 	const response = await client.request({ type: "get_state" });
 	return (response as Extract<RpcResponse, { command: "get_state"; success: true }>).data;

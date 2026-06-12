@@ -23,13 +23,14 @@ const PROBE_CONNECT_DEADLINE_MS = 2_000;
 export type AgentStatus = "idle" | "streaming" | "dormant" | "tombstoned" | "corrupt" | "unreachable";
 
 export interface AgentProbe {
-	id: string;
+	id: string;  // TDC: agentId?
 	status: AgentStatus;
 	record?: AgentRecord;
 	state?: RpcSessionState;
 	error?: string;
 }
 
+// TDC: this function is duplicated in its entirety in holder.ts. Is there a common utility we can rely on or some way to share the code? Are there any other duplicated utilities? Duplication of code like this makes maintenance a nightmare, so I really want to avoid it.
 async function fileExists(path: string): Promise<boolean> {
 	try {
 		await access(path);
@@ -108,6 +109,7 @@ export async function runStatus(argv: string[]): Promise<void> {
 		options: { json: { type: "boolean", default: false } },
 	});
 	if (positionals.length !== 1) {
+		// TDC: why not allow fetching the status of multiple agents in one request?
 		throw new Error("expected exactly one agent id");
 	}
 	const id = await resolveAgentId(positionals[0]!);
