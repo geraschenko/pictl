@@ -8,16 +8,14 @@ import { open, readdir, readFile, rename } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
+/**
+ * pi defers writing a new session file until the first assistant message, so
+ * an announced sessionFile may not exist on disk yet. Consumers that need the
+ * file (e.g. revival) must check existence themselves.
+ */
 export interface SessionHistoryEntry {
 	sessionFile: string;
 	sessionId: string;
-	/**
-	 * pi defers writing a new session file until the first assistant message,
-	 * so an announced sessionFile may not exist on disk yet. Entries start
-	 * pending and are confirmed when the holder observes an assistant message
-	 * in that session.
-	 */
-	confirmed: boolean;
 }
 
 export interface AgentRecord {

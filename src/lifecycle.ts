@@ -7,7 +7,7 @@
  * suspend leaves it, making the agent dormant.
  *
  * All three accept multiple agents; ids are resolved up front (so a typo
- * aborts before anything is touched), then agents are processed in order,
+ * aborts before anything is touched), then agents are acted on concurrently,
  * continuing past per-agent failures and reporting them at the end.
  */
 
@@ -165,24 +165,25 @@ function parseStopArgs(argv: string[], extraOptions: Record<string, { type: "boo
 	return { agentPrefixes: positionals, timeoutMs, flags };
 }
 
-/** Resolve all prefixes before acting, then run `action` per agent, collecting failures. */
+/**
+ * Resolve all prefixes before acting (so a typo aborts before anything is
+ * touched), then run `action` on every agent concurrently — agents are
+ * independent, and concurrency keeps quiescence waits from compounding.
+ * Failures are collected and reported in input order.
+ */
 async function forEachAgent(prefixes: string[], action: (agent: LoadedAgent) => Promise<void>): Promise<void> {
-	const agents: LoadedAgent[] = [];
-	for (const prefix of prefixes) {
-		// TDC: why await sequentially instead of in parallel?
-		agents.push(await loadAgent(prefix));
-	}
-	const failures: string[] = [];
-	for (const agent of agents) {
-		try {
-			// TDC: why await sequentially instead of in parallel?
-			await action(agent);
-		} catch (error) {
-			failures.push(`${agent.agentId}: ${error instanceof Error ? error.message : String(error)}`);
-		}
-	}
-	if (failures.length > 0) {
-		throw new Error(failures.join("\n"));
+	const agents = await Promise.all(prefixes.map(loadAgent));
+	const failures = await Promise.all(
+		agents.map((agent) =>
+			action(agent).then(
+				() => undefined,
+				(error) => `${agent.agentId}: ${error instanceof Error ? error.message : String(error)}`,
+			),
+		),
+	);
+	const messages = failures.filter((failure) => failure !== undefined);
+	if (messages.length > 0) {
+		throw new Error(messages.join("\n"));
 	}
 }
 

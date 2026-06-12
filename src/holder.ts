@@ -78,10 +78,8 @@ function signalReady(readyFd: number | undefined, message: { ok: boolean; error?
 
 /**
  * Pick the session to revive: the most recent entry whose file exists on
- * disk. Existence is the only criterion — the confirmed flag predicts whether
- * the file was ever flushed, but at revival time the disk is ground truth,
- * and an unconfirmed-but-existing newer session is still the session the
- * agent was most recently on.
+ * disk. pi defers writing a session file until the first assistant message,
+ * so newer entries may have no file yet — skip those.
  */
 async function revivalSessionArgs(sessions: SessionHistoryEntry[]): Promise<string[]> {
 	for (const entry of [...sessions].reverse()) {
@@ -194,39 +192,22 @@ export async function runHold(argv: string[]): Promise<void> {
 	process.on("SIGTERM", () => piProcess.kill("SIGTERM"));
 	process.on("SIGINT", () => piProcess.kill("SIGTERM"));
 
-	let currentSessionId: string | undefined;
 	const handleEvent = (event: SocketEvent): void => {
-		if (isSessionChangedEvent(event)) {
-			// Track the active session id even for in-memory sessions; only the
-			// durable history below is limited to sessions with a file.
-			currentSessionId = event.sessionId;
-			if (event.sessionFile === undefined) {
-				return;
-			}
-			// The history is duplicate-free: re-announcing a known session moves
-			// it to the end (most recent) and keeps its confirmed status — being
-			// re-announced does not change whether an assistant message was ever
-			// observed in it.
-			const previousIndex = record.sessions.findIndex((s) => s.sessionId === event.sessionId);
-			const confirmed = previousIndex === -1 ? false : record.sessions[previousIndex]!.confirmed;
-			if (previousIndex !== -1) {
-				record.sessions.splice(previousIndex, 1);
-			}
-			record.sessions.push({ sessionFile: event.sessionFile, sessionId: event.sessionId, confirmed });
-			queueRecordWrite();
+		if (!isSessionChangedEvent(event)) {
 			return;
 		}
-		if (event.type === "message_end") {
-			const message = event.message as { role?: string } | undefined;
-			if (message?.role !== "assistant") {
-				return;
-			}
-			const entry = record.sessions.find((s) => s.sessionId === currentSessionId && !s.confirmed);
-			if (entry) {
-				entry.confirmed = true;
-				queueRecordWrite();
-			}
+		// In-memory sessions (no file) are not recorded; they cannot be revived.
+		if (event.sessionFile === undefined) {
+			return;
 		}
+		// The history is duplicate-free: re-announcing a known session moves it
+		// to the end (most recent).
+		const previousIndex = record.sessions.findIndex((s) => s.sessionId === event.sessionId);
+		if (previousIndex !== -1) {
+			record.sessions.splice(previousIndex, 1);
+		}
+		record.sessions.push({ sessionFile: event.sessionFile, sessionId: event.sessionId });
+		queueRecordWrite();
 	};
 
 	try {

@@ -112,7 +112,7 @@ function printProbe(probe: AgentProbe): void {
 	if (probe.record && probe.record.sessions.length > 0) {
 		console.log("sessions:");
 		for (const entry of probe.record.sessions) {
-			console.log(`  ${entry.confirmed ? "confirmed" : "pending  "}  ${entry.sessionFile}`);
+			console.log(`  ${entry.sessionFile}`);
 		}
 	}
 }
@@ -126,11 +126,7 @@ export async function runStatus(argv: string[]): Promise<void> {
 	if (positionals.length === 0) {
 		throw new Error("expected at least one agent id");
 	}
-	const agentIds: string[] = [];
-	for (const prefix of positionals) {
-		// TDC: why await sequentially instead of in parallel?
-		agentIds.push(await resolveAgentId(prefix));
-	}
+	const agentIds = await Promise.all(positionals.map(resolveAgentId));
 	const probes = await Promise.all(agentIds.map(probeAgent));
 
 	if (values.json) {
