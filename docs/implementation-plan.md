@@ -7,6 +7,7 @@ Starting point for implementing agents. Read `design-decisions.md` first — it 
 - A pi binary supporting `--rpc-socket` (the tee-mode fork: `geraschenko/pi`, branch `anton/pi-tee`; spec in that repo at `docs/pi-rpc-socket-mode.md`). Build the standalone binary from the fork: `npm run build:binary` in `packages/coding-agent` produces a self-contained `dist/pi` (bun-compiled); symlink it into a PATH directory or point `PI_CTL_PI_BIN` at it. Verify with `pi --rpc-socket /tmp/test.sock` in a terminal — it must run interactive pi and create the socket.
 - pi-ctl resolves which pi binary to spawn from the `PI_CTL_PI_BIN` env var (falling back to `pi` on PATH). The resolved absolute path is recorded in `agent.json` at spawn time so dormant-agent revival uses the same binary.
 - For `tail --since` and entry-cursor features (phase 3): pi must also include the `get_entries`/`get_tree` RPC commands. The user's installed fork binary already includes them; if working against a different pi build, verify before phase 3.
+- For the holder's `sessions` history (phase 1): pi must broadcast a `session_changed` event (`{type, sessionFile?, sessionId}`; `sessionFile` absent for in-memory sessions) when the active session is replaced. This was added to the fork as part of tee mode (handoff spec: `/tmp/pi-session-changed.md`; as of 2026-06-11 in progress — verify it has landed in the installed binary before implementing session-history tracking, and sequence that part of the holder last if needed; everything else in phase 1 is independent of it).
 - Node.js + TypeScript toolchain. Key dependencies: `node-pty` (PTY allocation), `@xterm/headless` (detached screen state). RPC and session types are imported from the pi package via a **local-path dependency** on the fork checkout: `"@earendil-works/pi-coding-agent": "file:../../earendil-works/pi/packages/coding-agent"` (adjust the relative path to the actual checkout location). The fork's `dist/` must be built for the types to resolve — `npm run build` in `packages/coding-agent` does this (and `npm run build:binary` includes it). Import `RpcCommand`, `RpcResponse`, `RpcSessionState`, `SessionEntry`, `SessionTreeNode`, `RpcClient` from the package index; never hand-mirror them.
 
 ## Reference protocol facts
@@ -19,14 +20,15 @@ Starting point for implementing agents. Read `design-decisions.md` first — it 
 
 Deliverables:
 
+- Step zero: a node-pty smoke test — verify `npm install` compiles the native addon on this machine (needs `make`/`g++`/`python3`) and that a PTY can be allocated, before writing any real code. This is the most likely environment failure.
 - `pi-ctl spawn [--cwd <dir>] [--id <id>] [-- <pi args...>]`
-  - generates an agent id (random uuid; commands accept any unique prefix) unless given;
+  - generates an agent id (random uuid; commands accept any unique prefix) unless given; an ambiguous prefix is an error listing the candidates (docker-style), never a guess;
   - creates `$PI_CTL_DIR/<id>/` (default `~/.pi/agents/`);
   - daemonizes the holder (`pi-ctl _hold`, hidden entrypoint of the same binary) and prints the agent id.
-- `pi-ctl _hold` (hidden): allocates a PTY (default 80×24), runs `pi --rpc-socket <dir>/pi.sock <pi args...>` in it with `PI_AGENT_ID=<id>` in the environment, pipes PTY output into an @xterm/headless instance, acts as the sole writer of `agent.json` (holder pid, pi pid, cwd, pi binary path, spawn args, created-at, plus the `sessions` history: the holder connects to its own `pi.sock` as a client and appends the current session file at startup and whenever the session is replaced), reaps pi on exit, removes the sockets on clean shutdown. The `tty.sock` server may be stubbed until phase 2, but bind it now so the directory shape is final.
+- `pi-ctl _hold` (hidden): allocates a PTY (default 80×24), runs `pi --rpc-socket <dir>/pi.sock <pi args...>` in it with `PI_AGENT_ID=<id>` in the environment, pipes PTY output into an @xterm/headless instance, acts as the sole writer of `agent.json` (holder pid, pi pid, cwd, pi binary path, spawn args, created-at, plus the `sessions` history: the holder connects to its own `pi.sock` as a client, appends the current session file at startup via `get_state`, and thereafter appends on each `session_changed` broadcast event — never by polling `get_state` per event. Caveat: pi defers writing a new session file until the first assistant message, so the announced path may not exist yet; append it as *pending* and mark it confirmed on the first assistant message in that session. Events without `sessionFile` (in-memory sessions) are not recorded), reaps pi on exit, removes the sockets on clean shutdown. The `tty.sock` server may be stubbed until phase 2, but bind it now so the directory shape is final.
 - `pi-ctl list` — readdir + probe per agent (holder pid alive; `get_state` over `pi.sock` for status: idle/streaming/dormant/tombstoned). Human-readable table; `--json` for machines. Never revives dormant agents.
 - `pi-ctl status <agent>` — one agent, more detail (model, session file and history, cwd, pids). Never revives.
-- `pi-ctl kill <agent>` — default is polite: wait until the agent is fully quiescent (current turn finished AND queued steers/follow-ups drained: `isStreaming` false with empty pending queue), then SIGTERM pi with SIGKILL escalation, holder exits, tombstone written, directory removed. `--timeout <secs>` bounds the quiescence wait and on expiry fails *without* killing (reports the agent is still busy). `--now` first ends the current turn via RPC `abort`, then proceeds with the graceful path. `--force` SIGKILLs pi and holder with no socket interaction (for wedged agents).
+- `pi-ctl kill <agent>` — default is polite: wait until the agent is fully quiescent (current turn finished AND queued steers/follow-ups drained: `isStreaming` false with empty pending queue), then SIGTERM pi with SIGKILL escalation, holder exits, tombstone written, directory removed. `--timeout <secs>` bounds the quiescence wait and on expiry fails *without* killing (reports the agent is still busy); the default is to wait forever (Ctrl-C is the escape hatch). `--now` first ends the current turn via RPC `abort`, then proceeds with the graceful path. `--force` SIGKILLs pi and holder with no socket interaction (for wedged agents).
 - `pi-ctl suspend <agent>` — same quiescence wait, then stop the process but keep the directory; the agent goes dormant (see design-decisions.md "Agents outlive processes").
 - `pi-ctl resume <agent>` — revive a dormant agent: start a new holder using the pi binary path, spawn args, and cwd from `agent.json`, resuming the most recent session in the `sessions` history. No-op on a running agent.
 - `pi-ctl gc` — remove tombstoned (interrupted-kill) or corrupt agent dirs only. A dead holder is not garbage; it is a dormant agent.
@@ -35,7 +37,7 @@ Notes:
 
 - Getting the session file path into `agent.json`: query `get_state` over `pi.sock` after pi is up (its response includes `sessionFile`). Await the socket appearing / connecting with retry — never a fixed sleep.
 - Daemonization: detach the holder fully (setsid, stdio to a log file in the agent dir). The holder must survive the spawning terminal closing.
-- Revival mechanism: pi's CLI resumes a specific session via `--session <path|id>`, so revival is `pi --rpc-socket <dir>/pi.sock --session <most recent in sessions history> <recorded spawn args...>`.
+- Revival mechanism: pi's CLI resumes a specific session via `--session <path|id>`, so revival is `pi --rpc-socket <dir>/pi.sock --session <most recent confirmed entry in sessions history> <recorded spawn args...>`. Skip pending entries (their file was never flushed); as an ENOENT backstop, fall back to the next most recent entry whose file exists, and start without `--session` if none do.
 
 Verification pause: spawn an agent and confirm `list` shows it running; kill -9 the holder and confirm `list` reports it dormant and `resume` revives it on the same session; round-trip `suspend`/`resume`; `kill` removes it; `gc` cleans a hand-tombstoned dir and leaves a dormant one alone.
 
@@ -75,6 +77,18 @@ Deliverables:
 - README updates documenting the end-to-end example.
 
 Verification pause: run the example, attach to the supervisor, give it a task for the worker, watch the loop relay progress; kill and resume the orchestrating script mid-task.
+
+## Work log
+
+Each phase is implemented by a fresh agent; this section (plus the docs generally) is the only context that carries across phases. Update it at every check-in with environment facts, resolved decisions, and discovered constraints.
+
+### 2026-06-11: pre-phase-1 discussion (no code yet)
+
+- Environment verified: fork checkout at `/home/anton/git/earendil-works/pi` on branch `anton/pi-tee` with `dist/` built; `pi` on PATH is `~/bin/pi`, a symlink into that dist, version 0.79.1, supports `--rpc-socket`; Node v23.11.1, npm 11.11.0. The `file:` dependency path from this repo is therefore `file:../../earendil-works/pi/packages/coding-agent`.
+- Protocol facts verified in the fork source: `RpcSessionState` includes `pendingMessageCount` and `sessionFile`/`sessionId`, so the kill/suspend quiescence check ("not streaming AND pending queue empty") is fully supported.
+- Gap found and resolved pi-side: no broadcast event existed for session replacement (TUI `/new`/`/resume` invisible to socket clients; polling `get_state` per event is a non-starter since events fire per streamed token). A `session_changed` broadcast event is being added to the fork's tee mode (spec handed off in `/tmp/pi-session-changed.md`); see Prerequisites. In pi's source the hook point is `rpc-socket-mode.ts`'s rebind path (`runtimeHost.addRebindSessionListener`).
+- Decisions: node + npm + plain tsc, ESM, `bin` entry, `npm link` for dev (rationale in design-decisions.md "Toolchain"); `kill` waits forever by default; ambiguous id prefixes error with the candidate list; phase 1 starts with a node-pty native-build smoke test.
+- Caveat from the pi-side `session_changed` work: pi defers writing a new session file until the first assistant message, and `sessionFile` is optional (in-memory sessions). Hence the pending/confirmed `sessions`-entry semantics in design-decisions.md and the revival fallback rules above.
 
 ## Open questions (resolve with the user before or during the relevant phase)
 
