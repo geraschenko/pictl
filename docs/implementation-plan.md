@@ -6,8 +6,8 @@ Starting point for implementing agents. Read `design-decisions.md` first — it 
 
 - A pi binary supporting `--rpc-socket` (the tee-mode fork: `geraschenko/pi`, branch `anton/pi-tee`; spec in that repo at `docs/pi-rpc-socket-mode.md`). Build the standalone binary from the fork: `npm run build:binary` in `packages/coding-agent` produces a self-contained `dist/pi` (bun-compiled); symlink it into a PATH directory or point `PI_CTL_PI_BIN` at it. Verify with `pi --rpc-socket /tmp/test.sock` in a terminal — it must run interactive pi and create the socket.
 - pi-ctl resolves which pi binary to spawn from the `PI_CTL_PI_BIN` env var (falling back to `pi` on PATH). The resolved absolute path is recorded in `agent.json` at spawn time so dormant-agent revival uses the same binary.
-- For `tail --since` and entry-cursor features (phase 3): pi must also include the `get_entries`/`get_tree` RPC commands (see `docs/rpc-session-tree-commands.md` in the pi repo). Earlier phases do not need them.
-- Node.js + TypeScript toolchain. Key dependencies: `node-pty` (PTY allocation), `@xterm/headless` (detached screen state). RPC types should be imported from the pi package if its packaging allows; if pi does not publish consumable types, vendor them in a single clearly-marked module with the pi version recorded (see open questions).
+- For `tail --since` and entry-cursor features (phase 3): pi must also include the `get_entries`/`get_tree` RPC commands. The user's installed fork binary already includes them; if working against a different pi build, verify before phase 3.
+- Node.js + TypeScript toolchain. Key dependencies: `node-pty` (PTY allocation), `@xterm/headless` (detached screen state). RPC and session types are imported from the pi package via a **local-path dependency** on the fork checkout: `"@earendil-works/pi-coding-agent": "file:../../earendil-works/pi/packages/coding-agent"` (adjust the relative path to the actual checkout location). The fork's `dist/` must be built for the types to resolve — `npm run build` in `packages/coding-agent` does this (and `npm run build:binary` includes it). Import `RpcCommand`, `RpcResponse`, `RpcSessionState`, `SessionEntry`, `SessionTreeNode`, `RpcClient` from the package index; never hand-mirror them.
 
 ## Reference protocol facts
 
@@ -78,7 +78,7 @@ Verification pause: run the example, attach to the supervisor, give it a task fo
 
 ## Open questions (resolve with the user before or during the relevant phase)
 
-1. **Type imports** (phase 1) — RESOLVED: `@earendil-works/pi-coding-agent` exports `RpcCommand`, `RpcResponse`, `RpcSessionState`, `SessionEntry`, `SessionTreeNode`, and `RpcClient` from its package index. Depend on the fork's package (local path or git dependency; it must be built so `dist/` types exist) and import these directly. Remaining detail: pick local-path vs git dependency with the user at phase 1 start.
+1. **Type imports** (phase 1) — RESOLVED: local-path dependency on the fork's `packages/coding-agent` (see Prerequisites). The package index exports everything needed; the fork's `dist/` must be built.
 2. **`wait` semantics** — RESOLVED: see the `pi-ctl wait` deliverable in phase 3. `turn-end` returns immediately only when fully quiescent and treats pending queued messages as a turn that must end (this is what makes sequential `prompt; wait` race-free); `quiescent` is kill-style quiescence; `idle:<secs>` is event silence, which also catches turns stalled on human-facing UI.
 3. **Spawn-time pi configuration** (phase 1) — RESOLVED: raw pass-through of pi args after `--` only; no first-class flags in v1.
 4. **`prompt` ergonomics** (phase 3) — RESOLVED: message as argument, `-` for stdin; `--wait` blocks until the prompted turn ends, implemented on a single connection (send prompt, then await `agent_end` on the same subscription) so it is race-free by construction and is the recommended one-shot form.
