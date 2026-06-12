@@ -196,6 +196,14 @@ Decisions below were resolved with the user and are folded into the phase 3 deli
 - **`wait` exit codes** (decision): 0 met / 1 agent dead or runtime error / 2 usage / 3 timeout.
 - Sequencing within phase 3: rpc-commands module + connect helper + addressing (dormant still errors) → transparent revival with locking (including `src/attach.ts`'s TODO) → `wait` → `tail` → `prompt` ergonomics.
 
+### 2026-06-12: phase 3 step 1 — RPC passthrough module (awaiting check-in)
+
+- `src/rpc-commands.ts`: declarative spec table covering the full `RpcCommand` union (31 subcommands), one entry per command — positional names, flags usage, summary, and a `build(positionals, values) → RpcCommand` function. `main.ts`'s dispatch table and usage text are generated from it (`rpcCommandHandlers()` / `rpcCommandUsage()`), so the table really is the only file touched when pi's surface changes. Not mirrored: the `images` field on prompt/steer/follow_up (no good CLI shape for inline image content in v1; noted in the module doc comment).
+- Generic runner: parse args (`--json` always available), resolve the agent prefix via `loadAgent` (now exported from lifecycle.ts), error on dormant agents with a resume hint (`TODO(phase 3)` marks the transparent-revival insertion point), connect with the existing retry helper, send, print response `data` as pretty JSON (`--json` for the raw response record), close.
+- `UsageError` added to util.ts; main.ts exits 2 on it (shell usage-error convention, consistent with the decided `wait` exit codes). Positional arity is validated centrally by the runner; enum-valued args (`on|off`, queue modes, `--streaming-behavior`) validate in build functions.
+- Gotcha found while testing: pi does **not** reject an unknown `set_thinking_level` value — `setThinkingLevel` silently clamps it (a typo set the level to "off"). The CLI therefore validates against a mirrored `THINKING_LEVELS` list (drift risk accepted and documented in a comment); clamping of *valid* levels to model capabilities stays pi-side, which is desirable (e.g. `xhigh` on a model capped at `high`).
+- Verified end-to-end against a live agent: get-state/set-session-name/bash/get-commands/get-entries round-trips; prompt → busy error without `--streaming-behavior` (pi's message passed through, exit 1) → `--streaming-behavior follow-up` queues; `get-last-assistant-text` returned the combined turn; usage errors exit 2, pi-side rejections exit 1; dormant agent errors with the resume hint.
+
 ## Open questions (resolve with the user before or during the relevant phase)
 
 1. **Type imports** (phase 1) — RESOLVED: local-path dependency on the fork's `packages/coding-agent` (see Prerequisites). The package index exports everything needed; the fork's `dist/` must be built.

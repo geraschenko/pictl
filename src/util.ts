@@ -2,6 +2,9 @@
 
 import { access } from "node:fs/promises";
 
+/** Bad command-line arguments; main.ts exits 2 (shell usage-error convention). */
+export class UsageError extends Error {}
+
 export async function fileExists(path: string): Promise<boolean> {
   try {
     await access(path);

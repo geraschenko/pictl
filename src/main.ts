@@ -3,7 +3,9 @@ import { DETACH_KEY_NAME, runAttach } from "./attach.ts";
 import { runHold } from "./holder.ts";
 import { runGc, runList, runStatus } from "./inspect.ts";
 import { runKill, runResume, runSuspend } from "./lifecycle.ts";
+import { rpcCommandHandlers, rpcCommandUsage } from "./rpc-commands.ts";
 import { runSpawn } from "./spawn.ts";
+import { UsageError } from "./util.ts";
 
 const COMMANDS: Record<string, (argv: string[]) => Promise<void>> = {
   spawn: runSpawn,
@@ -15,6 +17,7 @@ const COMMANDS: Record<string, (argv: string[]) => Promise<void>> = {
   suspend: runSuspend,
   resume: runResume,
   gc: runGc,
+  ...rpcCommandHandlers(),
 };
 
 function usage(): never {
@@ -29,6 +32,9 @@ commands:
   suspend <agent>... [--timeout <secs>]                 wait for quiescence, then stop (agent goes dormant)
   resume <agent>...                                     revive dormant agents on their last sessions
   gc                                                    remove tombstoned or corrupt agent dirs
+
+RPC passthrough (sent to the agent's pi process; --json prints the raw response):
+${rpcCommandUsage()}
 
 <agent> accepts any unique id prefix.`);
   process.exit(2);
@@ -49,5 +55,5 @@ try {
   console.error(
     `pi-ctl: ${error instanceof Error ? error.message : String(error)}`,
   );
-  process.exit(1);
+  process.exit(error instanceof UsageError ? 2 : 1);
 }

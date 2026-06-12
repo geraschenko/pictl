@@ -29,13 +29,13 @@ const SOCKET_CONNECT_DEADLINE_MS = 5_000;
 const SIGKILL_ESCALATION_MS = 5_000;
 const PROCESS_EXIT_DEADLINE_MS = 10_000;
 
-interface LoadedAgent {
+export interface LoadedAgent {
   agentId: string;
   agentDir: string;
   record: AgentRecord;
 }
 
-async function loadAgent(prefix: string): Promise<LoadedAgent> {
+export async function loadAgent(prefix: string): Promise<LoadedAgent> {
   const agentId = await resolveAgentId(prefix);
   const agentDir = agentDirPath(agentId);
   const read = await readAgentRecord(agentDir);
