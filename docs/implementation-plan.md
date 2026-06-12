@@ -168,6 +168,16 @@ Each phase is implemented by a fresh agent; this section (plus the docs generall
 - Review comment on the snapshot's `SHOW_CURSOR` branch ("if we want the cursor hidden, why ever SHOW_CURSOR?") — answered in the comment: the snapshot mirrors the emulator's _current_ DECTCEM state, whatever it is; pi normally runs hidden, but if pi has the cursor visible at snapshot time the attacher must show it. The serializer captures no cursor-visibility at all, so one of the two sequences is always appended.
 - Known cosmetic quirk (user-observed, accepted — not a bug): the attach hint is short-lived when the attaching terminal is the one that changes the min size (i.e. it is smaller than the current PTY in some dimension). Its initial resize shrinks the PTY, pi does a full SIGWINCH redraw right after the snapshot, and the repaint overwrites the hint almost immediately. Attaching from a terminal that does not change the min triggers no redraw, so the hint persists until pi next repaints.
 
+### 2026-06-12: phase 2 signed off; phase 3 handoff notes
+
+- Phase 2 verified interactively by the user (multi-terminal attach from tmux + Cosmic, detach/reattach, kill mid-attach) and signed off. All review rounds (commits 710f49a, a186630, 8b1b6b5, a409b1e) addressed.
+- Phase 3 prerequisite verified against the installed `~/bin/pi`: `get_entries` (returns `leafId` and entries) and `get_tree` both succeed over a live agent's pi.sock. The "verify before phase 3" caveat in Prerequisites is retired.
+- Loose ends for phase 3, beyond its deliverables:
+  - `src/attach.ts` has the `TODO(phase 3)` for transparent dormant-agent revival (currently errors with a resume hint). The plan's deliverable covers it; the TODO marks the exact spot.
+  - Open question 5 (trust dialog on headless spawn) is still unresolved and will bite phase-3 testing: any programmatic spawn into a dir with `.pi` inputs needs `-- --approve` or it hangs until the holder's 30s deadline. Worth resolving with the user during phase 3.
+  - `src/rpc.ts`'s `getState` doc comment marks where the phase-3 CLI↔RPC mapping module should absorb command helpers; keep `PiSocketClient` purely transport.
+- Testing technique that served well (no harness for it in-repo; rebuild as needed): drive real `pi-ctl` commands end-to-end by spawning `pi-ctl attach`/`spawn` inside node-pty PTYs from a throwaway `node --input-type=module` script run from the project dir (ESM resolution requires it), with an output-quiescence settle heuristic; assert on raw bytes or `stripAnsi`ed text. Caught every real bug this phase (snapshot race, staircase, hint placement).
+
 ## Open questions (resolve with the user before or during the relevant phase)
 
 1. **Type imports** (phase 1) — RESOLVED: local-path dependency on the fork's `packages/coding-agent` (see Prerequisites). The package index exports everything needed; the fork's `dist/` must be built.
