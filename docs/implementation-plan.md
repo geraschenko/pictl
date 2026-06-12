@@ -35,8 +35,7 @@ Notes:
 
 - Getting the session file path into `agent.json`: query `get_state` over `pi.sock` after pi is up (its response includes `sessionFile`). Await the socket appearing / connecting with retry — never a fixed sleep.
 - Daemonization: detach the holder fully (setsid, stdio to a log file in the agent dir). The holder must survive the spawning terminal closing.
-- Revival mechanism: check whether pi's CLI supports resuming a specific session file directly (e.g. a `--session`/`--resume <path>` flag); if not, start pi fresh and immediately issue `switch_session` with the recorded path over `pi.sock` — that command is guaranteed to exist.
-TDC: pi's CLI support resuming a given session with `--session <path|id>`. Update this doc to reflect that.
+- Revival mechanism: pi's CLI resumes a specific session via `--session <path|id>`, so revival is `pi --rpc-socket <dir>/pi.sock --session <most recent in sessions history> <recorded spawn args...>`.
 
 Verification pause: spawn an agent and confirm `list` shows it running; kill -9 the holder and confirm `list` reports it dormant and `resume` revives it on the same session; round-trip `suspend`/`resume`; `kill` removes it; `gc` cleans a hand-tombstoned dir and leaves a dormant one alone.
 
@@ -59,7 +58,11 @@ Deliverables:
 - Agent addressing: positional `<agent-id>` accepting any unique prefix; session ids (or prefixes) resolve to the hosting agent via the `sessions` histories in `agent.json`; if `PI_WORKFLOW_DIR` is set or `--workflow <dir>` given, also accept role names resolved through that workflow's state file. (Resolution only — workflow dir layout is otherwise out of scope for v1; keep the resolver tiny and tolerant.)
 - Dormant-agent revival: every command that needs the socket transparently revives a dormant agent (equivalent to an implicit `pi-ctl resume`) before proceeding. `list`/`status`/`gc` never revive.
 - `pi-ctl tail <agent> [--follow] [--since <entry-id>] [--events]` — without `--follow`, dump entries from `get_entries` (since cursor if given) as JSONL and exit, printing the final entry id so callers can persist a cursor; with `--follow`, additionally stay connected and stream subsequent entries (use events as wakeups, re-drain `get_entries --since` to emit — never treat events as the data source).
-- `pi-ctl wait <agent> --until turn-end|idle:<secs> [--timeout <secs>]` — turn-end waits for the next `agent_end` event (check `get_state` first: if not streaming, an idle agent satisfies turn-end immediately — decide and document); idle:N waits until no events for N seconds while not streaming. Distinct exit codes for condition-met vs timeout vs agent-dead.
+- `pi-ctl wait <agent> --until turn-end|quiescent|idle:<secs> [--timeout <secs>]` — distinct exit codes for condition-met vs timeout vs agent-dead. Semantics:
+  - `turn-end`: return when the in-flight **or pending** turn ends (`agent_end`). Returns immediately only if the agent is fully quiescent (`isStreaming` false AND empty pending queue). Treating an accepted-but-not-yet-started prompt as "a turn that must end" is what makes the sequential `pi-ctl prompt X; pi-ctl wait X --until turn-end` pattern race-free: `prompt` only exits after the RPC accepts the message, so at `wait` time the agent is provably not quiescent. Implementer note: verify pi has no window where a message is accepted but visible neither as streaming nor as pending; if one exists, prefer `prompt --wait` plumbing (below) and document the limitation.
+  - `quiescent`: full kill-style quiescence — not streaming and pending queue drained.
+  - `idle:<secs>`: no session events for N seconds, regardless of streaming state. This intentionally differs from `quiescent`: it catches turns stalled mid-flight (e.g. blocked on human-facing extension UI, visible as `ui_wait_start` with no progress), which the supervisor pattern needs.
+- `pi-ctl prompt` ergonomics: message as positional argument, `-` to read from stdin; `--wait` blocks until the prompted turn ends, implemented on a single connection (send prompt, await `agent_end` on the same subscription) — race-free by construction and the recommended one-shot form.
 
 Verification pause: drive a short conversation entirely from a second terminal via `pi-ctl prompt`/`wait`/`tail --since`, including killing and re-running `tail` with a persisted cursor across a compaction (`pi-ctl compact`) and confirming nothing is lost.
 
@@ -76,9 +79,6 @@ Verification pause: run the example, attach to the supervisor, give it a task fo
 ## Open questions (resolve with the user before or during the relevant phase)
 
 1. **Type imports** (phase 1) — RESOLVED: `@earendil-works/pi-coding-agent` exports `RpcCommand`, `RpcResponse`, `RpcSessionState`, `SessionEntry`, `SessionTreeNode`, and `RpcClient` from its package index. Depend on the fork's package (local path or git dependency; it must be built so `dist/` types exist) and import these directly. Remaining detail: pick local-path vs git dependency with the user at phase 1 start.
-2. **`wait --until turn-end` on an idle agent** (phase 3): return immediately or wait for the *next* turn to end? Proposal: flag-controlled, default wait-for-next; confirm with user.
-TDC: My expectation is that if there's no active turn, then waiting until turn-end would return immediately. I would expect waiting until idle to use the same quiescence logic as `pi-ctl kill`. This does raise an important point about race conditions though. If I `pi-ctl prompt` and then `pi-ctl wait --until turn-end`, it seems like delays either in sending the prompt or between the commands could cause unexpected behavior. How do you think we should handle this? If turn-end returns immediately for an idle agent, is there even a race condition to worry about?
-3. **Spawn-time pi configuration** (phase 1): system prompts, extensions, model — pass through as raw pi args after `--`, or add first-class flags? Proposal: raw pass-through only in v1.
-TDC: agreed, raw pass-through.
-4. **`prompt` ergonomics** (phase 3): message as argument vs stdin; whether `prompt` should optionally block until turn-end (`--wait`) for one-shot scripting. Proposal: argument + `-` for stdin; add `--wait` since it collapses the most common two-command sequence.
-TDC: agreed on both.
+2. **`wait` semantics** — RESOLVED: see the `pi-ctl wait` deliverable in phase 3. `turn-end` returns immediately only when fully quiescent and treats pending queued messages as a turn that must end (this is what makes sequential `prompt; wait` race-free); `quiescent` is kill-style quiescence; `idle:<secs>` is event silence, which also catches turns stalled on human-facing UI.
+3. **Spawn-time pi configuration** (phase 1) — RESOLVED: raw pass-through of pi args after `--` only; no first-class flags in v1.
+4. **`prompt` ergonomics** (phase 3) — RESOLVED: message as argument, `-` for stdin; `--wait` blocks until the prompted turn ends, implemented on a single connection (send prompt, then await `agent_end` on the same subscription) so it is race-free by construction and is the recommended one-shot form.
