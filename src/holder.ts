@@ -11,6 +11,7 @@ import { parseArgs } from "node:util";
 import { SerializeAddon } from "@xterm/addon-serialize";
 import xterm from "@xterm/headless";
 import pty from "node-pty";
+import { HIDE_CURSOR, SHOW_CURSOR } from "./ansi.ts";
 import {
   type AgentRecord,
   holderLogPath,
@@ -118,20 +119,18 @@ function ptyEnv(agentId: string): Record<string, string> {
 }
 
 /**
- * The serialize addon does not capture cursor visibility (DECTCEM), and pi
- * runs cursor-hidden, so a raw snapshot would show a phantom cursor on
- * attach. The public `terminal.modes` API lacks DECTCEM too; the internal
- * core service is the only place xterm tracks it. Guarded so an xterm
- * internals change degrades to "cursor visible", not a crash.
+ * Whether the emulated terminal's cursor is currently hidden (DECTCEM). The
+ * public `terminal.modes` API lacks DECTCEM; the internal core service is the
+ * only place xterm tracks it. Guarded so an xterm internals change degrades
+ * to "cursor visible", not a crash.
  */
-// TDC: the name of this function doesn't make the meaning completely clear. Should it be called "hideCursorSequence" instead?
-function cursorVisibilitySequence(terminal: xterm.Terminal): string {
+function isCursorHidden(terminal: xterm.Terminal): boolean {
   const core = (
     terminal as unknown as {
       _core?: { coreService?: { isCursorHidden?: boolean } };
     }
   )._core;
-  return core?.coreService?.isCursorHidden ? "\x1b[?25l" : "\x1b[?25h";
+  return core?.coreService?.isCursorHidden ?? false;
 }
 
 function isSessionChangedEvent(
@@ -184,11 +183,15 @@ export async function runHold(argv: string[]): Promise<void> {
     // terminal.write("") is the parse barrier; serializing inside its
     // callback (not in a then() after it) keeps the snapshot exactly at the
     // barrier — xterm may parse further queued chunks before a microtask runs.
+    // The serialize addon does not capture cursor visibility, and pi runs
+    // cursor-hidden; without the appended sequence an attacher would show a
+    // phantom cursor.
     serializeScreen: () =>
       new Promise((resolve) => {
         terminal.write("", () =>
           resolve(
-            serializeAddon.serialize() + cursorVisibilitySequence(terminal),
+            serializeAddon.serialize() +
+              (isCursorHidden(terminal) ? HIDE_CURSOR : SHOW_CURSOR),
           ),
         );
       }),

@@ -7,6 +7,16 @@
 import { connect, type Socket } from "node:net";
 import { parseArgs } from "node:util";
 import {
+  CURSOR_HOME,
+  cursorToRow,
+  DISABLE_BRACKETED_PASTE,
+  ERASE_SCREEN,
+  RESET_SGR,
+  RESTORE_CURSOR,
+  SAVE_CURSOR,
+  SHOW_CURSOR,
+} from "./ansi.ts";
+import {
   agentDirPath,
   isPidAlive,
   readAgentRecord,
@@ -28,14 +38,11 @@ export const DETACH_KEY_NAME = "ctrl+]";
 /**
  * Undo what an attach session may have left in the local terminal: pi runs
  * cursor-hidden with bracketed paste on, and output may end mid-SGR.
- * (show cursor, bracketed paste off, SGR reset)
  */
-// TDC: separate out the three constants (show cursor, etc) and build this constant by concatenating them
-const TERMINAL_RESTORE_SEQUENCE = "\x1b[?25h\x1b[?2004l\x1b[0m";
+const TERMINAL_RESTORE_SEQUENCE = `${SHOW_CURSOR}${DISABLE_BRACKETED_PASTE}${RESET_SGR}`;
 
 /** Render the snapshot from the holder's emulator origin: home, clear. */
-// TDC: same here
-const CLEAR_SCREEN_SEQUENCE = "\x1b[H\x1b[2J";
+const CLEAR_SCREEN_SEQUENCE = `${CURSOR_HOME}${ERASE_SCREEN}`;
 
 /**
  * pi leaves the cursor at its editor line with the footer drawn below it;
@@ -44,7 +51,7 @@ const CLEAR_SCREEN_SEQUENCE = "\x1b[H\x1b[2J";
  * land below everything pi drew.
  */
 function cursorToLastRow(): string {
-  return `\x1b[${process.stdout.rows};1H`;
+  return cursorToRow(process.stdout.rows);
 }
 
 export async function runAttach(argv: string[]): Promise<void> {
@@ -75,10 +82,14 @@ export async function runAttach(argv: string[]): Promise<void> {
   }
 
   const socket = await connectToTty(ttySocketPath(agentDir), agentId);
-  // TDC: I don't ever see this text. I think the screen is being cleared immediately after it's written. Is there some way we could write it underneath all the lines from pi? It'll get overwritten, but at least the user will see it on attach.
-  console.log(`attached to ${agentId}; detach: ${DETACH_KEY_NAME}`);
   process.stdin.setRawMode(true);
   process.stdin.resume();
+
+  // Drawn over the last row right after the snapshot, so it is visible on
+  // attach instead of being wiped by the snapshot's screen clear; pi's next
+  // full redraw overwrites it. DECSC/DECRC bracket it so the cursor and SGR
+  // state the snapshot established are untouched.
+  const attachHint = `${SAVE_CURSOR}${cursorToLastRow()}${RESET_SGR}attached to ${agentId}; detach: ${DETACH_KEY_NAME}${RESTORE_CURSOR}`;
 
   const finish = (exitCode: number, message: string): never => {
     process.stdin.setRawMode(false);
@@ -109,6 +120,7 @@ export async function runAttach(argv: string[]): Promise<void> {
           case FrameType.snapshot:
             process.stdout.write(CLEAR_SCREEN_SEQUENCE);
             process.stdout.write(frame.payload);
+            process.stdout.write(attachHint);
             break;
           case FrameType.output:
             process.stdout.write(frame.payload);

@@ -60,6 +60,8 @@ interface Harness {
   resizes: Array<{ cols: number; rows: number }>;
   /** Resolve the snapshot promise handed out by serializeScreen. */
   resolveSnapshot(snapshot: string): void;
+  /** Reject the snapshot promise handed out by serializeScreen. */
+  rejectSnapshot(error: Error): void;
   cleanup(): Promise<void>;
 }
 
@@ -68,10 +70,15 @@ async function startServer(): Promise<Harness> {
   const socketPath = join(dir, "tty.sock");
   const inputs: string[] = [];
   const resizes: Array<{ cols: number; rows: number }> = [];
-  let pendingSnapshotResolvers: Array<(s: string) => void> = [];
+  let pendingSnapshots: Array<{
+    resolve: (s: string) => void;
+    reject: (e: Error) => void;
+  }> = [];
   const hooks: TtyServerHooks = {
     serializeScreen: () =>
-      new Promise((resolve) => pendingSnapshotResolvers.push(resolve)),
+      new Promise((resolve, reject) =>
+        pendingSnapshots.push({ resolve, reject }),
+      ),
     writeInput: (data) => inputs.push(data),
     resize: (cols, rows) => resizes.push({ cols, rows }),
   };
@@ -83,10 +90,16 @@ async function startServer(): Promise<Harness> {
     inputs,
     resizes,
     resolveSnapshot: (snapshot) => {
-      for (const resolve of pendingSnapshotResolvers) {
-        resolve(snapshot);
+      for (const pending of pendingSnapshots) {
+        pending.resolve(snapshot);
       }
-      pendingSnapshotResolvers = [];
+      pendingSnapshots = [];
+    },
+    rejectSnapshot: (error) => {
+      for (const pending of pendingSnapshots) {
+        pending.reject(error);
+      }
+      pendingSnapshots = [];
     },
     cleanup: async () => {
       await server.shutdown("test over");
@@ -154,6 +167,18 @@ test("shutdown delivers an exit frame and closes connections", async () => {
   assert.deepEqual(decodeExit(exitFrame.payload), {
     reason: "pi exited (code 0)",
   });
+});
+
+test("a failed snapshot drops the client instead of buffering forever", async () => {
+  const harness = await startServer();
+  try {
+    const client = await connectClient(harness.socketPath);
+    harness.rejectSnapshot(new Error("serialize blew up"));
+    await client.closed;
+    assert.equal(client.frames.length, 0);
+  } finally {
+    await harness.cleanup();
+  }
 });
 
 test("a client sending garbage is dropped without affecting others", async () => {

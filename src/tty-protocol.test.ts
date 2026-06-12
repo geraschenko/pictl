@@ -63,6 +63,14 @@ test("unknown frame type throws", () => {
   assert.throws(() => decoder.push(bogus), /unknown tty frame type 99/);
 });
 
+test("oversized declared payload length throws instead of buffering", () => {
+  const decoder = new FrameDecoder();
+  const header = Buffer.alloc(5);
+  header.writeUInt8(FrameType.output, 0);
+  header.writeUInt32BE(0xffffffff, 1);
+  assert.throws(() => decoder.push(header), /exceeds limit/);
+});
+
 test("resize payload round-trips", () => {
   const decoder = new FrameDecoder();
   const frames = decoder.push(encodeResize({ cols: 80, rows: 24 }));

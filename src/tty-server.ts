@@ -43,6 +43,7 @@ export class TtyServer {
   readonly server: Server;
   private readonly hooks: TtyServerHooks;
   private readonly clients = new Set<AttachClient>();
+  private shuttingDown = false;
 
   constructor(hooks: TtyServerHooks) {
     this.hooks = hooks;
@@ -78,11 +79,11 @@ export class TtyServer {
    * socket dying when the holder exits carries the same information.
    */
   async shutdown(reason: string): Promise<void> {
+    this.shuttingDown = true;
     this.server.close();
     const exitFrame = encodeExit({ reason });
     const flushes = [...this.clients].map(
       (client) =>
-        // TDC: A review agent says: "shutdown() calls socket.end(exitFrame, ...), but a pending serializeScreen().then(...) may later try to write snapshot/output to the same socket. Usually destroyed will become true quickly, but there is a small window where writes-after-end could happen. A server-level shuttingDown flag or per-client closed flag would make this cleaner." What do you think?
         new Promise<void>((resolve) => client.socket.end(exitFrame, resolve)),
     );
     let flushDeadline: NodeJS.Timeout | undefined;
@@ -100,6 +101,10 @@ export class TtyServer {
   }
 
   private handleConnection(socket: Socket): void {
+    if (this.shuttingDown) {
+      socket.destroy();
+      return;
+    }
     const client: AttachClient = { socket, pendingOutput: [] };
     this.clients.add(client);
     const dropClient = (): void => {
@@ -111,17 +116,27 @@ export class TtyServer {
 
     // Buffering (registration above) and the serialize parse barrier must be
     // enqueued in the same synchronous step — see TtyServerHooks.
-    // TDC: if serializeScreen() rejects, there is no .catch(). That can produce an unhandled rejection and leave the client in pendingOutput mode forever.
-    void this.hooks.serializeScreen().then((snapshot) => {
-      if (client.pendingOutput === null || socket.destroyed) {
-        return;
-      }
-      socket.write(encodeFrame(FrameType.snapshot, Buffer.from(snapshot)));
-      for (const payload of client.pendingOutput) {
-        socket.write(encodeFrame(FrameType.output, payload));
-      }
-      client.pendingOutput = null;
-    });
+    this.hooks.serializeScreen().then(
+      (snapshot) => {
+        // shuttingDown guards the window between shutdown()'s socket.end and
+        // the socket reporting destroyed, where a write would still succeed
+        // (or raise write-after-end) and corrupt the exit handshake.
+        if (
+          client.pendingOutput === null ||
+          socket.destroyed ||
+          this.shuttingDown
+        ) {
+          return;
+        }
+        socket.write(encodeFrame(FrameType.snapshot, Buffer.from(snapshot)));
+        for (const payload of client.pendingOutput) {
+          socket.write(encodeFrame(FrameType.output, payload));
+        }
+        client.pendingOutput = null;
+      },
+      // A client whose snapshot failed would otherwise buffer output forever.
+      () => dropClient(),
+    );
 
     // Input bytes are UTF-8 that may split mid-character across frames;
     // StringDecoder reassembles (node-pty accepts only strings).

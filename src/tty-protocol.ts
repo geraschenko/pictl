@@ -14,7 +14,10 @@
  * protocol and nothing else.
  */
 
-// TDC: FrameType exported as both value and type is kind of confusing, isn't it? Is this normal?
+// Const object + same-named type is the standard TS enum alternative: the
+// value gives `FrameType.input` etc., the type is the union of the values
+// (1 | 2 | ...). TS resolves which one a usage means from context, exactly
+// as it does for `enum` declarations.
 export const FrameType = {
   input: 1,
   resize: 2,
@@ -26,7 +29,17 @@ export const FrameType = {
 export type FrameType = (typeof FrameType)[keyof typeof FrameType];
 
 const FRAME_TYPE_VALUES = new Set<number>(Object.values(FrameType));
-const HEADER_LENGTH = 5;  // TDC: why 5? I think this is 1 byte for frame type and 4 bytes for payload size, but we should be explicit about where the 5 comes from.
+const FRAME_TYPE_BYTES = 1;
+const PAYLOAD_LENGTH_BYTES = 4;
+const HEADER_BYTES = FRAME_TYPE_BYTES + PAYLOAD_LENGTH_BYTES;
+
+/**
+ * Upper bound on a single frame's payload, far above anything legitimate
+ * (the largest frame is a snapshot with scrollback, ~hundreds of KB). Its
+ * only job is to keep a corrupt or hostile length prefix from committing the
+ * decoder to buffering gigabytes.
+ */
+export const MAX_PAYLOAD_BYTES = 16 * 1024 * 1024;
 
 export interface Frame {
   type: FrameType;
@@ -43,9 +56,9 @@ export interface ExitPayload {
 }
 
 export function encodeFrame(type: FrameType, payload: Buffer): Buffer {
-  const header = Buffer.allocUnsafe(HEADER_LENGTH);
+  const header = Buffer.allocUnsafe(HEADER_BYTES);
   header.writeUInt8(type, 0);
-  header.writeUInt32BE(payload.length, 1);
+  header.writeUInt32BE(payload.length, FRAME_TYPE_BYTES);
   return Buffer.concat([header, payload]);
 }
 
@@ -84,8 +97,18 @@ export function decodeExit(payload: Buffer): ExitPayload {
 
 /**
  * Incremental frame parser: feed socket chunks in, get complete frames out.
- * Throws on an unknown frame type; the connection is then unrecoverable
- * (framing is lost) and the caller should destroy it.
+ *
+ * Safety properties: header fields are read only once at least HEADER_BYTES
+ * are buffered; a frame is emitted only once its declared payload is fully
+ * buffered (a partial frame is the normal case — the kernel chunks socket
+ * data with no regard for frame boundaries, so a frame routinely arrives
+ * split across push() calls and the decoder just waits for the rest); reads
+ * are via subarray, which is bounds-checked — a lying length prefix can never
+ * read past what was actually received. The remaining risk with
+ * length-prefixed framing is memory, not overflow: a huge declared length
+ * would commit us to buffering it, hence the MAX_PAYLOAD_BYTES cap. Throws
+ * on an unknown frame type or an oversized declared length; framing is then
+ * unrecoverable and the caller must destroy the connection.
  */
 export class FrameDecoder {
   private buffer: Buffer = Buffer.alloc(0);
@@ -94,24 +117,28 @@ export class FrameDecoder {
     this.buffer =
       this.buffer.length === 0 ? chunk : Buffer.concat([this.buffer, chunk]);
     const frames: Frame[] = [];
-    while (this.buffer.length >= HEADER_LENGTH) {
+    while (this.buffer.length >= HEADER_BYTES) {
       const type = this.buffer.readUInt8(0);
       if (!FRAME_TYPE_VALUES.has(type)) {
         throw new Error(`unknown tty frame type ${type}`);
       }
-      const payloadLength = this.buffer.readUInt32BE(1);
-      if (this.buffer.length < HEADER_LENGTH + payloadLength) {
-        // TDC: when would this happen? This encoding/decoding scheme seems kind of dodgy, the sort of thing buffer overflow security stories are made of. What do you think?
+      const payloadLength = this.buffer.readUInt32BE(FRAME_TYPE_BYTES);
+      if (payloadLength > MAX_PAYLOAD_BYTES) {
+        throw new Error(
+          `tty frame payload length ${payloadLength} exceeds limit ${MAX_PAYLOAD_BYTES}`,
+        );
+      }
+      if (this.buffer.length < HEADER_BYTES + payloadLength) {
         break;
       }
       frames.push({
         type: type as FrameType,
         payload: this.buffer.subarray(
-          HEADER_LENGTH,
-          HEADER_LENGTH + payloadLength,
+          HEADER_BYTES,
+          HEADER_BYTES + payloadLength,
         ),
       });
-      this.buffer = this.buffer.subarray(HEADER_LENGTH + payloadLength);
+      this.buffer = this.buffer.subarray(HEADER_BYTES + payloadLength);
     }
     return frames;
   }
