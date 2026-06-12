@@ -7,8 +7,12 @@
     "pi-ctl": "dist/main.js"
   },
   "scripts": {
-    "build": "tsc",
-    "check": "tsc --noEmit"
+    "build": "tsc -p tsconfig.build.json",
+    "check": "tsc --noEmit",
+    "lint": "eslint src",
+    "test": "node --test \"src/**/*.test.ts\"",
+    "fmt": "treefmt",
+    "presubmit": "npm run check && npm run lint && treefmt --fail-on-change && npm test"
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "file:../../earendil-works/pi/packages/coding-agent",
@@ -16,7 +20,11 @@
     "node-pty": "^1.0.0"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.4",
     "@types/node": "^22.0.0",
-    "typescript": "^5.8.0"
+    "eslint": "^9.39.4",
+    "prettier": "^3.8.4",
+    "typescript": "^5.8.0",
+    "typescript-eslint": "^8.61.0"
   }
 }
