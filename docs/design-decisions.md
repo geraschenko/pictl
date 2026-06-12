@@ -6,7 +6,7 @@ This document records the design decisions behind pi-ctl and their rationale. It
 
 pi-ctl is a CLI for spawning, observing, controlling, and attaching to a fleet of [pi](https://github.com/earendil-works/pi) coding-agent instances. It is the foundation for a workflow system in which agents supervise, spawn, and message other agents, and in which humans can attach interactively to any agent at any time.
 
-It builds on pi's "tee" mode (`pi --rpc-socket <path>`, branch `anton/pi-tee` in the pi fork; spec at `docs/pi-rpc-socket-mode.md` in the pi repo): normal interactive pi that also exposes the RPC JSONL protocol over a Unix domain socket, with events broadcast to all connected clients.
+It builds on pi's "tee" mode (`pi --rpc-socket <path>`, branch `anton/rpc-tree` in the pi fork — successor of `anton/pi-tee`; spec at `docs/pi-rpc-socket-mode.md` in the pi repo): normal interactive pi that also exposes the RPC JSONL protocol over a Unix domain socket, with events broadcast to all connected clients.
 
 ## Philosophy
 
@@ -30,7 +30,7 @@ pi-ctl runs on Node (not bun) and builds with plain `tsc` (not tsup or a bundler
 
 pi-ctl is TypeScript. Reasons: pi is TypeScript, so RPC types can be **imported from the pi package rather than hand-mirrored** (compile-time compatibility checking — contrast pi-rpc-rs, which maintains a hand-tracked compatibility table); npm distribution; agents read/write TS workflows fluently; node-pty + @xterm/headless are the proven stack for the attach architecture.
 
-Caveat: until tee mode is upstreamed, pi-ctl depends on the pi _fork_ (geraschenko/pi, branch `anton/pi-tee`) both at runtime (the installed pi binary must support `--rpc-socket`) and for type imports. See open questions in the implementation plan.
+Caveat: until tee mode is upstreamed, pi-ctl depends on the pi _fork_ (geraschenko/pi, branch `anton/rpc-tree`) both at runtime (the installed pi binary must support `--rpc-socket`) and for type imports. See open questions in the implementation plan.
 
 ## Process model: one holder daemon per agent
 
