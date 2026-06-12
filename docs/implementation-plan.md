@@ -36,6 +36,7 @@ Notes:
 - Getting the session file path into `agent.json`: query `get_state` over `pi.sock` after pi is up (its response includes `sessionFile`). Await the socket appearing / connecting with retry — never a fixed sleep.
 - Daemonization: detach the holder fully (setsid, stdio to a log file in the agent dir). The holder must survive the spawning terminal closing.
 - Revival mechanism: check whether pi's CLI supports resuming a specific session file directly (e.g. a `--session`/`--resume <path>` flag); if not, start pi fresh and immediately issue `switch_session` with the recorded path over `pi.sock` — that command is guaranteed to exist.
+TDC: pi's CLI support resuming a given session with `--session <path|id>`. Update this doc to reflect that.
 
 Verification pause: spawn an agent and confirm `list` shows it running; kill -9 the holder and confirm `list` reports it dormant and `resume` revives it on the same session; round-trip `suspend`/`resume`; `kill` removes it; `gc` cleans a hand-tombstoned dir and leaves a dormant one alone.
 
@@ -76,5 +77,8 @@ Verification pause: run the example, attach to the supervisor, give it a task fo
 
 1. **Type imports** (phase 1) — RESOLVED: `@earendil-works/pi-coding-agent` exports `RpcCommand`, `RpcResponse`, `RpcSessionState`, `SessionEntry`, `SessionTreeNode`, and `RpcClient` from its package index. Depend on the fork's package (local path or git dependency; it must be built so `dist/` types exist) and import these directly. Remaining detail: pick local-path vs git dependency with the user at phase 1 start.
 2. **`wait --until turn-end` on an idle agent** (phase 3): return immediately or wait for the *next* turn to end? Proposal: flag-controlled, default wait-for-next; confirm with user.
+TDC: My expectation is that if there's no active turn, then waiting until turn-end would return immediately. I would expect waiting until idle to use the same quiescence logic as `pi-ctl kill`. This does raise an important point about race conditions though. If I `pi-ctl prompt` and then `pi-ctl wait --until turn-end`, it seems like delays either in sending the prompt or between the commands could cause unexpected behavior. How do you think we should handle this? If turn-end returns immediately for an idle agent, is there even a race condition to worry about?
 3. **Spawn-time pi configuration** (phase 1): system prompts, extensions, model — pass through as raw pi args after `--`, or add first-class flags? Proposal: raw pass-through only in v1.
+TDC: agreed, raw pass-through.
 4. **`prompt` ergonomics** (phase 3): message as argument vs stdin; whether `prompt` should optionally block until turn-end (`--wait`) for one-shot scripting. Proposal: argument + `-` for stdin; add `--wait` since it collapses the most common two-command sequence.
+TDC: agreed on both.
