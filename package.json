@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "file:../../earendil-works/pi/packages/coding-agent",
+    "@xterm/addon-serialize": "^0.14.0",
     "@xterm/headless": "^5.5.0",
     "node-pty": "^1.0.0"
   },
