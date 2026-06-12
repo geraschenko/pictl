@@ -1,0 +1,22 @@
+{
+  "name": "pi-ctl",
+  "version": "0.1.0",
+  "description": "Spawn, observe, control, and attach to a fleet of pi coding-agent instances",
+  "type": "module",
+  "bin": {
+    "pi-ctl": "dist/main.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "file:../../earendil-works/pi/packages/coding-agent",
+    "@xterm/headless": "^5.5.0",
+    "node-pty": "^1.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.8.0"
+  }
+}
