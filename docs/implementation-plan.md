@@ -204,6 +204,14 @@ Decisions below were resolved with the user and are folded into the phase 3 deli
 - Gotcha found while testing: pi does **not** reject an unknown `set_thinking_level` value — `setThinkingLevel` silently clamps it (a typo set the level to "off"). The CLI therefore validates against a mirrored `THINKING_LEVELS` list (drift risk accepted and documented in a comment); clamping of *valid* levels to model capabilities stays pi-side, which is desirable (e.g. `xhigh` on a model capped at `high`).
 - Verified end-to-end against a live agent: get-state/set-session-name/bash/get-commands/get-entries round-trips; prompt → busy error without `--streaming-behavior` (pi's message passed through, exit 1) → `--streaming-behavior follow-up` queues; `get-last-assistant-text` returned the combined turn; usage errors exit 2, pi-side rejections exit 1; dormant agent errors with the resume hint.
 
+### 2026-06-12: phase 3 step 1 review round (commit d8f976e) addressed
+
+- Flag names audited against pi's `RpcCommand` field names (now a stated convention in the module doc comment: kebab-cased field names): `compact --instructions` → `--custom-instructions`, `navigate-tree --instructions` → `--custom-instructions`, `export-html --output` → `--output-path`. All other flags already matched.
+- `--image <path>` (repeatable) added to prompt/steer/follow-up, closing the one full-mirror gap. Paths are read into pi's inline base64 `ImageContent` (same encoding pi's own file-processor uses: raw base64 + extension-derived mimeType); the `ImageContent` type is derived from the prompt command's `images` field (`NonNullable<...>[number]`) since the pi package index does not export it. Unsupported extension is a usage error (exit 2); unreadable file is a runtime error (exit 1). Spec `build` may now return a promise.
+- `getState` stays in rpc.ts (TDC question): it serves programmatic state checks (lifecycle.ts quiescence waits, inspect.ts probes), which are not CLI passthrough; doc comment rewritten to say so instead of forward-referencing phase 3.
+- Debugging lesson from verifying `--image`: a model API rejects a request if *any* image in the conversation history is invalid, not just ones in the new message — two valid-image retests "failed" because the session's first turn contained a corrupt test PNG. Both anthropic and openai-codex behave this way ("Could not process image" / "does not represent a valid image"). When testing image features, use a fresh session per attempt.
+- Verified live: two `--image` flags deliver both images in order (model named both colors); session entries store the exact file bytes (byte-compared); `new-session` round-trips.
+
 ## Open questions (resolve with the user before or during the relevant phase)
 
 1. **Type imports** (phase 1) — RESOLVED: local-path dependency on the fork's `packages/coding-agent` (see Prerequisites). The package index exports everything needed; the fork's `dist/` must be built.

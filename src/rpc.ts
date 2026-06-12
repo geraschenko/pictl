@@ -221,11 +221,11 @@ export async function connectWithRetry(
   }
 }
 
-// TDC: Do we still need this? I guess we do ...
 /**
  * Free function rather than a PiSocketClient method to keep the client purely
- * transport-level: phase 3 adds a module mapping all CLI subcommands to typed
- * RPC calls, and command-specific helpers belong there, not on the client.
+ * transport-level. Serves programmatic state checks (quiescence waits in
+ * lifecycle.ts, status probes in inspect.ts); the CLI passthrough in
+ * rpc-commands.ts builds its commands from its own spec table instead.
  */
 export async function getState(
   client: PiSocketClient,

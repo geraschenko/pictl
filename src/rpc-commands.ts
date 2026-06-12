@@ -8,10 +8,12 @@
  * RPC command from the rest, sends it over the agent's pi.sock, and prints
  * the response's data as JSON (`--json` for the raw response record).
  *
- * Not mirrored: the `images` field on prompt/steer/follow_up (no good CLI
- * shape for inline image content in v1).
+ * Flag names mirror pi's RpcCommand field names (kebab-cased) so users who
+ * know the RPC surface can map them without guessing.
  */
 
+import { readFile } from "node:fs/promises";
+import { extname } from "node:path";
 import { parseArgs } from "node:util";
 import type { RpcCommand, RpcResponse } from "@earendil-works/pi-coding-agent";
 import { loadAgent } from "./lifecycle.ts";
@@ -32,9 +34,12 @@ interface RpcCliSpec {
   /** Usage text for optional flags, e.g. "[--since <entry-id>]". */
   flagsUsage?: string;
   summary: string;
-  options?: Record<string, { type: "string" | "boolean" }>;
+  options?: Record<string, { type: "string" | "boolean"; multiple?: boolean }>;
   /** Positional arity is validated by the runner; enum-valued args validate here. */
-  build: (positionals: string[], values: FlagValues) => RpcCommand;
+  build: (
+    positionals: string[],
+    values: FlagValues,
+  ) => RpcCommand | Promise<RpcCommand>;
 }
 
 function oneOf<T extends string>(
@@ -70,15 +75,62 @@ const THINKING_LEVELS = [
   "xhigh",
 ] as const;
 
+type ImageContent = NonNullable<
+  Extract<RpcCommand, { type: "prompt" }>["images"]
+>[number];
+
+const IMAGE_MIME_TYPES: Record<string, string> = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+  webp: "image/webp",
+};
+
+const IMAGE_OPTION = { image: { type: "string", multiple: true } } as const;
+const IMAGE_FLAG_USAGE = "[--image <path>]...";
+
+/** Read `--image` paths (repeatable) into pi's inline base64 image content. */
+async function imagesFromFlags(
+  values: FlagValues,
+): Promise<{ images?: ImageContent[] }> {
+  const imagePaths = values.image;
+  if (!Array.isArray(imagePaths) || imagePaths.length === 0) {
+    return {};
+  }
+  const images = await Promise.all(
+    imagePaths.map(async (imagePath): Promise<ImageContent> => {
+      const extension = extname(String(imagePath)).slice(1).toLowerCase();
+      const mimeType = IMAGE_MIME_TYPES[extension];
+      if (mimeType === undefined) {
+        throw new UsageError(
+          `--image ${imagePath}: unsupported extension; expected one of: ${Object.keys(IMAGE_MIME_TYPES).join(", ")}`,
+        );
+      }
+      let data: Buffer;
+      try {
+        data = await readFile(String(imagePath));
+      } catch (error) {
+        throw new Error(
+          `--image ${imagePath}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+      return { type: "image", data: data.toString("base64"), mimeType };
+    }),
+  );
+  return { images };
+}
+
 const RPC_CLI_SPECS: Record<string, RpcCliSpec> = {
   prompt: {
     positionals: ["<message>"],
-    flagsUsage: "[--streaming-behavior steer|follow-up]",
+    flagsUsage: `[--streaming-behavior steer|follow-up] ${IMAGE_FLAG_USAGE}`,
     summary: "send a prompt (errors while streaming without --streaming-behavior)",
-    options: { "streaming-behavior": { type: "string" } },
-    build: ([message], values) => ({
+    options: { "streaming-behavior": { type: "string" }, ...IMAGE_OPTION },
+    build: async ([message], values) => ({
       type: "prompt",
       message: message!,
+      ...(await imagesFromFlags(values)),
       ...(typeof values["streaming-behavior"] === "string" && {
         streamingBehavior:
           oneOf(
@@ -93,13 +145,25 @@ const RPC_CLI_SPECS: Record<string, RpcCliSpec> = {
   },
   steer: {
     positionals: ["<message>"],
+    flagsUsage: IMAGE_FLAG_USAGE,
     summary: "interject into the current turn",
-    build: ([message]) => ({ type: "steer", message: message! }),
+    options: { ...IMAGE_OPTION },
+    build: async ([message], values) => ({
+      type: "steer",
+      message: message!,
+      ...(await imagesFromFlags(values)),
+    }),
   },
   "follow-up": {
     positionals: ["<message>"],
+    flagsUsage: IMAGE_FLAG_USAGE,
     summary: "queue a message for after the current turn",
-    build: ([message]) => ({ type: "follow_up", message: message! }),
+    options: { ...IMAGE_OPTION },
+    build: async ([message], values) => ({
+      type: "follow_up",
+      message: message!,
+      ...(await imagesFromFlags(values)),
+    }),
   },
   abort: {
     positionals: [],
@@ -173,13 +237,13 @@ const RPC_CLI_SPECS: Record<string, RpcCliSpec> = {
   },
   compact: {
     positionals: [],
-    flagsUsage: "[--instructions <text>]",
+    flagsUsage: "[--custom-instructions <text>]",
     summary: "compact the session context",
-    options: { instructions: { type: "string" } }, // TDC: let's name this "custom-instructions" so that users familiar with the rpc command fields know exactly what it is. Audit the other flag names and make sure they agree with pi's RpcCommand field names.
+    options: { "custom-instructions": { type: "string" } },
     build: (_positionals, values) => ({
       type: "compact",
-      ...(typeof values.instructions === "string" && {
-        customInstructions: values.instructions,
+      ...(typeof values["custom-instructions"] === "string" && {
+        customInstructions: values["custom-instructions"],
       }),
     }),
   },
@@ -229,13 +293,13 @@ const RPC_CLI_SPECS: Record<string, RpcCliSpec> = {
   },
   "export-html": {
     positionals: [],
-    flagsUsage: "[--output <path>]",
+    flagsUsage: "[--output-path <path>]",
     summary: "export the session as HTML",
-    options: { output: { type: "string" } },
+    options: { "output-path": { type: "string" } },
     build: (_positionals, values) => ({
       type: "export_html",
-      ...(typeof values.output === "string" && {
-        outputPath: values.output,
+      ...(typeof values["output-path"] === "string" && {
+        outputPath: values["output-path"],
       }),
     }),
   },
@@ -280,11 +344,11 @@ const RPC_CLI_SPECS: Record<string, RpcCliSpec> = {
   "navigate-tree": {
     positionals: ["<target-id>"],
     flagsUsage:
-      "[--summarize] [--instructions <text>] [--replace-instructions] [--label <text>]",
+      "[--summarize] [--custom-instructions <text>] [--replace-instructions] [--label <text>]",
     summary: "move the session leaf to another entry",
     options: {
       summarize: { type: "boolean" },
-      instructions: { type: "string" },
+      "custom-instructions": { type: "string" },
       "replace-instructions": { type: "boolean" },
       label: { type: "string" },
     },
@@ -292,8 +356,8 @@ const RPC_CLI_SPECS: Record<string, RpcCliSpec> = {
       type: "navigate_tree",
       targetId: targetId!,
       ...(values.summarize === true && { summarize: true }),
-      ...(typeof values.instructions === "string" && {
-        customInstructions: values.instructions,
+      ...(typeof values["custom-instructions"] === "string" && {
+        customInstructions: values["custom-instructions"],
       }),
       ...(values["replace-instructions"] === true && {
         replaceInstructions: true,
@@ -366,7 +430,7 @@ async function runRpcCliCommand(
   ) {
     throw new UsageError(`usage: ${cliInvocation(cliName, spec)}`);
   }
-  const command = spec.build(commandPositionals, parsed.values);
+  const command = await spec.build(commandPositionals, parsed.values);
 
   const agent = await loadAgent(agentPrefix);
   if (!isPidAlive(agent.record.holderPid)) {
