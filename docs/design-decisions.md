@@ -48,7 +48,7 @@ Holder/CLI version skew is acceptable: the sockets carry stable protocols, so a 
 ## Attach semantics
 
 - `pi-ctl attach <agent>`: raw-mode the local terminal, connect to `tty.sock`, send local terminal size, receive the serialized current screen, then proxy bytes bidirectionally until the detach keybinding.
-- Multiple simultaneous attachers are allowed; resize policy is last-resize-wins (forwarded as PTY ioctl + SIGWINCH; pi's TUI redraws on resize, which also backstops any emulator serialization imperfections).
+- Multiple simultaneous attachers are allowed; the PTY size is the **elementwise min over all attached clients' sizes** (tmux's policy), recomputed on attach, detach, and resize, forwarded as PTY ioctl + SIGWINCH. Every attacher renders correctly; larger terminals show unused margin. (Last-resize-wins was the original decision and was reverted after verification: attach is a byte-level proxy, and one byte stream cannot render at two geometries — pi pads redrawn lines to the full PTY width, so any attacher narrower than the PTY wraps those lines and each redraw scrolls a line, garbling its display.)
 - Detached agents keep their last size; agents that have never been attached use a default (80×24).
 
 ## Registry: the directory is the registry

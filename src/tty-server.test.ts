@@ -155,6 +155,37 @@ test("input and resize frames reach the hooks; UTF-8 split across frames reassem
   }
 });
 
+test("PTY size is the elementwise min across attached clients", async () => {
+  const harness = await startServer();
+  try {
+    const waitForResizes = async (count: number): Promise<void> => {
+      while (harness.resizes.length < count) {
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+    };
+    const a = await connectClient(harness.socketPath);
+    harness.resolveSnapshot("");
+    a.socket.write(encodeResize({ cols: 100, rows: 40 }));
+    await waitForResizes(1);
+
+    const b = await connectClient(harness.socketPath);
+    harness.resolveSnapshot("");
+    b.socket.write(encodeResize({ cols: 80, rows: 50 }));
+    await waitForResizes(2);
+
+    // b detaches: the min relaxes back to a's size.
+    b.socket.destroy();
+    await waitForResizes(3);
+    assert.deepEqual(harness.resizes, [
+      { cols: 100, rows: 40 },
+      { cols: 80, rows: 40 },
+      { cols: 100, rows: 40 },
+    ]);
+  } finally {
+    await harness.cleanup();
+  }
+});
+
 test("shutdown delivers an exit frame and closes connections", async () => {
   const harness = await startServer();
   const client = await connectClient(harness.socketPath);

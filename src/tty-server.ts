@@ -13,6 +13,7 @@ import {
   encodeFrame,
   FrameDecoder,
   FrameType,
+  type ResizePayload,
 } from "./tty-protocol.ts";
 
 const EXIT_FLUSH_DEADLINE_MS = 1_000;
@@ -37,12 +38,15 @@ interface AttachClient {
   socket: Socket;
   /** Output relayed before the snapshot was sent; null once flushed. */
   pendingOutput: Buffer[] | null;
+  /** Last size this client reported; undefined until its first resize frame. */
+  size?: ResizePayload;
 }
 
 export class TtyServer {
   readonly server: Server;
   private readonly hooks: TtyServerHooks;
   private readonly clients = new Set<AttachClient>();
+  private appliedSize: ResizePayload | undefined;
   private shuttingDown = false;
 
   constructor(hooks: TtyServerHooks) {
@@ -55,6 +59,33 @@ export class TtyServer {
       this.server.once("error", reject);
       this.server.listen(socketPath, resolve);
     });
+  }
+
+  /**
+   * PTY size = elementwise min over all attached clients' reported sizes
+   * (tmux's policy), recomputed on every resize, attach, and detach: every
+   * attacher renders correctly, larger ones with unused margin. Last-writer-
+   * wins was tried first and garbles every other differently-sized attacher —
+   * one byte stream cannot render at two geometries. When the last client
+   * disconnects the PTY keeps its size.
+   */
+  private applyMinSize(): void {
+    let cols = Infinity;
+    let rows = Infinity;
+    for (const client of this.clients) {
+      if (client.size) {
+        cols = Math.min(cols, client.size.cols);
+        rows = Math.min(rows, client.size.rows);
+      }
+    }
+    if (!Number.isFinite(cols) || !Number.isFinite(rows)) {
+      return;
+    }
+    if (this.appliedSize?.cols === cols && this.appliedSize?.rows === rows) {
+      return;
+    }
+    this.appliedSize = { cols, rows };
+    this.hooks.resize(cols, rows);
   }
 
   /** Relay PTY output to every attached client. */
@@ -110,6 +141,7 @@ export class TtyServer {
     const dropClient = (): void => {
       this.clients.delete(client);
       socket.destroy();
+      this.applyMinSize();
     };
     socket.on("close", dropClient);
     socket.on("error", dropClient);
@@ -149,11 +181,10 @@ export class TtyServer {
             case FrameType.input:
               this.hooks.writeInput(inputDecoder.write(frame.payload));
               break;
-            case FrameType.resize: {
-              const { cols, rows } = decodeResize(frame.payload);
-              this.hooks.resize(cols, rows);
+            case FrameType.resize:
+              client.size = decodeResize(frame.payload);
+              this.applyMinSize();
               break;
-            }
             default:
               throw new Error(
                 `unexpected client-to-server frame type ${frame.type}`,

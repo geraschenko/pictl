@@ -13,6 +13,11 @@ export const ERASE_SCREEN = "\x1b[2J";
 export const SAVE_CURSOR = "\x1b7";
 export const RESTORE_CURSOR = "\x1b8";
 
+/** CUP with 1-based coordinates. */
+export function cursorTo(row: number, col: number): string {
+  return `\x1b[${row};${col}H`;
+}
+
 export function cursorToRow(row: number): string {
-  return `\x1b[${row};1H`;
+  return cursorTo(row, 1);
 }
