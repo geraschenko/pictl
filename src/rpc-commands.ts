@@ -75,6 +75,7 @@ const THINKING_LEVELS = [
   "xhigh",
 ] as const;
 
+// TDC: does it make sense to use the type directly from packages/ai/src/types.ts of the pi repo?
 type ImageContent = NonNullable<
   Extract<RpcCommand, { type: "prompt" }>["images"]
 >[number];
