@@ -175,7 +175,7 @@ const RPC_CLI_SPECS: Record<string, RpcCliSpec> = {
     positionals: [],
     flagsUsage: "[--instructions <text>]",
     summary: "compact the session context",
-    options: { instructions: { type: "string" } },
+    options: { instructions: { type: "string" } }, // TDC: let's name this "custom-instructions" so that users familiar with the rpc command fields know exactly what it is. Audit the other flag names and make sure they agree with pi's RpcCommand field names.
     build: (_positionals, values) => ({
       type: "compact",
       ...(typeof values.instructions === "string" && {

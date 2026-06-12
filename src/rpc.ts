@@ -221,6 +221,7 @@ export async function connectWithRetry(
   }
 }
 
+// TDC: Do we still need this? I guess we do ...
 /**
  * Free function rather than a PiSocketClient method to keep the client purely
  * transport-level: phase 3 adds a module mapping all CLI subcommands to typed
