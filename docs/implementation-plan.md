@@ -252,6 +252,12 @@ Decisions below were resolved with the user and are folded into the phase 3 deli
 - Implementation: `RpcCliSpec` gained an optional `afterResponse(client, values)` hook, run by the generic runner after printing the response on the same connection; prompt is its only user. The spec table remains the single place to touch for surface changes.
 - Verified live: `prompt --wait; get-last-assistant-text` returns the prompted reply; `echo ... | prompt - --wait` round-trips; `--streaming-behavior follow-up --wait` during a long streaming turn returns only after both turns end with the follow-up's answer.
 
+### 2026-06-12: phase 3 end-to-end verification run (per the verification pause; awaiting user sign-off)
+
+- Drove a conversation entirely from a second terminal: spawn → `prompt --wait` ("remember codeword") → `tail`, persist the cursor record → second `prompt --wait` → `tail --since <cursor>` returned exactly the two new message entries (user question + "heliotrope" answer) → `pi-ctl compact` + `wait --until quiescent` → `tail --since <pre-compaction cursor>` exited 0 and returned exactly the new `compaction` entry — pre-compaction cursors survive compaction (compaction adds an entry; it does not replace the session) — → post-compaction prompt still recalls the codeword from the compaction summary.
+- Bug found and fixed by the run: one-shot `tail`'s cursor record sometimes carried `sessionId: null` — `drainEntries` took a sessionId _snapshot_ taken before the per-connection `session_changed` had been dispatched. It now takes the shared state and reads the sessionId after the response resolves (pi sends `session_changed` before any response on the connection, so FIFO order guarantees it is set by then).
+- Phase 3 deliverables are all implemented (steps 1–6 above). Remaining for the user: review + the sign-off pause; the workflow `state.json` format (step 2) still needs explicit approval.
+
 ## Open questions (resolve with the user before or during the relevant phase)
 
 1. **Type imports** (phase 1) — RESOLVED: local-path dependency on the fork's `packages/coding-agent` (see Prerequisites). The package index exports everything needed; the fork's `dist/` must be built.

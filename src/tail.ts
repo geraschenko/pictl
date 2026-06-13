@@ -66,15 +66,28 @@ function printCursorRecord(
   );
 }
 
+interface FollowState {
+  sessionId: string | undefined;
+  /** The session was replaced; the cursor belongs to the old session. */
+  resyncNeeded: boolean;
+  wakeArrived: boolean;
+  notifyWake: (() => void) | undefined;
+}
+
 /**
  * Fetch entries after `cursor`, print them, and return the advanced cursor
  * (unchanged when nothing new). The cursor is the last printed entry's id —
  * file order — not the response's leafId, which tree navigation can move
  * backwards onto an already-printed entry.
+ *
+ * Takes the state rather than a sessionId snapshot: the per-connection
+ * session_changed event may still be in flight when the drain starts, but pi
+ * sends it before any response, so by the time the response resolves the
+ * state carries the session id.
  */
 async function drainEntries(
   client: PiSocketClient,
-  sessionId: string | undefined,
+  state: FollowState,
   cursor: string | undefined,
 ): Promise<string | undefined> {
   let response;
@@ -100,7 +113,7 @@ async function drainEntries(
     console.log(JSON.stringify(entry));
   }
   const lastEntryId = entries[entries.length - 1]!.id;
-  printCursorRecord(sessionId, lastEntryId);
+  printCursorRecord(state.sessionId, lastEntryId);
   return lastEntryId;
 }
 
@@ -112,14 +125,6 @@ async function streamEvents(socketPath: string): Promise<void> {
   );
   await client.waitClosed();
   throw new Error("pi socket closed");
-}
-
-interface FollowState {
-  sessionId: string | undefined;
-  /** The session was replaced; the cursor belongs to the old session. */
-  resyncNeeded: boolean;
-  wakeArrived: boolean;
-  notifyWake: (() => void) | undefined;
 }
 
 function handleFollowEvent(state: FollowState, event: SocketEvent): void {
@@ -202,7 +207,7 @@ export async function runTail(argv: string[]): Promise<void> {
     (event) => handleFollowEvent(state, event),
   );
   try {
-    let cursor = await drainEntries(client, state.sessionId, parsed.values.since);
+    let cursor = await drainEntries(client, state, parsed.values.since);
     if (cursor === undefined || cursor === parsed.values.since) {
       // Nothing printed yet; emit the cursor record the caller persists.
       printCursorRecord(state.sessionId, cursor ?? null);
@@ -219,11 +224,11 @@ export async function runTail(argv: string[]): Promise<void> {
       }
       if (state.resyncNeeded) {
         state.resyncNeeded = false;
-        cursor = await resyncToSessionTip(client, state.sessionId);
+        cursor = await resyncToSessionTip(client, state);
         continue;
       }
       try {
-        cursor = await drainEntries(client, state.sessionId, cursor);
+        cursor = await drainEntries(client, state, cursor);
       } catch (error) {
         // A drain can race the session_changed broadcast: the cursor belongs
         // to the replaced session and pi reports it unknown. Resync instead
@@ -250,12 +255,12 @@ export async function runTail(argv: string[]): Promise<void> {
  */
 async function resyncToSessionTip(
   client: PiSocketClient,
-  sessionId: string | undefined,
+  state: FollowState,
 ): Promise<string | undefined> {
   const response = await client.request({ type: "get_entries" });
   const entries = entriesFrom(response);
   const lastEntryId =
     entries.length === 0 ? undefined : entries[entries.length - 1]!.id;
-  printCursorRecord(sessionId, lastEntryId ?? null);
+  printCursorRecord(state.sessionId, lastEntryId ?? null);
   return lastEntryId;
 }
