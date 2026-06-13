@@ -9,6 +9,12 @@ import { closeSync, writeSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { parseArgs } from "node:util";
 import { SerializeAddon } from "@xterm/addon-serialize";
+import {
+  getAgentDir,
+  hasProjectTrustInputs,
+  ProjectTrustStore,
+  SettingsManager,
+} from "@earendil-works/pi-coding-agent";
 import xterm from "@xterm/headless";
 import pty from "node-pty";
 import { cursorTo, cursorToRow, HIDE_CURSOR, SHOW_CURSOR } from "./ansi.ts";
@@ -39,6 +45,7 @@ interface HoldArgs {
   cwd: string;
   piBin: string;
   resume: boolean;
+  tag: string | undefined;
   readyFd: number | undefined;
   piArgs: string[];
 }
@@ -53,6 +60,7 @@ function parseHoldArgs(argv: string[]): HoldArgs {
       cwd: { type: "string" },
       "pi-bin": { type: "string" },
       resume: { type: "boolean", default: false },
+      tag: { type: "string" },
       "ready-fd": { type: "string" },
     },
   });
@@ -70,6 +78,7 @@ function parseHoldArgs(argv: string[]): HoldArgs {
     cwd: values.cwd,
     piBin: values["pi-bin"],
     resume: values.resume ?? false,
+    tag: values.tag,
     readyFd:
       values["ready-fd"] === undefined ? undefined : Number(values["ready-fd"]),
     piArgs: passthroughArgs,
@@ -162,29 +171,36 @@ function isSessionChangedEvent(
   return event.type === "session_changed";
 }
 
-class TrustPromptError extends Error {}
+/** pi flags that decide trust without prompting (`--approve`/`--no-approve`). */
+const TRUST_OVERRIDE_FLAGS = new Set([
+  "--approve",
+  "-a",
+  "--no-approve",
+  "-na",
+]);
 
 /**
- * Detects pi's project-trust dialog in raw PTY output. pi blocks on it before
- * binding pi.sock (cwd has `.pi` inputs, no stored trust decision), so without
- * detection a spawn or revival sits out the full connect deadline. The phrase
- * (from pi's `formatProjectTrustPrompt`) travels contiguously in the stream —
- * ANSI styling wraps it but does not split it — so scanning chunks with a
- * phrase-sized overlap suffices. If pi's wording changes, detection degrades
- * to the connect deadline.
+ * Whether interactive pi would block on its "Trust project folder?" dialog in
+ * this cwd — determined the same way pi does (`resolveProjectTrusted`), so a
+ * spawn or revival that would otherwise hang until the connect deadline fails
+ * fast instead. pi prompts only when the cwd has trust inputs, no trust flag
+ * was passed, no decision is stored, and the global default is "ask"; any
+ * other case proceeds (trusted or pi exits on its own) and is not our concern.
  */
-// TDC: this is pretty icky. We should consider using pi's resolveProjectTrusted directly, or maybe there's some way to run pi and determine if it trusts the project. Regardless, it's important that we not crash just because this string exists _somewhere_ in the stream.
-export function makeTrustPromptScanner(): (chunk: string) => boolean {
-  const phrase = "Trust project folder?";
-  let overlapTail = "";
-  return (chunk: string): boolean => {
-    const window = overlapTail + chunk;
-    if (window.includes(phrase)) {
-      return true;
-    }
-    overlapTail = window.slice(-(phrase.length - 1));
+export function projectTrustWouldBlock(cwd: string, piArgs: string[]): boolean {
+  if (piArgs.some((arg) => TRUST_OVERRIDE_FLAGS.has(arg))) {
     return false;
-  };
+  }
+  if (!hasProjectTrustInputs(cwd)) {
+    return false;
+  }
+  const agentDir = getAgentDir();
+  if (new ProjectTrustStore(agentDir).get(cwd) !== null) {
+    return false;
+  }
+  return (
+    SettingsManager.create(cwd, agentDir).getDefaultProjectTrust() === "ask"
+  );
 }
 
 export async function runHold(argv: string[]): Promise<void> {
@@ -197,6 +213,20 @@ export async function runHold(argv: string[]): Promise<void> {
       ? existing.record.createdAt
       : new Date().toISOString();
   const sessions = existing.kind === "ok" ? existing.record.sessions : [];
+  // First spawn carries --tag; revival preserves whatever was recorded.
+  const tag = existing.kind === "ok" ? existing.record.tag : args.tag;
+
+  // pi would sit on its interactive trust dialog forever in a headless PTY;
+  // detect that deterministically and fail fast instead of hanging.
+  if (projectTrustWouldBlock(args.cwd, args.piArgs)) {
+    const message =
+      `pi would block on the project-trust prompt in ${args.cwd}; ` +
+      `pass --approve (pi-ctl spawn -- --approve) or trust the directory ` +
+      `once interactively (run pi there and choose Trust)`;
+    console.error(`[holder] ${message}`);
+    signalReady(args.readyFd, { ok: false, error: message });
+    return;
+  }
 
   // A SIGKILLed predecessor leaves stale socket files behind, and pi refuses
   // to bind an existing path. Launchers guarantee no live holder for this dir.
@@ -256,37 +286,22 @@ export async function runHold(argv: string[]): Promise<void> {
     },
   });
 
-  const scanForTrustPrompt = makeTrustPromptScanner();
-  let watchingStartup = true;
-  let reportTrustPrompt: (() => void) | undefined;
-  const trustPromptSeen = new Promise<never>((_, reject) => {
-    reportTrustPrompt = () =>
-      reject(
-        // TDC: if --approve was already included and the string appears for an unrelated reason, connecting to the agent becomes impossible.
-        new TrustPromptError(
-          `pi is waiting for project-trust approval in ${args.cwd}; give pi --approve (pi-ctl spawn -- --approve) or run pi in that directory once and choose Trust`,
-        ),
-      );
-  });
-
   piProcess.onData((data) => {
     terminal.write(data);
     ttyServer.broadcastOutput(data);
-    if (watchingStartup && scanForTrustPrompt(data)) {
-      watchingStartup = false;
-      reportTrustPrompt?.();
-    }
   });
 
   const record: AgentRecord = {
     id: agentId,
     createdAt,
     cwd: args.cwd,
+    ...(tag !== undefined && { tag }),
     piBin: args.piBin,
     spawnArgs: args.piArgs,
     holderPid: process.pid,
     piPid: piProcess.pid,
     sessions,
+    agentDir,
   };
   await writeAgentRecord(agentDir, record);
 
@@ -355,18 +370,16 @@ export async function runHold(argv: string[]): Promise<void> {
   };
 
   try {
-    await Promise.race([
-      connectWithRetry(piSocketPath(agentDir), RPC_CONNECT_DEADLINE_MS, handleEvent),
-      trustPromptSeen,  // TDC: I propose looking for the trust prompt *and* a delay of 100ms (or whatever the appropriate time is).
-    ]);
-    watchingStartup = false;
+    await connectWithRetry(
+      piSocketPath(agentDir),
+      RPC_CONNECT_DEADLINE_MS,
+      handleEvent,
+    );
     signalReady(args.readyFd, { ok: true });
   } catch (error) {
-    const reason =
-      error instanceof TrustPromptError
-        ? error.message
-        : `could not connect to pi socket: ${String(error)}`;
-    const message = `${reason} (log: ${holderLogPath(agentDir)})`;
+    const message =
+      `could not connect to pi socket: ${String(error)} ` +
+      `(log: ${holderLogPath(agentDir)})`;
     console.error(`[holder] ${message}`);
     signalReady(args.readyFd, { ok: false, error: message });
     piProcess.kill("SIGKILL");

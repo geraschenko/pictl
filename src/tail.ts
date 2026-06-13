@@ -1,10 +1,10 @@
 /**
- * `pi-ctl tail <agent> [--follow] [--since <entry-id>] [--events]` — session
- * entries as JSONL on stdout, one entry per line, followed by a
- * `{"type":"pi_ctl_cursor","sessionId":...,"entryId":...}` record so callers
- * can persist their place (cursors are session-scoped: persist the sessionId
- * alongside, and expect "entry not found" after `/new`, `/resume`, fork, or
- * clone — pi-ctl does not interweave session files).
+ * `pi-ctl tail <agent> [--follow] [--since <entry-id>] [--until <cond>]
+ * [--events]` — session entries as JSONL on stdout, one entry per line,
+ * followed by a `{"type":"pi_ctl_cursor","sessionId":...,"entryId":...}` record
+ * so callers can persist their place (cursors are session-scoped: persist the
+ * sessionId alongside, and expect "entry not found" after `/new`, `/resume`,
+ * fork, or clone — pi-ctl does not interweave session files).
  *
  * --follow keeps the connection open and streams subsequent entries. Events
  * are only wakeups: every drain re-issues `get_entries --since <cursor>`, so
@@ -13,13 +13,17 @@
  * by a fresh cursor record) and only entries created after the replacement
  * stream out.
  *
+ * --until <cond> follows until a wait condition holds (turn-end|idle|
+ * no-activity:<secs>), then drains any trailing entries and exits 0. It implies
+ * --follow and is incompatible with --events.
+ *
  * --events instead streams the raw broadcast events as JSONL (implies
  * following; entry draining and --since do not apply).
  */
 
 import { parseArgs } from "node:util";
 import type { RpcResponse } from "@earendil-works/pi-coding-agent";
-import { ensureAgentRunning, loadAgent } from "./lifecycle.ts";
+import { ensureAgentRunning } from "./lifecycle.ts";
 import { piSocketPath } from "./registry.ts";
 import {
   connectWithRetry,
@@ -27,6 +31,11 @@ import {
   type SocketEvent,
 } from "./rpc.ts";
 import { UsageError } from "./util.ts";
+import {
+  applyWaitCondition,
+  parseWaitCondition,
+  WAIT_UNTIL_USAGE,
+} from "./wait.ts";
 
 const SOCKET_CONNECT_DEADLINE_MS = 5_000;
 
@@ -72,6 +81,10 @@ interface FollowState {
   resyncNeeded: boolean;
   wakeArrived: boolean;
   notifyWake: (() => void) | undefined;
+  /** A `--until` condition resolved; drain trailing entries and stop. */
+  stopRequested: boolean;
+  /** The `--until` wait rejected (e.g. socket closed); rethrow after the loop. */
+  stopError: Error | undefined;
 }
 
 /**
@@ -147,7 +160,7 @@ function handleFollowEvent(state: FollowState, event: SocketEvent): void {
 }
 
 function nextWake(state: FollowState, client: PiSocketClient): Promise<void> {
-  if (state.wakeArrived) {
+  if (state.wakeArrived || state.stopRequested) {
     return Promise.resolve();
   }
   return new Promise((resolve) => {
@@ -158,7 +171,12 @@ function nextWake(state: FollowState, client: PiSocketClient): Promise<void> {
 
 export async function runTail(argv: string[]): Promise<void> {
   let parsed: {
-    values: { follow?: boolean; since?: string; events?: boolean };
+    values: {
+      follow?: boolean;
+      since?: string;
+      until?: string;
+      events?: boolean;
+    };
     positionals: string[];
   };
   try {
@@ -168,6 +186,7 @@ export async function runTail(argv: string[]): Promise<void> {
       options: {
         follow: { type: "boolean" },
         since: { type: "string" },
+        until: { type: "string" },
         events: { type: "boolean" },
       },
     });
@@ -178,16 +197,23 @@ export async function runTail(argv: string[]): Promise<void> {
   }
   if (parsed.positionals.length !== 1) {
     throw new UsageError(
-      "usage: pi-ctl tail <agent> [--follow] [--since <entry-id>] [--events]",
+      `usage: pi-ctl tail <agent> [--follow] [--since <entry-id>] [--until ${WAIT_UNTIL_USAGE}] [--events]`,
     );
   }
   if (parsed.values.events && parsed.values.since !== undefined) {
     throw new UsageError("--events streams raw events; --since does not apply");
   }
+  if (parsed.values.events && parsed.values.until !== undefined) {
+    throw new UsageError("--events streams raw events; --until does not apply");
+  }
+  // --until implies --follow: it only makes sense while streaming.
+  const stopCondition =
+    parsed.values.until === undefined
+      ? undefined
+      : parseWaitCondition(parsed.values.until);
+  const follow = parsed.values.follow === true || stopCondition !== undefined;
 
-  const agent = await ensureAgentRunning(
-    await loadAgent(parsed.positionals[0]!),
-  );
+  const agent = await ensureAgentRunning(parsed.positionals[0]!);
   const socketPath = piSocketPath(agent.agentDir);
 
   if (parsed.values.events) {
@@ -200,6 +226,8 @@ export async function runTail(argv: string[]): Promise<void> {
     resyncNeeded: false,
     wakeArrived: false,
     notifyWake: undefined,
+    stopRequested: false,
+    stopError: undefined,
   };
   const client = await connectWithRetry(
     socketPath,
@@ -212,13 +240,32 @@ export async function runTail(argv: string[]): Promise<void> {
       // Nothing printed yet; emit the cursor record the caller persists.
       printCursorRecord(state.sessionId, cursor ?? null);
     }
-    if (!parsed.values.follow) {
+    if (!follow) {
       return;
+    }
+    if (stopCondition !== undefined) {
+      // Run the stop condition alongside the drain loop. When it resolves we
+      // wake the loop, which breaks after a final drain of trailing entries.
+      void applyWaitCondition(client, stopCondition, undefined).then(
+        () => {
+          state.stopRequested = true;
+          state.notifyWake?.();
+        },
+        (error: unknown) => {
+          state.stopError =
+            error instanceof Error ? error : new Error(String(error));
+          state.stopRequested = true;
+          state.notifyWake?.();
+        },
+      );
     }
     while (true) {
       state.wakeArrived = false;
       state.notifyWake = undefined;
       await nextWake(state, client);
+      if (state.stopRequested) {
+        break;
+      }
       if (client.isClosed) {
         throw new Error("pi socket closed");
       }
@@ -240,6 +287,21 @@ export async function runTail(argv: string[]): Promise<void> {
           state.resyncNeeded = true;
           continue;
         }
+        throw error;
+      }
+    }
+    if (state.stopError !== undefined) {
+      throw state.stopError;
+    }
+    // The agent_end that satisfied the condition may have produced entries the
+    // loop has not drained yet. Best-effort final drain; a session swap racing
+    // the stop leaves nothing for us to print, so ignore a stale cursor.
+    try {
+      await drainEntries(client, state, cursor);
+    } catch (error) {
+      if (
+        !(error instanceof Error && error.message.includes("Entry not found"))
+      ) {
         throw error;
       }
     }

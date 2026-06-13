@@ -16,7 +16,7 @@ import {
   SAVE_CURSOR,
   SHOW_CURSOR,
 } from "./ansi.ts";
-import { ensureAgentRunning, loadAgent } from "./lifecycle.ts";
+import { ensureAgentRunning } from "./lifecycle.ts";
 import { ttySocketPath } from "./registry.ts";
 import {
   encodeFrame,
@@ -61,9 +61,7 @@ export async function runAttach(argv: string[]): Promise<void> {
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
     throw new Error("attach requires stdin and stdout to be a terminal");
   }
-  const { agentId, agentDir } = await ensureAgentRunning(
-    await loadAgent(positionals[0]!),
-  );
+  const { id: agentId, agentDir } = await ensureAgentRunning(positionals[0]!);
 
   const socket = await connectToTty(ttySocketPath(agentDir), agentId);
   process.stdin.setRawMode(true);

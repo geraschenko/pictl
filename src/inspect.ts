@@ -4,16 +4,18 @@
  */
 
 import { rm } from "node:fs/promises";
+import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import type { RpcSessionState } from "@earendil-works/pi-coding-agent";
 import {
   type AgentRecord,
   agentDirPath,
+  archivedPath,
   isPidAlive,
   listAgentIds,
   piSocketPath,
   readAgentRecord,
-  resolveAgentAddress,
+  resolveAgentId,
   tombstonePath,
 } from "./registry.ts";
 import { connectWithRetry, getState } from "./rpc.ts";
@@ -25,6 +27,7 @@ export type AgentStatus =
   | "idle"
   | "streaming"
   | "dormant"
+  | "archived"
   | "tombstoned"
   | "corrupt"
   | "unreachable";
@@ -52,7 +55,10 @@ export async function probeAgent(agentId: string): Promise<AgentProbe> {
   }
   const record = read.record;
   if (!isPidAlive(record.holderPid)) {
-    return { agentId, status: "dormant", record };
+    const status = (await fileExists(archivedPath(agentDir)))
+      ? "archived"
+      : "dormant";
+    return { agentId, status, record };
   }
   try {
     const client = await connectWithRetry(
@@ -95,10 +101,23 @@ function formatTable(rows: string[][]): string {
 export async function runList(argv: string[]): Promise<void> {
   const { values } = parseArgs({
     args: argv,
-    options: { json: { type: "boolean", default: false } },
+    options: {
+      json: { type: "boolean", default: false },
+      all: { type: "boolean", default: false },
+      cwd: { type: "string" },
+    },
   });
+  const cwdFilter = values.cwd === undefined ? undefined : resolve(values.cwd);
   const agentIds = await listAgentIds();
-  const probes = await Promise.all(agentIds.map(probeAgent));
+  let probes = await Promise.all(agentIds.map(probeAgent));
+  // Archived agents are kept but hidden unless asked for; --cwd matches the
+  // agent's recorded working directory exactly (resolved).
+  if (!values.all) {
+    probes = probes.filter((probe) => probe.status !== "archived");
+  }
+  if (cwdFilter !== undefined) {
+    probes = probes.filter((probe) => probe.record?.cwd === cwdFilter);
+  }
   probes.sort((a, b) =>
     (a.record?.createdAt ?? "").localeCompare(b.record?.createdAt ?? ""),
   );
@@ -111,10 +130,11 @@ export async function runList(argv: string[]): Promise<void> {
     console.log("no agents");
     return;
   }
-  const rows = [["ID", "STATUS", "CWD", "CREATED"]];
+  const rows = [["ID", "TAG", "STATUS", "CWD", "CREATED"]];
   for (const probe of probes) {
     rows.push([
       probe.agentId.slice(0, 8),
+      probe.record?.tag ?? "-",
       probe.status,
       probe.record?.cwd ?? "-",
       probe.record?.createdAt ?? "-",
@@ -129,6 +149,9 @@ function printProbe(probe: AgentProbe): void {
     `status:   ${probe.status}${probe.error ? ` (${probe.error})` : ""}`,
   );
   if (probe.record) {
+    if (probe.record.tag !== undefined) {
+      console.log(`tag:      ${probe.record.tag}`);
+    }
     console.log(`cwd:      ${probe.record.cwd}`);
     console.log(`created:  ${probe.record.createdAt}`);
     console.log(`pi bin:   ${probe.record.piBin}`);
@@ -165,7 +188,7 @@ export async function runStatus(argv: string[]): Promise<void> {
     throw new Error("expected at least one agent id");
   }
   const agentIds = await Promise.all(
-    positionals.map((address) => resolveAgentAddress(address)),
+    positionals.map((address) => resolveAgentId(address)),
   );
   const probes = await Promise.all(agentIds.map(probeAgent));
 

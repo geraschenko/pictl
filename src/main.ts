@@ -2,12 +2,12 @@
 import { DETACH_KEY_NAME, runAttach } from "./attach.ts";
 import { runHold } from "./holder.ts";
 import { runGc, runList, runStatus } from "./inspect.ts";
-import { runKill, runResume, runSuspend } from "./lifecycle.ts";
+import { runArchive, runPurge, runResume, runSuspend } from "./lifecycle.ts";
 import { rpcCommandHandlers, rpcCommandUsage } from "./rpc-commands.ts";
 import { runSpawn } from "./spawn.ts";
 import { runTail } from "./tail.ts";
 import { UsageError } from "./util.ts";
-import { runWait, WaitTimeoutError } from "./wait.ts";
+import { runWait, WAIT_UNTIL_USAGE, WaitTimeoutError } from "./wait.ts";
 
 const COMMANDS: Record<string, (argv: string[]) => Promise<void>> = {
   spawn: runSpawn,
@@ -15,9 +15,10 @@ const COMMANDS: Record<string, (argv: string[]) => Promise<void>> = {
   attach: runAttach,
   list: runList,
   status: runStatus,
-  kill: runKill,
   suspend: runSuspend,
+  archive: runArchive,
   resume: runResume,
+  purge: runPurge,
   gc: runGc,
   wait: runWait,
   tail: runTail,
@@ -28,27 +29,29 @@ function usage(): never {
   console.error(`usage: pi-ctl <command> [args]
 
 commands:
-  spawn [--cwd <dir>] [--id <id>] [-- <pi args...>]     start a new agent, print its id
+  spawn [--cwd <dir>] [--id <id>] [--tag <label>] [-- <pi args...>]  start an agent, print its id
   attach <agent>                                        attach this terminal (detach: ${DETACH_KEY_NAME})
-  list [--json]                                         list agents and their status
+  list [--cwd <dir>] [--all] [--json]                   list agents and their status
   status <agent>... [--json]                            detailed status of agents
-  kill <agent>... [--timeout <secs>] [--now] [--force]  wait for quiescence, then kill and remove
   suspend <agent>... [--timeout <secs>]                 wait for quiescence, then stop (agent goes dormant)
+  archive <agent>... [--timeout <secs>]                 suspend, then hide from list (until resumed)
   resume <agent>...                                     revive dormant agents on their last sessions
+  purge <agent>... [--timeout <secs>] [--now] [--force] wait for quiescence, then delete permanently
   gc                                                    remove tombstoned or corrupt agent dirs
-  wait <agent> --until turn-end|quiescent|idle:<secs> [--timeout <secs>]
+  wait <agent> --until ${WAIT_UNTIL_USAGE} [--timeout <secs>]
                                                         block until the agent meets the condition
                                                         (exit 3 if --timeout expires first)
-  tail <agent> [--follow] [--since <entry-id>]          session entries as JSONL, then a cursor
+  tail <agent> [--follow] [--since <entry-id>] [--until <cond>]
+                                                        session entries as JSONL, then a cursor
                                                         record; --follow streams new entries,
+                                                        --until <cond> follows until the condition,
                                                         --events streams raw events instead
 
 RPC passthrough (sent to the agent's pi process; --json prints the raw response):
 ${rpcCommandUsage()}
 
-<agent> accepts an agent id, a session id (unique prefixes work for both), or a
-workflow role name when $PI_WORKFLOW_DIR is set (RPC commands also accept
---workflow <dir>); roles come from the "agents" map in <dir>/state.json.`);
+<agent> accepts an agent id (unique prefixes work). Use --tag at spawn time and
+list --cwd <dir> to find agents working in a shared directory.`);
   process.exit(2);
 }
 

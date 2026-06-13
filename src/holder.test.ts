@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 import xterm from "@xterm/headless";
-import { hintRoomSequence, makeTrustPromptScanner } from "./holder.ts";
+import { hintRoomSequence, projectTrustWouldBlock } from "./holder.ts";
 
 function makeTerminal(): xterm.Terminal {
   return new xterm.Terminal({ cols: 80, rows: 10, allowProposedApi: true });
@@ -40,19 +43,18 @@ test("hintRoomSequence scrolls one line and re-parks the cursor when content rea
   assert.equal(buffer.cursorX, 7);
 });
 
-test("trust prompt scanner matches the phrase within a styled chunk", () => {
-  const scan = makeTrustPromptScanner();
-  assert.equal(scan("\x1b[1mTrust project folder?\x1b[22m"), true);
+test("projectTrustWouldBlock short-circuits when an approve flag is present", () => {
+  // Returns before consulting trust inputs, so the cwd is irrelevant.
+  assert.equal(projectTrustWouldBlock("/nonexistent", ["--approve"]), false);
+  assert.equal(projectTrustWouldBlock("/nonexistent", ["-a"]), false);
+  assert.equal(projectTrustWouldBlock("/nonexistent", ["--no-approve"]), false);
 });
 
-test("trust prompt scanner matches across chunk boundaries", () => {
-  const scan = makeTrustPromptScanner();
-  assert.equal(scan("...\x1b[1mTrust proj"), false);
-  assert.equal(scan("ect folder?\x1b[22m..."), true);
-});
-
-test("trust prompt scanner ignores unrelated output", () => {
-  const scan = makeTrustPromptScanner();
-  assert.equal(scan("Trust me, this folder is fine"), false);
-  assert.equal(scan("project folder?"), false);
+test("projectTrustWouldBlock is false for a directory with no trust inputs", async () => {
+  const emptyDir = await mkdtemp(join(tmpdir(), "pi-ctl-trust-test-"));
+  try {
+    assert.equal(projectTrustWouldBlock(emptyDir, []), false);
+  } finally {
+    await rm(emptyDir, { recursive: true, force: true });
+  }
 });

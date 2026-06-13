@@ -27,6 +27,8 @@ export interface HolderLaunch {
   piBin: string;
   piArgs: string[];
   resume: boolean;
+  /** Set only on initial spawn; revival preserves the recorded tag. */
+  tag?: string;
 }
 
 function isExecutableFile(path: string): boolean {
@@ -95,6 +97,7 @@ export async function launchHolder(launch: HolderLaunch): Promise<void> {
     launch.piBin,
     "--ready-fd",
     "3",
+    ...(launch.tag !== undefined ? ["--tag", launch.tag] : []),
     ...(launch.resume ? ["--resume"] : []),
     "--",
     ...launch.piArgs,
@@ -142,6 +145,7 @@ export async function runSpawn(argv: string[]): Promise<void> {
     options: {
       cwd: { type: "string" },
       id: { type: "string" },
+      tag: { type: "string" },
     },
   });
 
@@ -162,6 +166,14 @@ export async function runSpawn(argv: string[]): Promise<void> {
 
   // On failure the dir is left in place so holder.log can be inspected;
   // `pi-ctl gc` removes dirs that never got an agent.json.
-  await launchHolder({ agentDir, agentId, cwd, piBin, piArgs, resume: false });
+  await launchHolder({
+    agentDir,
+    agentId,
+    cwd,
+    piBin,
+    piArgs,
+    resume: false,
+    tag: values.tag,
+  });
   console.log(agentId);
 }

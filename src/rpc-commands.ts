@@ -16,14 +16,16 @@ import { readFile } from "node:fs/promises";
 import { extname } from "node:path";
 import { parseArgs } from "node:util";
 import type { RpcCommand, RpcResponse } from "@earendil-works/pi-coding-agent";
-import {
-  ensureAgentRunning,
-  loadAgent,
-  waitQuiescent,
-} from "./lifecycle.ts";
+import { ensureAgentRunning } from "./lifecycle.ts";
 import { piSocketPath } from "./registry.ts";
 import { connectWithRetry, type PiSocketClient } from "./rpc.ts";
 import { UsageError } from "./util.ts";
+import {
+  applyWaitCondition,
+  parseWaitCondition,
+  WAIT_UNTIL_USAGE,
+  type WaitCondition,
+} from "./wait.ts";
 
 const SOCKET_CONNECT_DEADLINE_MS = 5_000;
 
@@ -139,7 +141,8 @@ async function readStdin(): Promise<string> {
   for await (const chunk of process.stdin) {
     data += chunk.toString();
   }
-  // TDC: why are we deleting blank lines here?
+  // Strip a single trailing newline, matching shell `$(...)` capture so
+  // `echo msg | pi-ctl prompt -` sends "msg", not "msg\n".
   return data.replace(/\n$/, "");
 }
 
@@ -147,13 +150,24 @@ function messageFrom(positional: string): string | Promise<string> {
   return positional === "-" ? readStdin() : positional;
 }
 
+/** The wait condition for `prompt --and-wait[-until]`, or undefined for neither. */
+function promptWaitCondition(values: FlagValues): WaitCondition | undefined {
+  const until = values["and-wait-until"];
+  if (typeof until === "string") {
+    return parseWaitCondition(until);
+  }
+  return values["and-wait"] === true ? { kind: "turn-end" } : undefined;
+}
+
 const RPC_CLI_SPECS: Record<string, RpcCliSpec> = {
   prompt: {
     positionals: ["<message|->"],
-    flagsUsage: `[--wait] [--streaming-behavior steer|follow-up] ${IMAGE_FLAG_USAGE}`,
-    summary: "send a prompt (errors while streaming without --streaming-behavior)",
+    flagsUsage: `[--and-wait | --and-wait-until ${WAIT_UNTIL_USAGE}] [--streaming-behavior steer|follow-up] ${IMAGE_FLAG_USAGE}`,
+    summary:
+      "send a prompt (errors while streaming without --streaming-behavior)",
     options: {
-      wait: { type: "boolean" },
+      "and-wait": { type: "boolean" },
+      "and-wait-until": { type: "string" },
       "streaming-behavior": { type: "string" },
       ...IMAGE_OPTION,
     },
@@ -172,35 +186,35 @@ const RPC_CLI_SPECS: Record<string, RpcCliSpec> = {
             : ("followUp" as const),
       }),
     }),
-    // --wait blocks until the prompted turn ends, on this same connection so
-    // it is race-free by construction. waitQuiescent (not "next agent_end")
-    // because a prompt queued behind a streaming turn ends a turn later, and
-    // auto-retry continuations must not count as the end.
+    // --and-wait[-until] blocks until the prompted turn meets the condition, on
+    // this same connection so it is race-free by construction. Default is
+    // turn-end; --and-wait-until takes wait's full vocabulary.
     afterResponse: async (client, values) => {
-      if (values.wait === true) {
-        await waitQuiescent(client, undefined);
+      const condition = promptWaitCondition(values);
+      if (condition !== undefined) {
+        await applyWaitCondition(client, condition, undefined);
       }
     },
   },
   steer: {
-    positionals: ["<message>"],
+    positionals: ["<message|->"],
     flagsUsage: IMAGE_FLAG_USAGE,
     summary: "interject into the current turn",
     options: { ...IMAGE_OPTION },
     build: async ([message], values) => ({
       type: "steer",
-      message: message!,
+      message: await messageFrom(message!),
       ...(await imagesFromFlags(values)),
     }),
   },
   "follow-up": {
-    positionals: ["<message>"],
+    positionals: ["<message|->"],
     flagsUsage: IMAGE_FLAG_USAGE,
     summary: "queue a message for after the current turn",
     options: { ...IMAGE_OPTION },
     build: async ([message], values) => ({
       type: "follow_up",
-      message: message!,
+      message: await messageFrom(message!),
       ...(await imagesFromFlags(values)),
     }),
   },
@@ -458,7 +472,6 @@ async function runRpcCliCommand(
       options: {
         ...(spec.options ?? {}),
         json: { type: "boolean" },
-        workflow: { type: "string" },
       },
     });
   } catch (error) {
@@ -475,14 +488,7 @@ async function runRpcCliCommand(
   }
   const command = await spec.build(commandPositionals, parsed.values);
 
-  const agent = await ensureAgentRunning(
-    await loadAgent(
-      agentAddress,
-      typeof parsed.values.workflow === "string"
-        ? parsed.values.workflow
-        : undefined,
-    ),
-  );
+  const agent = await ensureAgentRunning(agentAddress);
   const client = await connectWithRetry(
     piSocketPath(agent.agentDir),
     SOCKET_CONNECT_DEADLINE_MS,

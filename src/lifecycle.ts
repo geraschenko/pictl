@@ -1,13 +1,14 @@
 /**
- * `pi-ctl kill | suspend | resume` — stopping and reviving agents.
+ * `pi-ctl suspend | archive | purge | resume` — stopping and reviving agents.
  *
- * kill and suspend share the polite path: wait for full quiescence (not
- * streaming AND pending message queue empty), SIGTERM pi, SIGKILL escalation
- * if it lingers. kill additionally tombstones and removes the directory;
- * suspend leaves it, making the agent dormant.
+ * suspend, archive, and purge share the polite path: wait for full quiescence
+ * (not streaming AND pending message queue empty), SIGTERM pi, SIGKILL
+ * escalation if it lingers. suspend leaves the agent dormant; archive also
+ * marks it hidden from `list`; purge tombstones and removes the directory (the
+ * only destructive command). resume revives a dormant or archived agent.
  *
- * All three accept multiple agents; ids are resolved up front (so a typo
- * aborts before anything is touched), then agents are acted on concurrently,
+ * All accept multiple agents; ids are resolved up front (so a typo aborts
+ * before anything is touched), then agents are acted on concurrently,
  * continuing past per-agent failures and reporting them at the end.
  */
 
@@ -15,12 +16,11 @@ import { readFile, rm, writeFile } from "node:fs/promises";
 import { parseArgs } from "node:util";
 import {
   type AgentRecord,
-  agentDirPath,
+  archivedPath,
   holderLogPath,
   isPidAlive,
+  loadAgent,
   piSocketPath,
-  readAgentRecord,
-  resolveAgentAddress,
   reviveLockPath,
   tombstonePath,
 } from "./registry.ts";
@@ -31,32 +31,17 @@ const SOCKET_CONNECT_DEADLINE_MS = 5_000;
 const SIGKILL_ESCALATION_MS = 5_000;
 const PROCESS_EXIT_DEADLINE_MS = 10_000;
 
-export interface LoadedAgent {
-  agentId: string;
-  agentDir: string;
-  record: AgentRecord;
-}
-
-// TDC: why does LoadedAgent exist in the first place? It's confusing that the agent id is duplicated. Can we change AgentRecord to include the agentDir, but make it so that it's not written as part of writeAgentRecord (since it's already encoded in the path itself) and the field is populated on read? Then AgentRecord can replace LoadedAgent everywhere. I think this makes the types clearer. What do you think? Also, doesn't it make sense for this function to be in registry.ts instead?
-export async function loadAgent(
-  address: string,
-  workflowDir?: string,  // TDC: yeah, I don't like this arg at all. Let's discuss alternatives.
-): Promise<LoadedAgent> {
-  const agentId = await resolveAgentAddress(address, workflowDir);
-  const agentDir = agentDirPath(agentId);
-  const read = await readAgentRecord(agentDir);
-  if (read.kind !== "ok") {
-    throw new Error(
-      read.kind === "missing"
-        ? `agent '${agentId}' has no agent.json (failed spawn?); run \`pi-ctl gc\``
-        : `agent '${agentId}' has a corrupt agent.json: ${read.error}; run \`pi-ctl gc\``,
-    );
-  }
-  return { agentId, agentDir, record: read.record };
-}
-
 const REVIVAL_WAIT_DEADLINE_MS = 10_000;
 const REVIVAL_LOCK_POLL_MS = 100;
+
+/** Set or clear an agent's archived marker (see registry.archivedPath). */
+async function setArchived(agentDir: string, archived: boolean): Promise<void> {
+  if (archived) {
+    await writeFile(archivedPath(agentDir), `${new Date().toISOString()}\n`);
+  } else {
+    await rm(archivedPath(agentDir), { force: true });
+  }
+}
 
 /**
  * Revive `agent` via launchHolder, serialized through an O_EXCL lock file.
@@ -67,7 +52,7 @@ const REVIVAL_LOCK_POLL_MS = 100;
  * barrier. As with waitPidGone, there is no cross-process event channel for
  * "the lock file went away", so the loser polls.
  */
-async function reviveAgent(agent: LoadedAgent): Promise<LoadedAgent> {
+async function reviveAgent(agent: AgentRecord): Promise<AgentRecord> {
   const lockPath = reviveLockPath(agent.agentDir);
   try {
     await writeFile(lockPath, `${process.pid}\n`, { flag: "wx" });
@@ -81,30 +66,32 @@ async function reviveAgent(agent: LoadedAgent): Promise<LoadedAgent> {
   try {
     // Re-read under the lock: another process may have completed a revival
     // between our dormancy check and the lock acquisition.
-    // TDC: wouldn't it be clearer to overwrite the `agent` variable here. "fresh" is a confusing name, even if it is limited in scope.
-    const fresh = await loadAgent(agent.agentId);
-    if (isPidAlive(fresh.record.holderPid)) {
-      return fresh;
+    agent = await loadAgent(agent.id);
+    if (isPidAlive(agent.holderPid)) {
+      return agent;
     }
-    process.stderr.write(`pi-ctl: reviving dormant agent ${agent.agentId}\n`);
+    process.stderr.write(`pi-ctl: reviving dormant agent ${agent.id}\n`);
+    // Reviving an archived agent — including implicitly, by sending it a
+    // command — un-archives it.
+    await setArchived(agent.agentDir, false);
     await launchHolder({
-      agentDir: fresh.agentDir,
-      agentId: fresh.agentId,
-      cwd: fresh.record.cwd,
-      piBin: fresh.record.piBin,
-      piArgs: fresh.record.spawnArgs,
+      agentDir: agent.agentDir,
+      agentId: agent.id,
+      cwd: agent.cwd,
+      piBin: agent.piBin,
+      piArgs: agent.spawnArgs,
       resume: true,
     });
-    return await loadAgent(agent.agentId);
+    return await loadAgent(agent.id);
   } finally {
     await rm(lockPath, { force: true });
   }
 }
 
 async function awaitConcurrentRevival(
-  agent: LoadedAgent,
+  agent: AgentRecord,
   lockPath: string,
-): Promise<LoadedAgent> {
+): Promise<AgentRecord> {
   const deadline = Date.now() + REVIVAL_WAIT_DEADLINE_MS;
   while (true) {
     let lockContent: string;
@@ -119,35 +106,34 @@ async function awaitConcurrentRevival(
     const lockHolderPid = Number(lockContent.trim());
     if (lockHolderPid > 0 && !isPidAlive(lockHolderPid)) {
       throw new Error(
-        `stale revival lock for '${agent.agentId}' (process ${lockHolderPid} is gone); remove ${lockPath} and retry`,
+        `stale revival lock for '${agent.id}' (process ${lockHolderPid} is gone); remove ${lockPath} and retry`,
       );
     }
     if (Date.now() > deadline) {
       throw new Error(
-        `timed out waiting for a concurrent revival of '${agent.agentId}' (lock: ${lockPath})`,
+        `timed out waiting for a concurrent revival of '${agent.id}' (lock: ${lockPath})`,
       );
     }
     await new Promise((resolve) => setTimeout(resolve, REVIVAL_LOCK_POLL_MS));
   }
-  // TDC: mask `agent` here too?
-  const fresh = await loadAgent(agent.agentId);
-  if (!isPidAlive(fresh.record.holderPid)) {
+  agent = await loadAgent(agent.id);
+  if (!isPidAlive(agent.holderPid)) {
     throw new Error(
-      `concurrent revival of '${agent.agentId}' failed; see ${holderLogPath(fresh.agentDir)}`,
+      `concurrent revival of '${agent.id}' failed; see ${holderLogPath(agent.agentDir)}`,
     );
   }
-  return fresh;
+  return agent;
 }
 
 /**
  * The transparent-revival entry point for commands that need the agent's
  * pi.sock (RPC passthrough, attach). list/status/gc never revive by design.
  */
-// TDC: everywhere we use this function, we have an agentId, not an agent. Why not change this to take agentId instead, or make a convenience wrapper that does so?
 export async function ensureAgentRunning(
-  agent: LoadedAgent,
-): Promise<LoadedAgent> {
-  if (isPidAlive(agent.record.holderPid)) {
+  address: string,
+): Promise<AgentRecord> {
+  const agent = await loadAgent(address);
+  if (isPidAlive(agent.holderPid)) {
     return agent;
   }
   return await reviveAgent(agent);
@@ -305,17 +291,15 @@ function parseStopArgs(
  */
 async function forEachAgent(
   prefixes: string[],
-  action: (agent: LoadedAgent) => Promise<void>,
+  action: (agent: AgentRecord) => Promise<void>,
 ): Promise<void> {
-  const agents = await Promise.all(
-    prefixes.map((prefix) => loadAgent(prefix)),
-  );
+  const agents = await Promise.all(prefixes.map((prefix) => loadAgent(prefix)));
   const failures = await Promise.all(
     agents.map((agent) =>
       action(agent).then(
         () => undefined,
         (error) =>
-          `${agent.agentId}: ${error instanceof Error ? error.message : String(error)}`,
+          `${agent.id}: ${error instanceof Error ? error.message : String(error)}`,
       ),
     ),
   );
@@ -327,7 +311,7 @@ async function forEachAgent(
 
 /** The quiescence-wait → SIGTERM → escalate → holder-gone sequence shared by kill and suspend. */
 async function stopRunningAgent(
-  agent: LoadedAgent,
+  agent: AgentRecord,
   timeoutMs: number | undefined,
   abortFirst: boolean,
 ): Promise<void> {
@@ -340,37 +324,37 @@ async function stopRunningAgent(
       await client.request({ type: "abort" });
     }
     await waitQuiescent(client, timeoutMs);
-    await terminatePi(client, agent.record.piPid);
+    await terminatePi(client, agent.piPid);
   } finally {
     client.close();
   }
-  await waitPidGone(agent.record.holderPid, PROCESS_EXIT_DEADLINE_MS);
+  await waitPidGone(agent.holderPid, PROCESS_EXIT_DEADLINE_MS);
 }
 
-async function killOne(
-  agent: LoadedAgent,
+async function purgeOne(
+  agent: AgentRecord,
   timeoutMs: number | undefined,
   now: boolean,
   force: boolean,
 ): Promise<void> {
   if (force) {
-    killSilently(agent.record.piPid, "SIGKILL");
-    killSilently(agent.record.holderPid, "SIGKILL");
+    killSilently(agent.piPid, "SIGKILL");
+    killSilently(agent.holderPid, "SIGKILL");
     await Promise.all([
-      waitPidGone(agent.record.piPid, PROCESS_EXIT_DEADLINE_MS),
-      waitPidGone(agent.record.holderPid, PROCESS_EXIT_DEADLINE_MS),
+      waitPidGone(agent.piPid, PROCESS_EXIT_DEADLINE_MS),
+      waitPidGone(agent.holderPid, PROCESS_EXIT_DEADLINE_MS),
     ]);
     await rm(agent.agentDir, { recursive: true, force: true });
-    console.log(`killed ${agent.agentId} (forced)`);
+    console.log(`purged ${agent.id} (forced)`);
     return;
   }
 
-  if (isPidAlive(agent.record.holderPid)) {
+  if (isPidAlive(agent.holderPid)) {
     try {
       await stopRunningAgent(agent, timeoutMs, now);
     } catch (error) {
       if (error instanceof QuiescenceTimeoutError) {
-        throw new Error(`still busy after ${timeoutMs! / 1000}s; not killed`);
+        throw new Error(`still busy after ${timeoutMs! / 1000}s; not purged`);
       }
       throw error;
     }
@@ -382,24 +366,24 @@ async function killOne(
     `${new Date().toISOString()}\n`,
   );
   await rm(agent.agentDir, { recursive: true, force: true });
-  console.log(`killed ${agent.agentId}`);
+  console.log(`purged ${agent.id}`);
 }
 
-export async function runKill(argv: string[]): Promise<void> {
+export async function runPurge(argv: string[]): Promise<void> {
   const { agentPrefixes, timeoutMs, flags } = parseStopArgs(argv, {
     now: { type: "boolean" },
     force: { type: "boolean" },
   });
   await forEachAgent(agentPrefixes, (agent) =>
-    killOne(agent, timeoutMs, flags.now ?? false, flags.force ?? false),
+    purgeOne(agent, timeoutMs, flags.now ?? false, flags.force ?? false),
   );
 }
 
 export async function runSuspend(argv: string[]): Promise<void> {
   const { agentPrefixes, timeoutMs } = parseStopArgs(argv, {});
   await forEachAgent(agentPrefixes, async (agent) => {
-    if (!isPidAlive(agent.record.holderPid)) {
-      console.log(`${agent.agentId} is already dormant`);
+    if (!isPidAlive(agent.holderPid)) {
+      console.log(`${agent.id} is already dormant`);
       return;
     }
     try {
@@ -412,7 +396,32 @@ export async function runSuspend(argv: string[]): Promise<void> {
       }
       throw error;
     }
-    console.log(`suspended ${agent.agentId}`);
+    console.log(`suspended ${agent.id}`);
+  });
+}
+
+/**
+ * Stop a running agent (like suspend) and mark it archived so `list` hides it
+ * by default; the record and its sessions are kept and any resume (explicit or
+ * implicit) clears the flag. The deliberate destructive path is `purge`.
+ */
+export async function runArchive(argv: string[]): Promise<void> {
+  const { agentPrefixes, timeoutMs } = parseStopArgs(argv, {});
+  await forEachAgent(agentPrefixes, async (agent) => {
+    if (isPidAlive(agent.holderPid)) {
+      try {
+        await stopRunningAgent(agent, timeoutMs, false);
+      } catch (error) {
+        if (error instanceof QuiescenceTimeoutError) {
+          throw new Error(
+            `still busy after ${timeoutMs! / 1000}s; not archived`,
+          );
+        }
+        throw error;
+      }
+    }
+    await setArchived(agent.agentDir, true);
+    console.log(`archived ${agent.id}`);
   });
 }
 
@@ -426,18 +435,19 @@ export async function runResume(argv: string[]): Promise<void> {
     throw new Error("expected at least one agent id");
   }
   await forEachAgent(positionals, async (agent) => {
-    if (isPidAlive(agent.record.holderPid)) {
-      console.log(`${agent.agentId} is already running`);
+    await setArchived(agent.agentDir, false);
+    if (isPidAlive(agent.holderPid)) {
+      console.log(`${agent.id} is already running`);
       return;
     }
     await launchHolder({
       agentDir: agent.agentDir,
-      agentId: agent.agentId,
-      cwd: agent.record.cwd,
-      piBin: agent.record.piBin,
-      piArgs: agent.record.spawnArgs,
+      agentId: agent.id,
+      cwd: agent.cwd,
+      piBin: agent.piBin,
+      piArgs: agent.spawnArgs,
       resume: true,
     });
-    console.log(`resumed ${agent.agentId}`);
+    console.log(`resumed ${agent.id}`);
   });
 }
