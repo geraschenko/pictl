@@ -37,9 +37,10 @@ export interface LoadedAgent {
   record: AgentRecord;
 }
 
+// TDC: why does LoadedAgent exist in the first place? It's confusing that the agent id is duplicated. Can we change AgentRecord to include the agentDir, but make it so that it's not written as part of writeAgentRecord (since it's already encoded in the path itself) and the field is populated on read? Then AgentRecord can replace LoadedAgent everywhere. I think this makes the types clearer. What do you think? Also, doesn't it make sense for this function to be in registry.ts instead?
 export async function loadAgent(
   address: string,
-  workflowDir?: string,
+  workflowDir?: string,  // TDC: yeah, I don't like this arg at all. Let's discuss alternatives.
 ): Promise<LoadedAgent> {
   const agentId = await resolveAgentAddress(address, workflowDir);
   const agentDir = agentDirPath(agentId);
@@ -54,7 +55,7 @@ export async function loadAgent(
   return { agentId, agentDir, record: read.record };
 }
 
-const REVIVAL_WAIT_DEADLINE_MS = 60_000;
+const REVIVAL_WAIT_DEADLINE_MS = 10_000;
 const REVIVAL_LOCK_POLL_MS = 100;
 
 /**
@@ -80,6 +81,7 @@ async function reviveAgent(agent: LoadedAgent): Promise<LoadedAgent> {
   try {
     // Re-read under the lock: another process may have completed a revival
     // between our dormancy check and the lock acquisition.
+    // TDC: wouldn't it be clearer to overwrite the `agent` variable here. "fresh" is a confusing name, even if it is limited in scope.
     const fresh = await loadAgent(agent.agentId);
     if (isPidAlive(fresh.record.holderPid)) {
       return fresh;
@@ -127,6 +129,7 @@ async function awaitConcurrentRevival(
     }
     await new Promise((resolve) => setTimeout(resolve, REVIVAL_LOCK_POLL_MS));
   }
+  // TDC: mask `agent` here too?
   const fresh = await loadAgent(agent.agentId);
   if (!isPidAlive(fresh.record.holderPid)) {
     throw new Error(
@@ -140,6 +143,7 @@ async function awaitConcurrentRevival(
  * The transparent-revival entry point for commands that need the agent's
  * pi.sock (RPC passthrough, attach). list/status/gc never revive by design.
  */
+// TDC: everywhere we use this function, we have an agentId, not an agent. Why not change this to take agentId instead, or make a convenience wrapper that does so?
 export async function ensureAgentRunning(
   agent: LoadedAgent,
 ): Promise<LoadedAgent> {

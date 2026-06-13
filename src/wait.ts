@@ -41,6 +41,7 @@ function parseUntil(value: string): WaitCondition {
   if (value === "quiescent") {
     return { kind: "quiescent" };
   }
+  // TDC: actually, I kind of like the idea of giving users the ability to have millisecond resolution on this. Does `idle:0.123` work in the current implementation?
   const idleSeconds = /^idle:(\d+)$/.exec(value)?.[1];
   if (idleSeconds !== undefined) {
     return { kind: "idle", idleMs: Number(idleSeconds) * 1000 };

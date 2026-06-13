@@ -187,9 +187,12 @@ export async function resolveAgentAddress(
     }
   }
 
+  // TDC: IIUC, this allows using a unique prefix of the session id to refer to an agent. Why did you add this? I don't think I asked for it.
   // agentId → a matching sessionId (one per agent suffices to identify it).
   const sessionMatches = new Map<string, string>();
   for (const agentId of agentIds) {
+    // TDC: "read" is a terrible variable name here.
+    // TDC: this is really just loadAgent, so why not use that here? I recommend moving loadAgent into this file.
     const read = await readAgentRecord(agentDirPath(agentId));
     if (read.kind !== "ok") {
       continue;

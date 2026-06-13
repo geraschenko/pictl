@@ -133,12 +133,13 @@ async function imagesFromFlags(
   return { images };
 }
 
-/** `prompt -` (and friends) read the message from stdin. */
+/** `prompt -` and friends read the message from stdin. */
 async function readStdin(): Promise<string> {
   let data = "";
   for await (const chunk of process.stdin) {
     data += chunk.toString();
   }
+  // TDC: why are we deleting blank lines here?
   return data.replace(/\n$/, "");
 }
 

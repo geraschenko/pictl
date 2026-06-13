@@ -173,6 +173,7 @@ class TrustPromptError extends Error {}
  * phrase-sized overlap suffices. If pi's wording changes, detection degrades
  * to the connect deadline.
  */
+// TDC: this is pretty icky. We should consider using pi's resolveProjectTrusted directly, or maybe there's some way to run pi and determine if it trusts the project. Regardless, it's important that we not crash just because this string exists _somewhere_ in the stream.
 export function makeTrustPromptScanner(): (chunk: string) => boolean {
   const phrase = "Trust project folder?";
   let overlapTail = "";
@@ -261,6 +262,7 @@ export async function runHold(argv: string[]): Promise<void> {
   const trustPromptSeen = new Promise<never>((_, reject) => {
     reportTrustPrompt = () =>
       reject(
+        // TDC: if --approve was already included and the string appears for an unrelated reason, connecting to the agent becomes impossible.
         new TrustPromptError(
           `pi is waiting for project-trust approval in ${args.cwd}; give pi --approve (pi-ctl spawn -- --approve) or run pi in that directory once and choose Trust`,
         ),
@@ -355,7 +357,7 @@ export async function runHold(argv: string[]): Promise<void> {
   try {
     await Promise.race([
       connectWithRetry(piSocketPath(agentDir), RPC_CONNECT_DEADLINE_MS, handleEvent),
-      trustPromptSeen,
+      trustPromptSeen,  // TDC: I propose looking for the trust prompt *and* a delay of 100ms (or whatever the appropriate time is).
     ]);
     watchingStartup = false;
     signalReady(args.readyFd, { ok: true });

@@ -220,6 +220,8 @@ Decisions below were resolved with the user and are folded into the phase 3 deli
 - Workflow dir source: `PI_WORKFLOW_DIR` works for every command (the resolver's default); `--workflow <dir>` is wired only into the RPC passthrough runner (centralized there like `--json`). Extending the flag to attach/status/lifecycle would mean touching each parser — deferred until something needs it.
 - New `src/registry.test.ts` covers the resolver namespaces, precedence, ambiguity, and state-file tolerance (12 tests; suite now 29). Verified live: `get-state` via session-id prefix, role via env and via `--workflow`, `status` via session id.
 
+TDC: I'm having second thoughts about the workflow details. I want workflows to be _enabled_ by pi-ctl, but I don't think pi-ctl should have to know about the concept of workflows. I want to explore other mechanisms for giving agents "nicknames" or grouping them into hierarchies.
+
 ### 2026-06-12: phase 3 step 3 — transparent revival + trust-dialog fail-fast (awaiting check-in)
 
 - `ensureAgentRunning` (lifecycle.ts): RPC passthrough and attach now transparently revive dormant agents (a one-line `reviving dormant agent <id>` note goes to stderr); both `TODO(phase 3)` markers are gone. list/status/gc still never revive.
@@ -228,12 +230,17 @@ Decisions below were resolved with the user and are folded into the phase 3 deli
 - **Discovered: pi creates `.pi/todos` in the cwd during a session.** A cwd that was empty (and therefore trusted by default — `hasProjectTrustInputs` only fires when `.pi` or `.agents/skills` exists) becomes trust-gated by the time the agent is revived. So _suspend → revive in a scratch directory predictably hits the trust dialog_ even though the original spawn sailed through. The fail-fast turns this from a 30s timeout into an immediate actionable error; spawning with `-- --approve` (or trusting the directory) avoids it entirely. Worth a mention in the README and the phase-4 skill.
 - Cosmetic fix en route: holder-reported launch errors no longer get a second `(log: ...)` suffix from `launchHolder`.
 
+TDC: "Trust project folder?" is a pretty innocuous string. I want to make sure that we only fail if this string appears _and_ pi appears to be hanging. If that string just appears somewhere in the history (e.g. if it's a session where a pi dev is working on the trust prompt itself), I don't want to fail.
+
 ### 2026-06-12: phase 3 step 4 — `pi-ctl wait` (awaiting check-in)
 
 - `src/wait.ts` implements the spec'd semantics verbatim: `turn-end` (next `agent_end` with `willRetry !== true`; immediate return only when fully quiescent — listener registered before the `get_state` so nothing lands in the gap), `quiescent` (reuses lifecycle's `waitQuiescent`), `idle:<secs>` (timer reset on every socket event). Verified in pi's source that the session layer stamps every broadcast `agent_end` with `willRetry: boolean` (`agent-session.ts` wraps the raw agent event), so the check never sees an absent field on current pi; `!== true` also tolerates older builds.
 - Exit codes wired through main.ts: `WaitTimeoutError` → 3, `UsageError` → 2, else 1. `--timeout` is raced via a cleared-timer deadline for turn-end/idle and mapped from `QuiescenceTimeoutError` for quiescent.
 - `wait` revives dormant agents (it needs the socket; a dormant agent then reports quiescent/turn-end immediately, which is the honest answer).
+TDC: what? if an agent is dormant, then it's obviously quiescent since the process isn't doing anything. If we revive it, it's guaranteed to be idle, because pi never resumes work it was previously in the middle of when it's restarted. I don't think we should revive dormant agents.
 - Verified live: immediate return on idle agent (50ms); `prompt; wait --until turn-end` then `get-last-assistant-text` returns the prompted reply (the race-free sequential pattern works); exit 3 on `--timeout 1` during a busy turn; `quiescent` exit 0 after the turn; `idle:2` returns in ~2s; exits 2 on bad/missing `--until`; revival on a suspended agent.
+
+TDC: I'm having second thoughts about the word "quiescent". What do you think about using "idle" instead, and using "idle:N" to mean "no activity for N seconds"? The thing is that quiescence is the more common condition waited on, so I want it to have a short and easy name, like "idle". If "idle:N" is confusing (which I think it is), we could change it to "no-activity:N".
 
 ### 2026-06-12: phase 3 step 5 — `pi-ctl tail` (awaiting check-in)
 
@@ -245,10 +252,16 @@ Decisions below were resolved with the user and are folded into the phase 3 deli
 - `PiSocketClient` gained a public `isClosed` getter; socket closure mid-follow exits 1 ("pi socket closed").
 - Verified live: full dump + cursor; `--since <cursor>` returns only the cursor record when nothing is new and exactly the new entries after another turn; `--follow` across `new-session` (no history re-dump, fresh-session cursor records, subsequent turns stream); `--events` shows the full event vocabulary of a turn; bad cursor errors with the reframed message.
 
+TDC: This seems problematic. In particular, every drain re-issuing `get_entries` is bad. Why exactly do we have `tail` when `get_entries` exists? I'm thinking that we might want to modify upstream get_entries to support an optional `lastN` arg (mutually exclusive with `since`) for getting the last few messages. To support `--follow`, I think we should be able to just read new entries out of the event stream. This means that we'll have to maintain logic for when a message produces a new entry, but that doesn't sound too bad. It's better than constantly sending `get_entries` commands across the wire.
+
+TDC: I wonder if `tail --until` (with `--until` accepting the same arguments as `wait`) would be a natural addition.
+
 ### 2026-06-12: phase 3 step 6 — `prompt` ergonomics (awaiting check-in)
 
 - `prompt <agent> <message|->`: `-` reads the message from stdin (one trailing newline stripped). Scoped to prompt per the plan; steer/follow-up unchanged.
+TDC: wait, why is this not in steer/follow-up as well?
 - `prompt --wait` blocks until the prompted turn ends on the same connection (race-free by construction). It awaits full quiescence via `waitQuiescent`, not "next `agent_end`": a prompt queued with `--streaming-behavior follow-up` runs a turn later, and quiescence is what "the prompted turn ended" means in every case (auto-retry continuations included, since `waitQuiescent` re-checks state rather than counting events).
+TDC: I think it would be clearer to have `--and-wait-until <turn-end|quiescent|idle:<secs>>`, exactly matching the behavior of `wait`. One wart is that since `afterResponse` is run after the rpc response (not after the prompt message is actually inserted), it could happen that `prompt` is called with streaming mode follow-up and we only wait until the turn end _before_ the prompt actually appears as a message. But I think this is tolerable since this is a strange combination to ask for in the first place.
 - Implementation: `RpcCliSpec` gained an optional `afterResponse(client, values)` hook, run by the generic runner after printing the response on the same connection; prompt is its only user. The spec table remains the single place to touch for surface changes.
 - Verified live: `prompt --wait; get-last-assistant-text` returns the prompted reply; `echo ... | prompt - --wait` round-trips; `--streaming-behavior follow-up --wait` during a long streaming turn returns only after both turns end with the follow-up's answer.
 
