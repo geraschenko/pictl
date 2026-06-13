@@ -122,21 +122,98 @@ export async function listAgentIds(): Promise<string[]> {
   }
 }
 
-/** Resolve a (possibly partial) agent id. Ambiguity is an error, never a guess. */
-export async function resolveAgentId(prefix: string): Promise<string> {
+/**
+ * A workflow state file maps role names to agent ids:
+ * `<workflowDir>/state.json` containing `{"agents": {"<role>": "<agentId>"}}`.
+ * Other keys are ignored (workflow scripts keep their own bookkeeping there).
+ * A missing or unreadable file degrades to "no roles" — role addressing is a
+ * convenience layer, never a hard dependency.
+ */
+async function lookupWorkflowRole(
+  workflowDir: string,
+  role: string,
+): Promise<string | undefined> {
+  try {
+    const raw = await readFile(join(workflowDir, "state.json"), "utf8");
+    const state = JSON.parse(raw) as { agents?: Record<string, unknown> };
+    const agentId = state.agents?.[role];
+    return typeof agentId === "string" ? agentId : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Resolve an agent address to an agent id. Namespaces are tried in order:
+ *   1. agent id, exact or unique prefix;
+ *   2. workflow role name (when a workflow dir is given via `--workflow` or
+ *      `PI_WORKFLOW_DIR`), resolved through that dir's state file;
+ *   3. session id, exact or unique prefix, matched against every agent's
+ *      session history.
+ * Ambiguity within a namespace is an error, never a guess.
+ */
+export async function resolveAgentAddress(
+  address: string,
+  workflowDir: string | undefined = process.env.PI_WORKFLOW_DIR,
+): Promise<string> {
   const agentIds = await listAgentIds();
-  if (agentIds.includes(prefix)) {
-    return prefix;
+  if (agentIds.includes(address)) {
+    return address;
   }
-  const matches = agentIds.filter((agentId) => agentId.startsWith(prefix));
-  if (matches.length === 1) {
-    return matches[0]!;
+  const idMatches = agentIds.filter((agentId) => agentId.startsWith(address));
+  if (idMatches.length === 1) {
+    return idMatches[0]!;
   }
-  if (matches.length === 0) {
-    throw new Error(`no agent matches '${prefix}'`);
+  if (idMatches.length > 1) {
+    throw new Error(
+      `ambiguous agent id '${address}', candidates:\n  ${idMatches.join("\n  ")}`,
+    );
   }
+
+  if (workflowDir !== undefined) {
+    const roleAgentId = await lookupWorkflowRole(workflowDir, address);
+    if (roleAgentId !== undefined) {
+      if (!agentIds.includes(roleAgentId)) {
+        throw new Error(
+          `workflow role '${address}' maps to agent '${roleAgentId}', which does not exist`,
+        );
+      }
+      return roleAgentId;
+    }
+  }
+
+  // agentId → a matching sessionId (one per agent suffices to identify it).
+  const sessionMatches = new Map<string, string>();
+  for (const agentId of agentIds) {
+    const read = await readAgentRecord(agentDirPath(agentId));
+    if (read.kind !== "ok") {
+      continue;
+    }
+    for (const session of read.record.sessions) {
+      if (session.sessionId.startsWith(address)) {
+        sessionMatches.set(agentId, session.sessionId);
+      }
+    }
+  }
+  if (sessionMatches.size === 1) {
+    return sessionMatches.keys().next().value!;
+  }
+  if (sessionMatches.size > 1) {
+    const candidates = [...sessionMatches]
+      .map(([agentId, sessionId]) => `${sessionId} (agent ${agentId})`)
+      .join("\n  ");
+    throw new Error(
+      `ambiguous session id '${address}', candidates:\n  ${candidates}`,
+    );
+  }
+
+  const namespaces = [
+    "agent ids",
+    ...(workflowDir !== undefined ? ["workflow roles"] : []),
+    "session ids",
+  ];
   throw new Error(
-    `ambiguous agent id '${prefix}', candidates:\n  ${matches.join("\n  ")}`,
+    `no agent matches '${address}' (tried ${namespaces.join(", ")})`,
   );
 }
 

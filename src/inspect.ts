@@ -13,7 +13,7 @@ import {
   listAgentIds,
   piSocketPath,
   readAgentRecord,
-  resolveAgentId,
+  resolveAgentAddress,
   tombstonePath,
 } from "./registry.ts";
 import { connectWithRetry, getState } from "./rpc.ts";
@@ -164,7 +164,9 @@ export async function runStatus(argv: string[]): Promise<void> {
   if (positionals.length === 0) {
     throw new Error("expected at least one agent id");
   }
-  const agentIds = await Promise.all(positionals.map(resolveAgentId));
+  const agentIds = await Promise.all(
+    positionals.map((address) => resolveAgentAddress(address)),
+  );
   const probes = await Promise.all(agentIds.map(probeAgent));
 
   if (values.json) {

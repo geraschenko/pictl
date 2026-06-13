@@ -19,7 +19,7 @@ import {
   isPidAlive,
   piSocketPath,
   readAgentRecord,
-  resolveAgentId,
+  resolveAgentAddress,
   tombstonePath,
 } from "./registry.ts";
 import { connectWithRetry, getState, type PiSocketClient } from "./rpc.ts";
@@ -35,8 +35,11 @@ export interface LoadedAgent {
   record: AgentRecord;
 }
 
-export async function loadAgent(prefix: string): Promise<LoadedAgent> {
-  const agentId = await resolveAgentId(prefix);
+export async function loadAgent(
+  address: string,
+  workflowDir?: string,
+): Promise<LoadedAgent> {
+  const agentId = await resolveAgentAddress(address, workflowDir);
   const agentDir = agentDirPath(agentId);
   const read = await readAgentRecord(agentDir);
   if (read.kind !== "ok") {
@@ -203,7 +206,9 @@ async function forEachAgent(
   prefixes: string[],
   action: (agent: LoadedAgent) => Promise<void>,
 ): Promise<void> {
-  const agents = await Promise.all(prefixes.map(loadAgent));
+  const agents = await Promise.all(
+    prefixes.map((prefix) => loadAgent(prefix)),
+  );
   const failures = await Promise.all(
     agents.map((agent) =>
       action(agent).then(

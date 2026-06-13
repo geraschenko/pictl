@@ -422,23 +422,32 @@ async function runRpcCliCommand(
     parsed = parseArgs({
       args: argv,
       allowPositionals: true,
-      options: { ...(spec.options ?? {}), json: { type: "boolean" } },
+      options: {
+        ...(spec.options ?? {}),
+        json: { type: "boolean" },
+        workflow: { type: "string" },
+      },
     });
   } catch (error) {
     throw new UsageError(
       `${error instanceof Error ? error.message : String(error)}\nusage: ${cliInvocation(cliName, spec)}`,
     );
   }
-  const [agentPrefix, ...commandPositionals] = parsed.positionals;
+  const [agentAddress, ...commandPositionals] = parsed.positionals;
   if (
-    agentPrefix === undefined ||
+    agentAddress === undefined ||
     commandPositionals.length !== spec.positionals.length
   ) {
     throw new UsageError(`usage: ${cliInvocation(cliName, spec)}`);
   }
   const command = await spec.build(commandPositionals, parsed.values);
 
-  const agent = await loadAgent(agentPrefix);
+  const agent = await loadAgent(
+    agentAddress,
+    typeof parsed.values.workflow === "string"
+      ? parsed.values.workflow
+      : undefined,
+  );
   if (!isPidAlive(agent.record.holderPid)) {
     // TODO(phase 3): transparently revive dormant agents here.
     throw new Error(

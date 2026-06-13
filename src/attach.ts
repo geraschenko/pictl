@@ -20,7 +20,7 @@ import {
   agentDirPath,
   isPidAlive,
   readAgentRecord,
-  resolveAgentId,
+  resolveAgentAddress,
   ttySocketPath,
 } from "./registry.ts";
 import {
@@ -63,7 +63,7 @@ export async function runAttach(argv: string[]): Promise<void> {
   if (positionals.length !== 1) {
     throw new Error("expected exactly one agent id");
   }
-  const agentId = await resolveAgentId(positionals[0]!);
+  const agentId = await resolveAgentAddress(positionals[0]!);
   const agentDir = agentDirPath(agentId);
   const read = await readAgentRecord(agentDir);
   if (read.kind !== "ok") {

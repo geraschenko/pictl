@@ -36,7 +36,9 @@ commands:
 RPC passthrough (sent to the agent's pi process; --json prints the raw response):
 ${rpcCommandUsage()}
 
-<agent> accepts any unique id prefix.`);
+<agent> accepts an agent id, a session id (unique prefixes work for both), or a
+workflow role name when $PI_WORKFLOW_DIR is set (RPC commands also accept
+--workflow <dir>); roles come from the "agents" map in <dir>/state.json.`);
   process.exit(2);
 }
 
