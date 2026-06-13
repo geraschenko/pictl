@@ -245,6 +245,13 @@ Decisions below were resolved with the user and are folded into the phase 3 deli
 - `PiSocketClient` gained a public `isClosed` getter; socket closure mid-follow exits 1 ("pi socket closed").
 - Verified live: full dump + cursor; `--since <cursor>` returns only the cursor record when nothing is new and exactly the new entries after another turn; `--follow` across `new-session` (no history re-dump, fresh-session cursor records, subsequent turns stream); `--events` shows the full event vocabulary of a turn; bad cursor errors with the reframed message.
 
+### 2026-06-12: phase 3 step 6 — `prompt` ergonomics (awaiting check-in)
+
+- `prompt <agent> <message|->`: `-` reads the message from stdin (one trailing newline stripped). Scoped to prompt per the plan; steer/follow-up unchanged.
+- `prompt --wait` blocks until the prompted turn ends on the same connection (race-free by construction). It awaits full quiescence via `waitQuiescent`, not "next `agent_end`": a prompt queued with `--streaming-behavior follow-up` runs a turn later, and quiescence is what "the prompted turn ended" means in every case (auto-retry continuations included, since `waitQuiescent` re-checks state rather than counting events).
+- Implementation: `RpcCliSpec` gained an optional `afterResponse(client, values)` hook, run by the generic runner after printing the response on the same connection; prompt is its only user. The spec table remains the single place to touch for surface changes.
+- Verified live: `prompt --wait; get-last-assistant-text` returns the prompted reply; `echo ... | prompt - --wait` round-trips; `--streaming-behavior follow-up --wait` during a long streaming turn returns only after both turns end with the follow-up's answer.
+
 ## Open questions (resolve with the user before or during the relevant phase)
 
 1. **Type imports** (phase 1) — RESOLVED: local-path dependency on the fork's `packages/coding-agent` (see Prerequisites). The package index exports everything needed; the fork's `dist/` must be built.

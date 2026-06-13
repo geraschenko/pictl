@@ -16,9 +16,13 @@ import { readFile } from "node:fs/promises";
 import { extname } from "node:path";
 import { parseArgs } from "node:util";
 import type { RpcCommand, RpcResponse } from "@earendil-works/pi-coding-agent";
-import { ensureAgentRunning, loadAgent } from "./lifecycle.ts";
+import {
+  ensureAgentRunning,
+  loadAgent,
+  waitQuiescent,
+} from "./lifecycle.ts";
 import { piSocketPath } from "./registry.ts";
-import { connectWithRetry } from "./rpc.ts";
+import { connectWithRetry, type PiSocketClient } from "./rpc.ts";
 import { UsageError } from "./util.ts";
 
 const SOCKET_CONNECT_DEADLINE_MS = 5_000;
@@ -40,6 +44,8 @@ interface RpcCliSpec {
     positionals: string[],
     values: FlagValues,
   ) => RpcCommand | Promise<RpcCommand>;
+  /** Runs after the response is printed, on the same connection (e.g. prompt --wait). */
+  afterResponse?: (client: PiSocketClient, values: FlagValues) => Promise<void>;
 }
 
 function oneOf<T extends string>(
@@ -127,15 +133,32 @@ async function imagesFromFlags(
   return { images };
 }
 
+/** `prompt -` (and friends) read the message from stdin. */
+async function readStdin(): Promise<string> {
+  let data = "";
+  for await (const chunk of process.stdin) {
+    data += chunk.toString();
+  }
+  return data.replace(/\n$/, "");
+}
+
+function messageFrom(positional: string): string | Promise<string> {
+  return positional === "-" ? readStdin() : positional;
+}
+
 const RPC_CLI_SPECS: Record<string, RpcCliSpec> = {
   prompt: {
-    positionals: ["<message>"],
-    flagsUsage: `[--streaming-behavior steer|follow-up] ${IMAGE_FLAG_USAGE}`,
+    positionals: ["<message|->"],
+    flagsUsage: `[--wait] [--streaming-behavior steer|follow-up] ${IMAGE_FLAG_USAGE}`,
     summary: "send a prompt (errors while streaming without --streaming-behavior)",
-    options: { "streaming-behavior": { type: "string" }, ...IMAGE_OPTION },
+    options: {
+      wait: { type: "boolean" },
+      "streaming-behavior": { type: "string" },
+      ...IMAGE_OPTION,
+    },
     build: async ([message], values) => ({
       type: "prompt",
-      message: message!,
+      message: await messageFrom(message!),
       ...(await imagesFromFlags(values)),
       ...(typeof values["streaming-behavior"] === "string" && {
         streamingBehavior:
@@ -148,6 +171,15 @@ const RPC_CLI_SPECS: Record<string, RpcCliSpec> = {
             : ("followUp" as const),
       }),
     }),
+    // --wait blocks until the prompted turn ends, on this same connection so
+    // it is race-free by construction. waitQuiescent (not "next agent_end")
+    // because a prompt queued behind a streaming turn ends a turn later, and
+    // auto-retry continuations must not count as the end.
+    afterResponse: async (client, values) => {
+      if (values.wait === true) {
+        await waitQuiescent(client, undefined);
+      }
+    },
   },
   steer: {
     positionals: ["<message>"],
@@ -457,6 +489,9 @@ async function runRpcCliCommand(
   try {
     const response = await client.request(command);
     printResponse(response, parsed.values.json === true);
+    if (spec.afterResponse) {
+      await spec.afterResponse(client, parsed.values);
+    }
   } finally {
     client.close();
   }
