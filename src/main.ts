@@ -6,6 +6,7 @@ import { runKill, runResume, runSuspend } from "./lifecycle.ts";
 import { rpcCommandHandlers, rpcCommandUsage } from "./rpc-commands.ts";
 import { runSpawn } from "./spawn.ts";
 import { UsageError } from "./util.ts";
+import { runWait, WaitTimeoutError } from "./wait.ts";
 
 const COMMANDS: Record<string, (argv: string[]) => Promise<void>> = {
   spawn: runSpawn,
@@ -17,6 +18,7 @@ const COMMANDS: Record<string, (argv: string[]) => Promise<void>> = {
   suspend: runSuspend,
   resume: runResume,
   gc: runGc,
+  wait: runWait,
   ...rpcCommandHandlers(),
 };
 
@@ -32,6 +34,9 @@ commands:
   suspend <agent>... [--timeout <secs>]                 wait for quiescence, then stop (agent goes dormant)
   resume <agent>...                                     revive dormant agents on their last sessions
   gc                                                    remove tombstoned or corrupt agent dirs
+  wait <agent> --until turn-end|quiescent|idle:<secs> [--timeout <secs>]
+                                                        block until the agent meets the condition
+                                                        (exit 3 if --timeout expires first)
 
 RPC passthrough (sent to the agent's pi process; --json prints the raw response):
 ${rpcCommandUsage()}
@@ -57,5 +62,7 @@ try {
   console.error(
     `pi-ctl: ${error instanceof Error ? error.message : String(error)}`,
   );
-  process.exit(error instanceof UsageError ? 2 : 1);
+  process.exit(
+    error instanceof WaitTimeoutError ? 3 : error instanceof UsageError ? 2 : 1,
+  );
 }

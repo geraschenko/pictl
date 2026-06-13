@@ -228,6 +228,13 @@ Decisions below were resolved with the user and are folded into the phase 3 deli
 - **Discovered: pi creates `.pi/todos` in the cwd during a session.** A cwd that was empty (and therefore trusted by default — `hasProjectTrustInputs` only fires when `.pi` or `.agents/skills` exists) becomes trust-gated by the time the agent is revived. So _suspend → revive in a scratch directory predictably hits the trust dialog_ even though the original spawn sailed through. The fail-fast turns this from a 30s timeout into an immediate actionable error; spawning with `-- --approve` (or trusting the directory) avoids it entirely. Worth a mention in the README and the phase-4 skill.
 - Cosmetic fix en route: holder-reported launch errors no longer get a second `(log: ...)` suffix from `launchHolder`.
 
+### 2026-06-12: phase 3 step 4 — `pi-ctl wait` (awaiting check-in)
+
+- `src/wait.ts` implements the spec'd semantics verbatim: `turn-end` (next `agent_end` with `willRetry !== true`; immediate return only when fully quiescent — listener registered before the `get_state` so nothing lands in the gap), `quiescent` (reuses lifecycle's `waitQuiescent`), `idle:<secs>` (timer reset on every socket event). Verified in pi's source that the session layer stamps every broadcast `agent_end` with `willRetry: boolean` (`agent-session.ts` wraps the raw agent event), so the check never sees an absent field on current pi; `!== true` also tolerates older builds.
+- Exit codes wired through main.ts: `WaitTimeoutError` → 3, `UsageError` → 2, else 1. `--timeout` is raced via a cleared-timer deadline for turn-end/idle and mapped from `QuiescenceTimeoutError` for quiescent.
+- `wait` revives dormant agents (it needs the socket; a dormant agent then reports quiescent/turn-end immediately, which is the honest answer).
+- Verified live: immediate return on idle agent (50ms); `prompt; wait --until turn-end` then `get-last-assistant-text` returns the prompted reply (the race-free sequential pattern works); exit 3 on `--timeout 1` during a busy turn; `quiescent` exit 0 after the turn; `idle:2` returns in ~2s; exits 2 on bad/missing `--until`; revival on a suspended agent.
+
 ## Open questions (resolve with the user before or during the relevant phase)
 
 1. **Type imports** (phase 1) — RESOLVED: local-path dependency on the fork's `packages/coding-agent` (see Prerequisites). The package index exports everything needed; the fork's `dist/` must be built.
