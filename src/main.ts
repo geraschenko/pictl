@@ -5,6 +5,7 @@ import { runGc, runList, runStatus } from "./inspect.ts";
 import { runKill, runResume, runSuspend } from "./lifecycle.ts";
 import { rpcCommandHandlers, rpcCommandUsage } from "./rpc-commands.ts";
 import { runSpawn } from "./spawn.ts";
+import { runTail } from "./tail.ts";
 import { UsageError } from "./util.ts";
 import { runWait, WaitTimeoutError } from "./wait.ts";
 
@@ -19,6 +20,7 @@ const COMMANDS: Record<string, (argv: string[]) => Promise<void>> = {
   resume: runResume,
   gc: runGc,
   wait: runWait,
+  tail: runTail,
   ...rpcCommandHandlers(),
 };
 
@@ -37,6 +39,9 @@ commands:
   wait <agent> --until turn-end|quiescent|idle:<secs> [--timeout <secs>]
                                                         block until the agent meets the condition
                                                         (exit 3 if --timeout expires first)
+  tail <agent> [--follow] [--since <entry-id>]          session entries as JSONL, then a cursor
+                                                        record; --follow streams new entries,
+                                                        --events streams raw events instead
 
 RPC passthrough (sent to the agent's pi process; --json prints the raw response):
 ${rpcCommandUsage()}

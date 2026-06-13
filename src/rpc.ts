@@ -167,6 +167,10 @@ export class PiSocketClient {
     return this.closedPromise;
   }
 
+  get isClosed(): boolean {
+    return this.closed;
+  }
+
   close(): void {
     this.socket.destroy();
   }

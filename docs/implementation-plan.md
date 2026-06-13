@@ -235,6 +235,16 @@ Decisions below were resolved with the user and are folded into the phase 3 deli
 - `wait` revives dormant agents (it needs the socket; a dormant agent then reports quiescent/turn-end immediately, which is the honest answer).
 - Verified live: immediate return on idle agent (50ms); `prompt; wait --until turn-end` then `get-last-assistant-text` returns the prompted reply (the race-free sequential pattern works); exit 3 on `--timeout 1` during a busy turn; `quiescent` exit 0 after the turn; `idle:2` returns in ~2s; exits 2 on bad/missing `--until`; revival on a suspended agent.
 
+### 2026-06-12: phase 3 step 5 — `pi-ctl tail` (awaiting check-in)
+
+- `src/tail.ts`: entries as JSONL, one per line, with a final `{"type":"pi_ctl_cursor","sessionId":...,"entryId":...}` record (the plan's "print the final entry id" deliverable, shaped as a JSONL record so `tail -1 | jq` extracts it and the sessionId travels with it, per the cursors-are-session-scoped decision). A cursor record follows every drain batch in `--follow` mode, so a killed-and-rerun consumer resumes from its last persisted line.
+- The cursor is the last _printed entry's_ id (file order), deliberately not the response's `leafId`: `navigate-tree` can move the leaf backwards onto an already-printed entry, and a leafId cursor would then re-emit everything after it.
+- `--follow` per the decided design: events are pure wakeups (any event except the per-token `message_update`/`tool_execution_update` noise — unknown future event types default to waking), every drain re-issues `get_entries --since <cursor>`. **Session replacement mid-follow resyncs quietly**: the cursor is repositioned to the new session's tip without dumping its history (only entries created after the replacement stream out), announced by a cursor record with the new sessionId. A drain that races the `session_changed` broadcast gets pi's "Entry not found" and is treated as a resync trigger, not an error.
+- Stale `--since` on a one-shot tail passes pi's error through reframed: "Entry not found: <id>; the session may have changed (cursors are session-scoped)" (exit 1).
+- `--events` streams the raw broadcast events as JSONL instead (implies following; `--since` rejected as a usage error). The per-connection `session_changed` is the first record.
+- `PiSocketClient` gained a public `isClosed` getter; socket closure mid-follow exits 1 ("pi socket closed").
+- Verified live: full dump + cursor; `--since <cursor>` returns only the cursor record when nothing is new and exactly the new entries after another turn; `--follow` across `new-session` (no history re-dump, fresh-session cursor records, subsequent turns stream); `--events` shows the full event vocabulary of a turn; bad cursor errors with the reframed message.
+
 ## Open questions (resolve with the user before or during the relevant phase)
 
 1. **Type imports** (phase 1) — RESOLVED: local-path dependency on the fork's `packages/coding-agent` (see Prerequisites). The package index exports everything needed; the fork's `dist/` must be built.
