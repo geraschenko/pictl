@@ -16,8 +16,8 @@ import { readFile } from "node:fs/promises";
 import { extname } from "node:path";
 import { parseArgs } from "node:util";
 import type { RpcCommand, RpcResponse } from "@earendil-works/pi-coding-agent";
-import { loadAgent } from "./lifecycle.ts";
-import { isPidAlive, piSocketPath } from "./registry.ts";
+import { ensureAgentRunning, loadAgent } from "./lifecycle.ts";
+import { piSocketPath } from "./registry.ts";
 import { connectWithRetry } from "./rpc.ts";
 import { UsageError } from "./util.ts";
 
@@ -442,18 +442,14 @@ async function runRpcCliCommand(
   }
   const command = await spec.build(commandPositionals, parsed.values);
 
-  const agent = await loadAgent(
-    agentAddress,
-    typeof parsed.values.workflow === "string"
-      ? parsed.values.workflow
-      : undefined,
+  const agent = await ensureAgentRunning(
+    await loadAgent(
+      agentAddress,
+      typeof parsed.values.workflow === "string"
+        ? parsed.values.workflow
+        : undefined,
+    ),
   );
-  if (!isPidAlive(agent.record.holderPid)) {
-    // TODO(phase 3): transparently revive dormant agents here.
-    throw new Error(
-      `agent '${agent.agentId}' is dormant; run \`pi-ctl resume ${agent.agentId}\``,
-    );
-  }
   const client = await connectWithRetry(
     piSocketPath(agent.agentDir),
     SOCKET_CONNECT_DEADLINE_MS,

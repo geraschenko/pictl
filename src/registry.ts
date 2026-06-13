@@ -54,6 +54,11 @@ export function tombstonePath(agentDir: string): string {
   return join(agentDir, "tombstone");
 }
 
+/** Serializes dormant-agent revival; holds the reviving process's pid. */
+export function reviveLockPath(agentDir: string): string {
+  return join(agentDir, "revive.lock");
+}
+
 export function holderLogPath(agentDir: string): string {
   return join(agentDir, "holder.log");
 }

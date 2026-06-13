@@ -11,15 +11,17 @@
  * continuing past per-agent failures and reporting them at the end.
  */
 
-import { rm, writeFile } from "node:fs/promises";
+import { readFile, rm, writeFile } from "node:fs/promises";
 import { parseArgs } from "node:util";
 import {
   type AgentRecord,
   agentDirPath,
+  holderLogPath,
   isPidAlive,
   piSocketPath,
   readAgentRecord,
   resolveAgentAddress,
+  reviveLockPath,
   tombstonePath,
 } from "./registry.ts";
 import { connectWithRetry, getState, type PiSocketClient } from "./rpc.ts";
@@ -50,6 +52,101 @@ export async function loadAgent(
     );
   }
   return { agentId, agentDir, record: read.record };
+}
+
+const REVIVAL_WAIT_DEADLINE_MS = 60_000;
+const REVIVAL_LOCK_POLL_MS = 100;
+
+/**
+ * Revive `agent` via launchHolder, serialized through an O_EXCL lock file.
+ * Two concurrent revivals of the same agent must not both launch holders: the
+ * second holder's stale-socket cleanup would delete the first's live pi.sock.
+ * The loser waits for the winner instead of spawning. launchHolder returns
+ * only once pi.sock is up, so holding the lock across it is the readiness
+ * barrier. As with waitPidGone, there is no cross-process event channel for
+ * "the lock file went away", so the loser polls.
+ */
+async function reviveAgent(agent: LoadedAgent): Promise<LoadedAgent> {
+  const lockPath = reviveLockPath(agent.agentDir);
+  try {
+    await writeFile(lockPath, `${process.pid}\n`, { flag: "wx" });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
+      throw error;
+    }
+    return await awaitConcurrentRevival(agent, lockPath);
+  }
+
+  try {
+    // Re-read under the lock: another process may have completed a revival
+    // between our dormancy check and the lock acquisition.
+    const fresh = await loadAgent(agent.agentId);
+    if (isPidAlive(fresh.record.holderPid)) {
+      return fresh;
+    }
+    process.stderr.write(`pi-ctl: reviving dormant agent ${agent.agentId}\n`);
+    await launchHolder({
+      agentDir: fresh.agentDir,
+      agentId: fresh.agentId,
+      cwd: fresh.record.cwd,
+      piBin: fresh.record.piBin,
+      piArgs: fresh.record.spawnArgs,
+      resume: true,
+    });
+    return await loadAgent(agent.agentId);
+  } finally {
+    await rm(lockPath, { force: true });
+  }
+}
+
+async function awaitConcurrentRevival(
+  agent: LoadedAgent,
+  lockPath: string,
+): Promise<LoadedAgent> {
+  const deadline = Date.now() + REVIVAL_WAIT_DEADLINE_MS;
+  while (true) {
+    let lockContent: string;
+    try {
+      lockContent = await readFile(lockPath, "utf8");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        break;
+      }
+      throw error;
+    }
+    const lockHolderPid = Number(lockContent.trim());
+    if (lockHolderPid > 0 && !isPidAlive(lockHolderPid)) {
+      throw new Error(
+        `stale revival lock for '${agent.agentId}' (process ${lockHolderPid} is gone); remove ${lockPath} and retry`,
+      );
+    }
+    if (Date.now() > deadline) {
+      throw new Error(
+        `timed out waiting for a concurrent revival of '${agent.agentId}' (lock: ${lockPath})`,
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, REVIVAL_LOCK_POLL_MS));
+  }
+  const fresh = await loadAgent(agent.agentId);
+  if (!isPidAlive(fresh.record.holderPid)) {
+    throw new Error(
+      `concurrent revival of '${agent.agentId}' failed; see ${holderLogPath(fresh.agentDir)}`,
+    );
+  }
+  return fresh;
+}
+
+/**
+ * The transparent-revival entry point for commands that need the agent's
+ * pi.sock (RPC passthrough, attach). list/status/gc never revive by design.
+ */
+export async function ensureAgentRunning(
+  agent: LoadedAgent,
+): Promise<LoadedAgent> {
+  if (isPidAlive(agent.record.holderPid)) {
+    return agent;
+  }
+  return await reviveAgent(agent);
 }
 
 function killSilently(pid: number, signal: NodeJS.Signals): void {

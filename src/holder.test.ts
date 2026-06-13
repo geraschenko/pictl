@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import xterm from "@xterm/headless";
-import { hintRoomSequence } from "./holder.ts";
+import { hintRoomSequence, makeTrustPromptScanner } from "./holder.ts";
 
 function makeTerminal(): xterm.Terminal {
   return new xterm.Terminal({ cols: 80, rows: 10, allowProposedApi: true });
@@ -38,4 +38,21 @@ test("hintRoomSequence scrolls one line and re-parks the cursor when content rea
   assert.equal(bottomRow, "");
   assert.equal(buffer.cursorY, 8);
   assert.equal(buffer.cursorX, 7);
+});
+
+test("trust prompt scanner matches the phrase within a styled chunk", () => {
+  const scan = makeTrustPromptScanner();
+  assert.equal(scan("\x1b[1mTrust project folder?\x1b[22m"), true);
+});
+
+test("trust prompt scanner matches across chunk boundaries", () => {
+  const scan = makeTrustPromptScanner();
+  assert.equal(scan("...\x1b[1mTrust proj"), false);
+  assert.equal(scan("ect folder?\x1b[22m..."), true);
+});
+
+test("trust prompt scanner ignores unrelated output", () => {
+  const scan = makeTrustPromptScanner();
+  assert.equal(scan("Trust me, this folder is fine"), false);
+  assert.equal(scan("project folder?"), false);
 });

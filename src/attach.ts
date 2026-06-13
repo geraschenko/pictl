@@ -16,13 +16,8 @@ import {
   SAVE_CURSOR,
   SHOW_CURSOR,
 } from "./ansi.ts";
-import {
-  agentDirPath,
-  isPidAlive,
-  readAgentRecord,
-  resolveAgentAddress,
-  ttySocketPath,
-} from "./registry.ts";
+import { ensureAgentRunning, loadAgent } from "./lifecycle.ts";
+import { ttySocketPath } from "./registry.ts";
 import {
   encodeFrame,
   encodeResize,
@@ -63,23 +58,12 @@ export async function runAttach(argv: string[]): Promise<void> {
   if (positionals.length !== 1) {
     throw new Error("expected exactly one agent id");
   }
-  const agentId = await resolveAgentAddress(positionals[0]!);
-  const agentDir = agentDirPath(agentId);
-  const read = await readAgentRecord(agentDir);
-  if (read.kind !== "ok") {
-    throw new Error(
-      `agent ${agentId} has no readable agent.json (${read.kind})`,
-    );
-  }
-  // TODO(phase 3): transparently revive dormant agents instead of erroring.
-  if (!isPidAlive(read.record.holderPid)) {
-    throw new Error(
-      `agent ${agentId} is dormant; run \`pi-ctl resume ${agentId}\``,
-    );
-  }
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
     throw new Error("attach requires stdin and stdout to be a terminal");
   }
+  const { agentId, agentDir } = await ensureAgentRunning(
+    await loadAgent(positionals[0]!),
+  );
 
   const socket = await connectToTty(ttySocketPath(agentDir), agentId);
   process.stdin.setRawMode(true);

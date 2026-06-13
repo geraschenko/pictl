@@ -162,6 +162,30 @@ function isSessionChangedEvent(
   return event.type === "session_changed";
 }
 
+class TrustPromptError extends Error {}
+
+/**
+ * Detects pi's project-trust dialog in raw PTY output. pi blocks on it before
+ * binding pi.sock (cwd has `.pi` inputs, no stored trust decision), so without
+ * detection a spawn or revival sits out the full connect deadline. The phrase
+ * (from pi's `formatProjectTrustPrompt`) travels contiguously in the stream —
+ * ANSI styling wraps it but does not split it — so scanning chunks with a
+ * phrase-sized overlap suffices. If pi's wording changes, detection degrades
+ * to the connect deadline.
+ */
+export function makeTrustPromptScanner(): (chunk: string) => boolean {
+  const phrase = "Trust project folder?";
+  let overlapTail = "";
+  return (chunk: string): boolean => {
+    const window = overlapTail + chunk;
+    if (window.includes(phrase)) {
+      return true;
+    }
+    overlapTail = window.slice(-(phrase.length - 1));
+    return false;
+  };
+}
+
 export async function runHold(argv: string[]): Promise<void> {
   const args = parseHoldArgs(argv);
   const { agentDir, agentId } = args;
@@ -231,9 +255,25 @@ export async function runHold(argv: string[]): Promise<void> {
     },
   });
 
+  const scanForTrustPrompt = makeTrustPromptScanner();
+  let watchingStartup = true;
+  let reportTrustPrompt: (() => void) | undefined;
+  const trustPromptSeen = new Promise<never>((_, reject) => {
+    reportTrustPrompt = () =>
+      reject(
+        new TrustPromptError(
+          `pi is waiting for project-trust approval in ${args.cwd}; give pi --approve (pi-ctl spawn -- --approve) or run pi in that directory once and choose Trust`,
+        ),
+      );
+  });
+
   piProcess.onData((data) => {
     terminal.write(data);
     ttyServer.broadcastOutput(data);
+    if (watchingStartup && scanForTrustPrompt(data)) {
+      watchingStartup = false;
+      reportTrustPrompt?.();
+    }
   });
 
   const record: AgentRecord = {
@@ -313,14 +353,18 @@ export async function runHold(argv: string[]): Promise<void> {
   };
 
   try {
-    await connectWithRetry(
-      piSocketPath(agentDir),
-      RPC_CONNECT_DEADLINE_MS,
-      handleEvent,
-    );
+    await Promise.race([
+      connectWithRetry(piSocketPath(agentDir), RPC_CONNECT_DEADLINE_MS, handleEvent),
+      trustPromptSeen,
+    ]);
+    watchingStartup = false;
     signalReady(args.readyFd, { ok: true });
   } catch (error) {
-    const message = `could not connect to pi socket: ${String(error)} (log: ${holderLogPath(agentDir)})`;
+    const reason =
+      error instanceof TrustPromptError
+        ? error.message
+        : `could not connect to pi socket: ${String(error)}`;
+    const message = `${reason} (log: ${holderLogPath(agentDir)})`;
     console.error(`[holder] ${message}`);
     signalReady(args.readyFd, { ok: false, error: message });
     piProcess.kill("SIGKILL");

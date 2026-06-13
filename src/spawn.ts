@@ -126,8 +126,11 @@ export async function launchHolder(launch: HolderLaunch): Promise<void> {
     ready = undefined;
   }
   if (!ready?.ok) {
+    // Holder-reported errors already carry the log path.
     throw new Error(
-      `holder failed to start: ${ready?.error ?? "exited before signaling ready"} (log: ${holderLogPath(launch.agentDir)})`,
+      ready?.error !== undefined
+        ? `holder failed to start: ${ready.error}`
+        : `holder failed to start: exited before signaling ready (log: ${holderLogPath(launch.agentDir)})`,
     );
   }
 }
