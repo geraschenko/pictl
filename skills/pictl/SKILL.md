@@ -21,7 +21,7 @@ For scripting/orchestration details, read [references/orchestration.md](referenc
 Agents commonly need peers working in the same directory:
 
 ```bash
-echo "$PI_AGENT_ID"          # your own agent id, if pictl spawned you
+echo "$PI_AGENT_ID"         # your own agent id, if pictl spawned you
 pictl list --cwd .          # human-readable agents in this cwd
 pictl list --cwd . --json   # machine-readable agents in this cwd
 pictl status <agent>        # details for one agent
