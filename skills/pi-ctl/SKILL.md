@@ -89,6 +89,7 @@ pi-ctl get-session-stats <agent>
 For continuous or crash-resumable scripts, use `pi-ctl tail`; see [references/orchestration.md](references/orchestration.md).
 
 Most RPC passthrough commands print response data as JSON. Add `--json` to print the raw RPC response record.
+TDC: This is actually pretty confusing. Let's change it so that the flag is `--raw` instead of `--json`.
 
 ## Spawn helper agents
 
@@ -97,9 +98,11 @@ worker=$(pi-ctl spawn --tag worker -- --approve)
 pi-ctl prompt "$worker" "You are my worker agent. My agent id is $PI_AGENT_ID. Please ..." --and-wait
 ```
 
-Use `--tag` to make helpers discoverable. `-- --approve` passes pi's project-trust approval flag through to pi; use it only when appropriate for the current project/workflow.
+Use `--tag` to make helpers discoverable.
 
 ## Lifecycle commands
+
+TDC: I think the only thing we need in this main skill doc is `archive` for when you're done with an agent. Everything else is clutter that's only relevant in very specific situations since archive already suspends and resume happens automatically on commands that need it. Maybe is worth saying that archived agents are revived if you interact with them and can be seen with `list --all`.
 
 Non-destructive:
 
