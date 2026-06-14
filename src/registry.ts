@@ -22,7 +22,7 @@ export interface AgentRecord {
   id: string;
   createdAt: string;
   cwd: string;
-  /** Optional human label set at spawn (`--tag`); non-unique, for grouping. */
+  /** Optional label set at spawn (`--tag`); non-unique, for grouping. */
   tag?: string;
   piBin: string;
   spawnArgs: string[];
@@ -120,7 +120,7 @@ export async function readAgentRecord(
  * stripped here rather than duplicated into the file.
  */
 export async function writeAgentRecord(
-  agentDir: string,
+  agentDir: string,  // TDC: remove this arg; get it out of record instead.
   record: AgentRecord,
 ): Promise<void> {
   const { agentDir: _derived, ...persisted } = record;
@@ -149,31 +149,29 @@ export async function listAgentIds(): Promise<string[]> {
 }
 
 /**
- * Resolve an agent address — an agent id, exact or as a unique prefix — to a
- * full agent id. An ambiguous prefix is an error listing the candidates, never
- * a guess. (Agents are grouped/labelled out of band: see `--tag` and
- * `list --cwd`; pi-ctl does not address agents by nickname.)
+ * Resolve an agent id, exact or as a unique prefix — to a full agent id. An
+ * ambiguous prefix is an error listing the candidates, never a guess.
  */
-export async function resolveAgentId(address: string): Promise<string> {
+export async function resolveAgentId(agentIdPrefix: string): Promise<string> {
   const agentIds = await listAgentIds();
-  if (agentIds.includes(address)) {
-    return address;
+  if (agentIds.includes(agentIdPrefix)) {
+    return agentIdPrefix;
   }
-  const matches = agentIds.filter((agentId) => agentId.startsWith(address));
+  const matches = agentIds.filter((agentId) => agentId.startsWith(agentIdPrefix));
   if (matches.length === 1) {
     return matches[0]!;
   }
   if (matches.length > 1) {
     throw new Error(
-      `ambiguous agent id '${address}', candidates:\n  ${matches.join("\n  ")}`,
+      `ambiguous agent id '${agentIdPrefix}', candidates:\n  ${matches.join("\n  ")}`,
     );
   }
-  throw new Error(`no agent matches '${address}'`);
+  throw new Error(`no agent matches '${agentIdPrefix}'`);
 }
 
-/** Resolve an address and read its record (with agentDir populated). */
-export async function loadAgent(address: string): Promise<AgentRecord> {
-  const agentId = await resolveAgentId(address);
+/** Resolve an agent id and read its record (with agentDir populated). */
+export async function loadAgent(agentIdPrefix: string): Promise<AgentRecord> {
+  const agentId = await resolveAgentId(agentIdPrefix);
   const read = await readAgentRecord(agentDirPath(agentId));
   if (read.kind !== "ok") {
     throw new Error(

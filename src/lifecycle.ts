@@ -130,9 +130,9 @@ async function awaitConcurrentRevival(
  * pi.sock (RPC passthrough, attach). list/status/gc never revive by design.
  */
 export async function ensureAgentRunning(
-  address: string,
+  agentIdPrefix: string,
 ): Promise<AgentRecord> {
-  const agent = await loadAgent(address);
+  const agent = await loadAgent(agentIdPrefix);
   if (isPidAlive(agent.holderPid)) {
     return agent;
   }
@@ -147,6 +147,7 @@ function killSilently(pid: number, signal: NodeJS.Signals): void {
   }
 }
 
+// TDC: We still have references to "quiescence". Do an audit for the old quiescent/idle terminology, and let's fix it.
 export class QuiescenceTimeoutError extends Error {}
 
 /**
@@ -293,7 +294,7 @@ async function forEachAgent(
   prefixes: string[],
   action: (agent: AgentRecord) => Promise<void>,
 ): Promise<void> {
-  const agents = await Promise.all(prefixes.map((prefix) => loadAgent(prefix)));
+  const agents = await Promise.all(prefixes.map(loadAgent));
   const failures = await Promise.all(
     agents.map((agent) =>
       action(agent).then(

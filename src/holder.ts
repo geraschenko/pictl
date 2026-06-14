@@ -221,8 +221,8 @@ export async function runHold(argv: string[]): Promise<void> {
   if (projectTrustWouldBlock(args.cwd, args.piArgs)) {
     const message =
       `pi would block on the project-trust prompt in ${args.cwd}; ` +
-      `pass --approve (pi-ctl spawn -- --approve) or trust the directory ` +
-      `once interactively (run pi there and choose Trust)`;
+      `pass --[no-]approve (pi-ctl spawn -- --approve) or trust/distrust ` +
+      `the directory once interactively by running pi there.`;
     console.error(`[holder] ${message}`);
     signalReady(args.readyFd, { ok: false, error: message });
     return;

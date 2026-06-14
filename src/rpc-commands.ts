@@ -479,16 +479,16 @@ async function runRpcCliCommand(
       `${error instanceof Error ? error.message : String(error)}\nusage: ${cliInvocation(cliName, spec)}`,
     );
   }
-  const [agentAddress, ...commandPositionals] = parsed.positionals;
+  const [agentIdPrefix, ...commandPositionals] = parsed.positionals;
   if (
-    agentAddress === undefined ||
+    agentIdPrefix === undefined ||
     commandPositionals.length !== spec.positionals.length
   ) {
     throw new UsageError(`usage: ${cliInvocation(cliName, spec)}`);
   }
   const command = await spec.build(commandPositionals, parsed.values);
 
-  const agent = await ensureAgentRunning(agentAddress);
+  const agent = await ensureAgentRunning(agentIdPrefix);
   const client = await connectWithRetry(
     piSocketPath(agent.agentDir),
     SOCKET_CONNECT_DEADLINE_MS,

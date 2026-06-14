@@ -204,6 +204,7 @@ export async function runStatus(argv: string[]): Promise<void> {
   });
 }
 
+// TDC: why is this in inspect.ts instead of lifecycle.ts? I guess it's because it relies on probeAgent. Ok ... but this does feel a little funny. Do you have any thoughts on this?
 export async function runGc(argv: string[]): Promise<void> {
   parseArgs({ args: argv, options: {} });
   const agentIds = await listAgentIds();

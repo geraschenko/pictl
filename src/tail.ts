@@ -204,6 +204,7 @@ export async function runTail(argv: string[]): Promise<void> {
     throw new UsageError("--events streams raw events; --since does not apply");
   }
   if (parsed.values.events && parsed.values.until !== undefined) {
+    // TDC: Why not? It seems totally reasonable to stream raw events until idle/turn-end/no-activity.
     throw new UsageError("--events streams raw events; --until does not apply");
   }
   // --until implies --follow: it only makes sense while streaming.
