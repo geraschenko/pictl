@@ -10,18 +10,19 @@ description: Use pi-ctl to discover, message, monitor, spawn, suspend, resume, a
 ## Core rules
 
 - Prefer `prompt`/`follow-up`/`steer` over interrupting an agent.
-- Prefer `suspend` or `archive` over `purge`.
+- Prefer `suspend` or `archive` over `purge`.  TDC: isn't this redundant with the line below?
 - Do **not** purge, force-kill, or take over agents you did not create unless the user explicitly asks.
-- When spawning subagents, give them clear role instructions and tell them relevant agent ids, including your own `$PI_AGENT_ID` when set.
-- Treat entry cursors as session-scoped: persist both `sessionId` and `entryId`.
+- When spawning subagents, give them clear role instructions and tell them relevant agent ids, including your own `$PI_AGENT_ID`.
+- Treat entry cursors as session-scoped: persist both `sessionId` and `entryId`. TDC: is this really necessary? I expect it to be extrordinarily rare for session id to change. Maybe this could go in a supplementary file of gotchas or details?
 
 ## Identify yourself and discover agents
 
+TDC: since you'll typically want agents running in the same directory as yourself, we should probably make `pi-ctl list --cwd .` the demo example. What do you think?
 ```bash
-printf '%s\n' "$PI_AGENT_ID"          # your own agent id, if pi-ctl spawned you
-pi-ctl list                         # human-readable list
-pi-ctl list --json                  # machine-readable list
-pi-ctl status <agent>               # details for one agent
+echo $PI_AGENT_ID       # your own agent id, if pi-ctl spawned you
+pi-ctl list             # human-readable list
+pi-ctl list --json      # machine-readable list
+pi-ctl status <agent>   # details for one agent
 ```
 
 `<agent>` accepts a full agent id or any unique prefix. Use tags, cwd, and status output to avoid confusing unrelated agents.
@@ -52,6 +53,7 @@ Use `steer` only for timely corrections during an active turn:
 ```bash
 pi-ctl steer <agent> "Correction: use branch feature/foo, not main."
 ```
+TDC: I'm not sure that steer or follow-up should *ever* be used. Why wouldn't you just do `pi-ctl prompt <agent> --streaming-behavior steer "Correction:..."` in situations where you expect the agent may be streaming? If you use steer and the agent finishes after you checked its status but before you sent the message, then the message gets queued up but not actually executed until you send your next message. I think this skill may need a bunch of reference documents with little bits of knowledge about pi and its rpc commands.
 
 Abort only when necessary:
 
@@ -134,6 +136,8 @@ pi-ctl get-commands <agent>
 Most RPC passthrough commands print response data as JSON. Add `--json` to print the raw RPC response record.
 
 ## Minimal worker-drain pattern
+
+TDC: we should probably have a separate sub-skill or reference document for programmatically using pi-ctl (e.g. to write orchestration scripts) vs just using it one-off to interact with other agents. Does this distinction make sense? For example, casual interaction is less likely to use `pi-ctl tail`.
 
 This pattern waits for a worker, drains new entries, saves the cursor record, and sends the drain to a supervisor. Adapt it rather than parsing human TUI output.
 
