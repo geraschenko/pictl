@@ -57,7 +57,9 @@ RPC passthrough (sent to the agent's pi process; --json prints the raw response)
 ${rpcCommandUsage()}
 
 <agent> accepts an agent id (unique prefixes work). Use --tag at spawn time and
-list --cwd <dir> to find agents working in a shared directory.`);
+list --cwd <dir> to find agents working in a shared directory. To adopt an
+existing pi session into a managed agent, exit it and run
+pi-ctl spawn -- --session <session-id>.`);
   process.exit(2);
 }
 
