@@ -4,7 +4,7 @@ Use this reference when writing scripts or workflows around `pi-ctl`. For one-of
 
 ## General scripting rules
 
-- Prefer machine-readable output: `list --json`, `status --json`, RPC `--raw`, and `pi-ctl tail` JSONL.
+- Prefer machine-readable output: `list --json`, `status --json`, RPC command output, and `pi-ctl tail` JSONL. RPC commands already print JSON by default; use `--raw` only when you need the exact wire response.
 - Do not parse the interactive TUI or human-readable `status` output in scripts.
 - Persist enough state to restart safely: agent ids, role names, and any tail cursor.
 - Make scripts idempotent: if an agent id already exists, reuse it.
