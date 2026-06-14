@@ -111,7 +111,6 @@ Questions:
 
 - Should `--and-wait` be kept as pure completion waiting, or replaced/repurposed as output streaming?
 - Is `--and-tail` the right name?
-- What exact message-shaped output should be the default?
 - Can entries be reliably recovered from the event stream without duplicating fragile pi internals?
 - Can messages be reliably derived from entries in the same way pi computes `get_messages`?
 - Should this logic live in pictl unless pi already exports a suitable filter-map?
