@@ -1,11 +1,5 @@
 # Global target selection
 
-## Status
-
-Exploratory. This is not a decided design.
-
-## Observation
-
 The current command shape puts the agent id after the command name:
 
 ```bash
@@ -120,7 +114,7 @@ pictl --target abc spawn    # probably an error
 
 ## Open questions
 
-- Should positional target arguments be removed entirely, or kept as a secondary form?
+- Should positional target arguments be removed entirely, or kept as a secondary form?  TDC: I lean towards removing them. Is there any argument for keeping them?
 - Is `target` really the right term, or just convenient for CLI grammar?
 - Where should the agent/target terminology change: CLI help, docs, code types, env vars, user-facing errors?
 - Should `PICTL_TARGET` be documented as the normal repeated-interaction workflow?

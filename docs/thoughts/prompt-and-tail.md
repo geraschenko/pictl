@@ -1,11 +1,5 @@
 # Prompt, tail, and entries-vs-events
 
-## Status
-
-Exploratory. This is not a decided design.
-
-## Observation
-
 `prompt --and-wait` may be solving the wrong problem for scripts. Waiting until a turn ends is useful, but a client often wants the activity produced after sending the prompt as the command's output.
 
 Similarly, `tail --follow` feels like it may not be quite the right abstraction yet. We previously decided that events should be treated as wakeups and session entries should remain the source of truth: `tail --follow` listens for events, then re-drains `get_entries --since <cursor>`. That avoids reproducing pi's event-to-entry logic in pictl.
@@ -79,6 +73,7 @@ pictl tail --target <target> --raw
 ```
 
 Names are not decided. `--raw` is especially overloaded because RPC passthrough uses it for raw wire responses; using the same flag for “raw events” may be confusing.
+TDC: `--raw` is exactly correct here, not overloading. It means we're doing raw passthrough of the wire format.
 
 ## Tail as a filter-map over events
 
@@ -118,9 +113,9 @@ Questions:
 
 - Should `--and-wait` be kept as pure completion waiting, or replaced/repurposed as output streaming?
 - Is `--and-tail` the right name?
-- What should the default output format be: messages, entries, or something hybrid?
+- What should the default output format be: messages, entries, or something hybrid? TDC: default should be messages; I told you that already.
 - Can entries be reliably recovered from the event stream without duplicating fragile pi internals?
 - Can messages be reliably derived from entries in the same way pi computes `get_messages`?
-- Should this logic live in pictl, pi, or both?
-- What cursor should be emitted for message-level output if messages do not include ids?
-- How should compaction, tree navigation, forks, and session replacement appear in the default stream?
+- Should this logic live in pictl, pi, or both? TDC: this logic obviously has to live in pictl, unless pi already exports the filtermap (which I doubt)
+- What cursor should be emitted for message-level output if messages do not include ids? TDC: I explained this. The point is that the events/entries _do_ contain the ids, so when we filtermap to turn them into messages, we have to preserve the id of the last one. You clearly didn't understand this.
+- How should compaction, tree navigation, forks, and session replacement appear in the default stream? TDC: as events/entries, there is no issue. However, in the message stream, we should somehow indicate these events (even though they are not messages) because they do change the message set.

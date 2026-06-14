@@ -1,11 +1,5 @@
 # Command-line argument parsing
 
-## Status
-
-Exploratory. This is not a decided design.
-
-## Observation
-
 The current CLI uses Node's built-in `parseArgs` directly in each command. This works, but the result feels increasingly awkward as the CLI grows.
 
 Current pain points:
@@ -54,6 +48,8 @@ Unknown which of these are hard requirements yet:
 - shell completions;
 - nested commands, if command grammar ever grows;
 - clean separation between command definitions, parsing, and execution.
+
+TDC: I think I'd also like `--help` to be more punchy (just the most common commands), with a `--helpfull` (or similar) for the full listing.
 
 ## Relationship to other thoughts
 
