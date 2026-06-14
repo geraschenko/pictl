@@ -30,15 +30,15 @@ async function writeAgent(agentId: string): Promise<void> {
 }
 
 before(async () => {
-  baseDir = await mkdtemp(join(tmpdir(), "pi-ctl-registry-test-"));
-  process.env.PI_CTL_DIR = baseDir;
+  baseDir = await mkdtemp(join(tmpdir(), "pictl-registry-test-"));
+  process.env.PICTL_DIR = baseDir;
 
   await writeAgent("alpha-agent");
   await writeAgent("beta-agent");
 });
 
 after(async () => {
-  delete process.env.PI_CTL_DIR;
+  delete process.env.PICTL_DIR;
   await rm(baseDir, { recursive: true, force: true });
 });
 

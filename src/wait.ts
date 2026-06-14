@@ -1,5 +1,5 @@
 /**
- * `pi-ctl wait <agent> --until turn-end|idle|no-activity:<secs>` — block until
+ * `pictl wait <agent> --until turn-end|idle|no-activity:<secs>` — block until
  * the agent reaches a condition. Exit codes: 0 condition met, 1 runtime error,
  * 2 usage error, 3 `--timeout` expired.
  *
@@ -159,7 +159,7 @@ export async function runWait(argv: string[]): Promise<void> {
   }
   if (parsed.positionals.length !== 1 || parsed.values.until === undefined) {
     throw new UsageError(
-      `usage: pi-ctl wait <agent> --until ${WAIT_UNTIL_USAGE} [--timeout <secs>]`,
+      `usage: pictl wait <agent> --until ${WAIT_UNTIL_USAGE} [--timeout <secs>]`,
     );
   }
   const condition = parseWaitCondition(parsed.values.until);

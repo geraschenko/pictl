@@ -1,6 +1,6 @@
 /**
  * ANSI escape sequences shared by the holder and the attach client. Keep this
- * file free of pi-ctl-specific imports.
+ * file free of pictl-specific imports.
  */
 
 export const SHOW_CURSOR = "\x1b[?25h";

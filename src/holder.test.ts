@@ -51,7 +51,7 @@ test("projectTrustWouldBlock short-circuits when an approve flag is present", ()
 });
 
 test("projectTrustWouldBlock is false for a directory with no trust inputs", async () => {
-  const emptyDir = await mkdtemp(join(tmpdir(), "pi-ctl-trust-test-"));
+  const emptyDir = await mkdtemp(join(tmpdir(), "pictl-trust-test-"));
   try {
     assert.equal(projectTrustWouldBlock(emptyDir, []), false);
   } finally {

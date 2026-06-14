@@ -32,7 +32,7 @@ const COMMANDS: Record<string, (argv: string[]) => Promise<void>> = {
 };
 
 function usage(): never {
-  console.error(`usage: pi-ctl <command> [args]
+  console.error(`usage: pictl <command> [args]
 
 commands:
   spawn [--cwd <dir>] [--id <id>] [--tag <label>] [-- <pi args...>]  start an agent, print its id
@@ -59,7 +59,7 @@ ${rpcCommandUsage()}
 <agent> accepts an agent id (unique prefixes work). Use --tag at spawn time and
 list --cwd <dir> to find agents working in a shared directory. To adopt an
 existing pi session into a managed agent, exit it and run
-pi-ctl spawn -- --session <session-id>.`);
+pictl spawn -- --session <session-id>.`);
   process.exit(2);
 }
 
@@ -67,7 +67,7 @@ const [command, ...argv] = process.argv.slice(2);
 const handler = command === undefined ? undefined : COMMANDS[command];
 if (!handler) {
   if (command !== undefined) {
-    console.error(`pi-ctl: unknown command: ${command}\n`);
+    console.error(`pictl: unknown command: ${command}\n`);
   }
   usage();
 }
@@ -76,7 +76,7 @@ try {
   await handler(argv);
 } catch (error) {
   console.error(
-    `pi-ctl: ${error instanceof Error ? error.message : String(error)}`,
+    `pictl: ${error instanceof Error ? error.message : String(error)}`,
   );
   process.exit(
     error instanceof WaitTimeoutError ? 3 : error instanceof UsageError ? 2 : 1,

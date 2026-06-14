@@ -1,4 +1,4 @@
-/** Small shared helpers. Keep this file free of pi-ctl-specific imports. */
+/** Small shared helpers. Keep this file free of pictl-specific imports. */
 
 import { access } from "node:fs/promises";
 

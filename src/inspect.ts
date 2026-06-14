@@ -1,5 +1,5 @@
 /**
- * `pi-ctl list | status` — read-only inspection of the registry. Neither
+ * `pictl list | status` — read-only inspection of the registry. Neither
  * revives dormant agents: a dead holder is not garbage.
  */
 

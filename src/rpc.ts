@@ -147,7 +147,7 @@ export class PiSocketClient {
     if (this.closed) {
       throw new Error("pi socket closed");
     }
-    const id = `pi-ctl-${++this.requestCounter}`;
+    const id = `pictl-${++this.requestCounter}`;
     const response = await new Promise<RpcResponse>((resolve, reject) => {
       this.pending.set(id, { resolve, reject });
       this.socket.write(`${JSON.stringify({ ...command, id })}\n`);
@@ -188,7 +188,7 @@ function validateHello(line: string): Error | undefined {
     }
     if (hello.version !== 1) {
       process.stderr.write(
-        `pi-ctl: warning: pi socket protocol version ${hello.version}, expected 1\n`,
+        `pictl: warning: pi socket protocol version ${hello.version}, expected 1\n`,
       );
     }
     return undefined;

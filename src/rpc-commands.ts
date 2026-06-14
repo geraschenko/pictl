@@ -87,7 +87,7 @@ const THINKING_LEVELS = [
  * pi-ai's ImageContent. Derived from the prompt command's `images` field
  * rather than imported: the coding-agent package index does not re-export
  * it, and @earendil-works/pi-ai is a transitive dependency that does not
- * resolve from pi-ctl's node_modules.
+ * resolve from pictl's node_modules.
  */
 type ImageContent = NonNullable<
   Extract<RpcCommand, { type: "prompt" }>["images"]
@@ -142,7 +142,7 @@ async function readStdin(): Promise<string> {
     data += chunk.toString();
   }
   // Strip a single trailing newline, matching shell `$(...)` capture so
-  // `echo msg | pi-ctl prompt -` sends "msg", not "msg\n".
+  // `echo msg | pictl prompt -` sends "msg", not "msg\n".
   return data.replace(/\n$/, "");
 }
 
@@ -441,7 +441,7 @@ const RPC_CLI_SPECS: Record<string, RpcCliSpec> = {
 };
 
 function cliInvocation(cliName: string, spec: RpcCliSpec): string {
-  const parts = [`pi-ctl ${cliName} <agent>`, ...spec.positionals];
+  const parts = [`pictl ${cliName} <agent>`, ...spec.positionals];
   if (spec.flagsUsage) {
     parts.push(spec.flagsUsage);
   }
@@ -524,7 +524,7 @@ export function rpcCommandHandlers(): Record<
 export function rpcCommandUsage(): string {
   const alignmentCapColumns = 60;
   const rows = Object.entries(RPC_CLI_SPECS).map(([cliName, spec]) => {
-    const invocation = cliInvocation(cliName, spec).replace(/^pi-ctl /, "");
+    const invocation = cliInvocation(cliName, spec).replace(/^pictl /, "");
     return [invocation, spec.summary] as const;
   });
   const width = Math.max(

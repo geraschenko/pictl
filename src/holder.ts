@@ -1,5 +1,5 @@
 /**
- * `pi-ctl _hold` — the holder daemon. One per agent. It owns the PTY that pi
+ * `pictl _hold` — the holder daemon. One per agent. It owns the PTY that pi
  * runs in, maintains detached screen state via @xterm/headless, and is the
  * sole writer of agent.json. It connects to its own pi.sock as a client to
  * track session replacements (never polling get_state per event).
@@ -221,7 +221,7 @@ export async function runHold(argv: string[]): Promise<void> {
   if (projectTrustWouldBlock(args.cwd, args.piArgs)) {
     const message =
       `pi would block on the project-trust prompt in ${args.cwd}; ` +
-      `pass --[no-]approve (pi-ctl spawn -- --approve) or trust/distrust ` +
+      `pass --[no-]approve (pictl spawn -- --approve) or trust/distrust ` +
       `the directory once interactively by running pi there.`;
     console.error(`[holder] ${message}`);
     signalReady(args.readyFd, { ok: false, error: message });

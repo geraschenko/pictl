@@ -1,5 +1,5 @@
 /**
- * `pi-ctl attach <agent>` — connect the local terminal to an agent's PTY via
+ * `pictl attach <agent>` — connect the local terminal to an agent's PTY via
  * the holder's tty.sock: raw-mode stdin, snapshot render, then bidirectional
  * byte proxying until the detach keybinding.
  */

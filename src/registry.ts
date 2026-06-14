@@ -1,5 +1,5 @@
 /**
- * The agent registry is a directory of agent dirs: $PI_CTL_DIR/<agentId>/ with
+ * The agent registry is a directory of agent dirs: $PICTL_DIR/<agentId>/ with
  * agent.json (written only by the holder), pi.sock, tty.sock, holder.log,
  * and optionally a tombstone file marking the dir for gc.
  */
@@ -37,13 +37,13 @@ export interface AgentRecord {
   agentDir: string;
 }
 
-export function piCtlBaseDir(): string {
-  return process.env.PI_CTL_DIR ?? join(homedir(), ".pi", "agents");
+export function pictlBaseDir(): string {
+  return process.env.PICTL_DIR ?? join(homedir(), ".pi", "agents");
 }
 
 /** The agent's own directory within the registry. */
 export function agentDirPath(agentId: string): string {
-  return join(piCtlBaseDir(), agentId);
+  return join(pictlBaseDir(), agentId);
 }
 
 export function agentJsonPath(agentDir: string): string {
@@ -136,7 +136,7 @@ export async function writeAgentRecord(record: AgentRecord): Promise<void> {
 
 export async function listAgentIds(): Promise<string[]> {
   try {
-    const entries = await readdir(piCtlBaseDir(), { withFileTypes: true });
+    const entries = await readdir(pictlBaseDir(), { withFileTypes: true });
     return entries.filter((e) => e.isDirectory()).map((e) => e.name);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
@@ -176,8 +176,8 @@ export async function loadAgent(agentIdPrefix: string): Promise<AgentRecord> {
   if (read.kind !== "ok") {
     throw new Error(
       read.kind === "missing"
-        ? `agent '${agentId}' has no agent.json (failed spawn?); run \`pi-ctl gc\``
-        : `agent '${agentId}' has a corrupt agent.json: ${read.error}; run \`pi-ctl gc\``,
+        ? `agent '${agentId}' has no agent.json (failed spawn?); run \`pictl gc\``
+        : `agent '${agentId}' has a corrupt agent.json: ${read.error}; run \`pictl gc\``,
     );
   }
   return read.record;

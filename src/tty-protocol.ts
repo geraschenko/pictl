@@ -1,6 +1,6 @@
 /**
  * Framing for the holder's tty.sock attach protocol, shared by the holder
- * (server) and `pi-ctl attach` (client). Binary frames — raw PTY output is
+ * (server) and `pictl attach` (client). Binary frames — raw PTY output is
  * high-volume, so no JSONL/base64:
  *
  *   [type: u8][payloadLength: u32 BE][payload]
@@ -10,7 +10,7 @@
  * connect), `output` (raw PTY output bytes), `exit` (JSON, the agent is
  * shutting down).
  *
- * Keep this file free of pi-ctl-specific imports: it defines the wire
+ * Keep this file free of pictl-specific imports: it defines the wire
  * protocol and nothing else.
  */
 

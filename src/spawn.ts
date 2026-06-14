@@ -1,6 +1,6 @@
 /**
- * `pi-ctl spawn` — create an agent dir and daemonize a holder for it.
- * Also home of launchHolder, shared with `pi-ctl resume`.
+ * `pictl spawn` — create an agent dir and daemonize a holder for it.
+ * Also home of launchHolder, shared with `pictl resume`.
  */
 
 import { spawn as spawnChild } from "node:child_process";
@@ -17,7 +17,7 @@ import { delimiter, isAbsolute, join, resolve } from "node:path";
 import type { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { agentDirPath, holderLogPath, piCtlBaseDir } from "./registry.ts";
+import { agentDirPath, holderLogPath, pictlBaseDir } from "./registry.ts";
 import { splitAtDoubleDash } from "./util.ts";
 
 export interface HolderLaunch {
@@ -40,13 +40,13 @@ function isExecutableFile(path: string): boolean {
   }
 }
 
-/** PI_CTL_PI_BIN wins; otherwise search PATH for `pi`. Returns an absolute path. */
+/** PICTL_PI_BIN wins; otherwise search PATH for `pi`. Returns an absolute path. */
 export function resolvePiBin(): string {
-  const fromEnv = process.env.PI_CTL_PI_BIN;
+  const fromEnv = process.env.PICTL_PI_BIN;
   if (fromEnv) {
     const absolute = resolve(fromEnv);
     if (!isExecutableFile(absolute)) {
-      throw new Error(`PI_CTL_PI_BIN is not an executable file: ${absolute}`);
+      throw new Error(`PICTL_PI_BIN is not an executable file: ${absolute}`);
     }
     return absolute;
   }
@@ -60,7 +60,7 @@ export function resolvePiBin(): string {
     }
   }
   throw new Error(
-    "no `pi` found on PATH (set PI_CTL_PI_BIN to point at the binary)",
+    "no `pi` found on PATH (set PICTL_PI_BIN to point at the binary)",
   );
 }
 
@@ -154,7 +154,7 @@ export async function runSpawn(argv: string[]): Promise<void> {
   const piBin = resolvePiBin();
   const agentDir = agentDirPath(agentId);
 
-  await mkdir(piCtlBaseDir(), { recursive: true });
+  await mkdir(pictlBaseDir(), { recursive: true });
   try {
     await mkdir(agentDir);
   } catch (error) {
@@ -165,7 +165,7 @@ export async function runSpawn(argv: string[]): Promise<void> {
   }
 
   // On failure the dir is left in place so holder.log can be inspected;
-  // `pi-ctl gc` removes dirs that never got an agent.json.
+  // `pictl gc` removes dirs that never got an agent.json.
   await launchHolder({
     agentDir,
     agentId,

@@ -1,20 +1,20 @@
-# pi-ctl RPC details and gotchas
+# pictl RPC details and gotchas
 
-Use this reference when you need exact command behavior beyond the top-level pi-ctl skill.
+Use this reference when you need exact command behavior beyond the top-level pictl skill.
 
 ## `prompt` vs `steer` vs `follow-up`
 
 Prefer `prompt` for most messaging.
 
 ```bash
-pi-ctl prompt <agent> "Do this." --and-wait
+pictl prompt <agent> "Do this." --and-wait
 ```
 
 When the target may be streaming, use `prompt --streaming-behavior` instead of checking status and then choosing a raw command:
 
 ```bash
-pi-ctl prompt <agent> "Correction: use branch feature/foo." --streaming-behavior steer
-pi-ctl prompt <agent> "After this turn, also check Y." --streaming-behavior follow-up
+pictl prompt <agent> "Correction: use branch feature/foo." --streaming-behavior steer
+pictl prompt <agent> "After this turn, also check Y." --streaming-behavior follow-up
 ```
 
 Why: checking whether an agent is streaming and then calling raw `steer` or `follow-up` is a race. The target may finish between your check and your send. `prompt --streaming-behavior ...` lets pi decide atomically:
@@ -25,31 +25,31 @@ Why: checking whether an agent is streaming and then calling raw `steer` or `fol
 Raw commands still exist for exact RPC use:
 
 ```bash
-pi-ctl steer <agent> "Interject into the current turn."
-pi-ctl follow-up <agent> "Queue this after the current turn."
+pictl steer <agent> "Interject into the current turn."
+pictl follow-up <agent> "Queue this after the current turn."
 ```
 
 Use them only when you deliberately want those exact semantics.
 
 ## Waiting after prompting
 
-`pi-ctl prompt --and-wait` waits on the same socket connection used to send the prompt. This is the recommended one-shot form because it avoids subscription races.
+`pictl prompt --and-wait` waits on the same socket connection used to send the prompt. This is the recommended one-shot form because it avoids subscription races.
 
 ```bash
-pi-ctl prompt <agent> "Do X." --and-wait
+pictl prompt <agent> "Do X." --and-wait
 ```
 
 Equivalent two-step usage is usually fine too:
 
 ```bash
-pi-ctl prompt <agent> "Do X."
-pi-ctl wait <agent> --until turn-end
+pictl prompt <agent> "Do X."
+pictl wait <agent> --until turn-end
 ```
 
 Use `--and-wait-until` when you want a condition other than turn end:
 
 ```bash
-pi-ctl prompt <agent> "Start investigating." --and-wait-until no-activity:30
+pictl prompt <agent> "Start investigating." --and-wait-until no-activity:30
 ```
 
 ## Abort etiquette
@@ -57,13 +57,13 @@ pi-ctl prompt <agent> "Start investigating." --and-wait-until no-activity:30
 `abort` interrupts the current turn. Prefer sending a correction first:
 
 ```bash
-pi-ctl prompt <agent> "Correction: stop editing foo; inspect bar instead." --streaming-behavior steer
+pictl prompt <agent> "Correction: stop editing foo; inspect bar instead." --streaming-behavior steer
 ```
 
 Use abort when continuing the current turn is harmful or wasteful:
 
 ```bash
-pi-ctl abort <agent>
+pictl abort <agent>
 ```
 
 ## Lifecycle command meanings
@@ -87,10 +87,10 @@ Most commands that need the socket transparently revive dormant or archived agen
 
 ## Tail cursors are session-scoped
 
-`pi-ctl tail` cursor records include both `sessionId` and `entryId`:
+`pictl tail` cursor records include both `sessionId` and `entryId`:
 
 ```json
-{"type":"pi_ctl_cursor","sessionId":"...","entryId":"..."}
+{"type":"pictl_cursor","sessionId":"...","entryId":"..."}
 ```
 
 In simple usage, saving only `entryId` often works. For robust orchestration, save both. If the session changes, an old entry id may not exist in the new session and `tail --since` can fail with “entry not found”.
@@ -100,13 +100,13 @@ Session changes can happen via `/new`, `/resume`, `fork`, `clone`, or `switch-se
 ## Useful passthrough commands
 
 ```bash
-pi-ctl get-state <agent>                 # model, streaming state, pending count, session info
-pi-ctl get-last-assistant-text <agent>   # text of the last assistant message
-pi-ctl get-messages <agent>              # full message history
-pi-ctl get-entries <agent>               # session entries
-pi-ctl get-tree <agent>                  # session entry tree
-pi-ctl get-session-stats <agent>         # token/cost stats
-pi-ctl get-commands <agent>              # slash commands available to prompt
+pictl get-state <agent>                 # model, streaming state, pending count, session info
+pictl get-last-assistant-text <agent>   # text of the last assistant message
+pictl get-messages <agent>              # full message history
+pictl get-entries <agent>               # session entries
+pictl get-tree <agent>                  # session entry tree
+pictl get-session-stats <agent>         # token/cost stats
+pictl get-commands <agent>              # slash commands available to prompt
 ```
 
 Most passthrough commands print response data as JSON. Add `--raw` for the raw RPC response record.

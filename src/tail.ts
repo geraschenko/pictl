@@ -1,10 +1,10 @@
 /**
- * `pi-ctl tail <agent> [--follow] [--since <entry-id>] [--until <cond>]
+ * `pictl tail <agent> [--follow] [--since <entry-id>] [--until <cond>]
  * [--events]` — session entries as JSONL on stdout, one entry per line,
- * followed by a `{"type":"pi_ctl_cursor","sessionId":...,"entryId":...}` record
+ * followed by a `{"type":"pictl_cursor","sessionId":...,"entryId":...}` record
  * so callers can persist their place (cursors are session-scoped: persist the
  * sessionId alongside, and expect "entry not found" after `/new`, `/resume`,
- * fork, or clone — pi-ctl does not interweave session files).
+ * fork, or clone — pictl does not interweave session files).
  *
  * --follow keeps the connection open and streams subsequent entries. Events
  * are only wakeups: every drain re-issues `get_entries --since <cursor>`, so
@@ -70,7 +70,7 @@ function printCursorRecord(
 ): void {
   console.log(
     JSON.stringify({
-      type: "pi_ctl_cursor",
+      type: "pictl_cursor",
       sessionId: sessionId ?? null,
       entryId,
     }),
@@ -211,7 +211,7 @@ export async function runTail(argv: string[]): Promise<void> {
   }
   if (parsed.positionals.length !== 1) {
     throw new UsageError(
-      `usage: pi-ctl tail <agent> [--follow] [--since <entry-id>] [--until ${WAIT_UNTIL_USAGE}] [--events]`,
+      `usage: pictl tail <agent> [--follow] [--since <entry-id>] [--until ${WAIT_UNTIL_USAGE}] [--events]`,
     );
   }
   if (parsed.values.events && parsed.values.since !== undefined) {

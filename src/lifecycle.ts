@@ -1,5 +1,5 @@
 /**
- * `pi-ctl suspend | archive | purge | resume | gc` — stopping, reviving, and
+ * `pictl suspend | archive | purge | resume | gc` — stopping, reviving, and
  * cleaning up agents.
  *
  * suspend, archive, and purge share the polite path: wait until idle (not
@@ -76,7 +76,7 @@ async function reviveAgent(agent: AgentRecord): Promise<AgentRecord> {
     if (isPidAlive(agent.holderPid)) {
       return agent;
     }
-    process.stderr.write(`pi-ctl: reviving dormant agent ${agent.id}\n`);
+    process.stderr.write(`pictl: reviving dormant agent ${agent.id}\n`);
     // Reviving an archived agent — including implicitly, by sending it a
     // command — un-archives it.
     await setArchived(agent.agentDir, false);

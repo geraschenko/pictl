@@ -1,10 +1,10 @@
 {
-  "name": "pi-ctl",
+  "name": "pictl",
   "version": "0.1.0",
   "description": "Spawn, observe, control, and attach to a fleet of pi coding-agent instances",
   "type": "module",
   "bin": {
-    "pi-ctl": "dist/main.js"
+    "pictl": "dist/main.js"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
