@@ -5,31 +5,33 @@ description: Use pi-ctl to discover, message, monitor, spawn, suspend, resume, a
 
 # pi-ctl
 
-`pi-ctl` controls long-lived pi agents. Use it to discover peers, send them work, monitor their progress, and spawn helper agents.
+`pi-ctl` controls long-lived pi agents. Use it to discover peers, send them work, monitor progress, and spawn helper agents.
+
+For scripting/orchestration details, read [references/orchestration.md](references/orchestration.md). For RPC command gotchas, read [references/rpc-details.md](references/rpc-details.md).
 
 ## Core rules
 
-- Prefer `prompt`/`follow-up`/`steer` over interrupting an agent.
-- Prefer `suspend` or `archive` over `purge`.  TDC: isn't this redundant with the line below?
 - Do **not** purge, force-kill, or take over agents you did not create unless the user explicitly asks.
 - When spawning subagents, give them clear role instructions and tell them relevant agent ids, including your own `$PI_AGENT_ID`.
-- Treat entry cursors as session-scoped: persist both `sessionId` and `entryId`. TDC: is this really necessary? I expect it to be extrordinarily rare for session id to change. Maybe this could go in a supplementary file of gotchas or details?
+- Prefer `pi-ctl prompt ... --streaming-behavior ...` over raw `steer`/`follow-up`; it avoids races when the target's streaming state changes.
+- Use machine-readable output (`--json`, `tail`) for scripts; do not parse human TUI text.
 
-## Identify yourself and discover agents
+## Identify yourself and discover nearby agents
 
-TDC: since you'll typically want agents running in the same directory as yourself, we should probably make `pi-ctl list --cwd .` the demo example. What do you think?
+Agents commonly need peers working in the same directory:
+
 ```bash
-echo $PI_AGENT_ID       # your own agent id, if pi-ctl spawned you
-pi-ctl list             # human-readable list
-pi-ctl list --json      # machine-readable list
-pi-ctl status <agent>   # details for one agent
+echo "$PI_AGENT_ID"          # your own agent id, if pi-ctl spawned you
+pi-ctl list --cwd .          # human-readable agents in this cwd
+pi-ctl list --cwd . --json   # machine-readable agents in this cwd
+pi-ctl status <agent>        # details for one agent
 ```
 
-`<agent>` accepts a full agent id or any unique prefix. Use tags, cwd, and status output to avoid confusing unrelated agents.
+`<agent>` accepts a full agent id or any unique prefix. Use cwd, tags, and status output to avoid confusing unrelated agents.
 
 ## Message another agent
 
-Send a normal task when the peer is idle:
+Send a normal task and wait for that turn to finish:
 
 ```bash
 pi-ctl prompt <agent> "Please do X and report back." --and-wait
@@ -41,19 +43,17 @@ Read a longer prompt from stdin:
 pi-ctl prompt <agent> - --and-wait < task.md
 ```
 
-If the peer is busy, either queue a follow-up or explicitly choose streaming behavior:
+If the peer might be busy, choose what should happen explicitly:
 
 ```bash
-pi-ctl follow-up <agent> "After your current turn, also check Y."
-pi-ctl prompt <agent> "Do this next." --streaming-behavior follow-up
+# Timely correction to the active turn if it is streaming; normal prompt otherwise.
+pi-ctl prompt <agent> "Correction: use branch feature/foo, not main." --streaming-behavior steer
+
+# Queue this as the next turn if the agent is streaming; normal prompt otherwise.
+pi-ctl prompt <agent> "After your current turn, also check Y." --streaming-behavior follow-up
 ```
 
-Use `steer` only for timely corrections during an active turn:
-
-```bash
-pi-ctl steer <agent> "Correction: use branch feature/foo, not main."
-```
-TDC: I'm not sure that steer or follow-up should *ever* be used. Why wouldn't you just do `pi-ctl prompt <agent> --streaming-behavior steer "Correction:..."` in situations where you expect the agent may be streaming? If you use steer and the agent finishes after you checked its status but before you sent the message, then the message gets queued up but not actually executed until you send your next message. I think this skill may need a bunch of reference documents with little bits of knowledge about pi and its rpc commands.
+Use raw `pi-ctl steer` and `pi-ctl follow-up` only when you deliberately want those exact RPC commands. In most cases, `prompt --streaming-behavior ...` is safer.
 
 Abort only when necessary:
 
@@ -75,30 +75,26 @@ pi-ctl wait <agent> --until no-activity:30 --timeout 120
 
 Exit code `3` means `--timeout` expired. Do not assume the task failed; the condition simply was not reached in time.
 
-## Read session entries with durable cursors
+## Check what happened
 
-`tail` emits JSONL. Normal entry records are followed by cursor records like:
-
-```json
-{"type":"pi_ctl_cursor","sessionId":"...","entryId":"..."}
-```
-
-Examples:
+For casual inspection:
 
 ```bash
-pi-ctl tail <agent>
-pi-ctl tail <agent> --since "$ENTRY_ID"
-pi-ctl tail <agent> --follow --until idle
-pi-ctl tail <agent> --events --until no-activity:10
+pi-ctl get-state <agent>
+pi-ctl get-last-assistant-text <agent>
+pi-ctl get-messages <agent>
+pi-ctl get-session-stats <agent>
 ```
 
-Persist both `sessionId` and `entryId`. If a saved cursor is rejected as “entry not found”, the agent likely changed sessions via `/new`, `/resume`, `fork`, or `clone`; reset the cursor or ask the user how to proceed.
+For continuous or crash-resumable scripts, use `pi-ctl tail`; see [references/orchestration.md](references/orchestration.md).
+
+Most RPC passthrough commands print response data as JSON. Add `--json` to print the raw RPC response record.
 
 ## Spawn helper agents
 
 ```bash
 worker=$(pi-ctl spawn --tag worker -- --approve)
-pi-ctl prompt "$worker" "You are my worker agent. My agent id is ${PI_AGENT_ID:-unknown}. Please ..." --and-wait
+pi-ctl prompt "$worker" "You are my worker agent. My agent id is $PI_AGENT_ID. Please ..." --and-wait
 ```
 
 Use `--tag` to make helpers discoverable. `-- --approve` passes pi's project-trust approval flag through to pi; use it only when appropriate for the current project/workflow.
@@ -122,45 +118,3 @@ pi-ctl purge <agent> --force # last resort for wedged agents
 ```
 
 Only purge agents you created or that the user explicitly told you to remove.
-
-## Useful inspection and RPC commands
-
-```bash
-pi-ctl get-state <agent>
-pi-ctl get-last-assistant-text <agent>
-pi-ctl get-messages <agent>
-pi-ctl get-session-stats <agent>
-pi-ctl get-commands <agent>
-```
-
-Most RPC passthrough commands print response data as JSON. Add `--json` to print the raw RPC response record.
-
-## Minimal worker-drain pattern
-
-TDC: we should probably have a separate sub-skill or reference document for programmatically using pi-ctl (e.g. to write orchestration scripts) vs just using it one-off to interact with other agents. Does this distinction make sense? For example, casual interaction is less likely to use `pi-ctl tail`.
-
-This pattern waits for a worker, drains new entries, saves the cursor record, and sends the drain to a supervisor. Adapt it rather than parsing human TUI output.
-
-```bash
-cursor_file="$STATE_DIR/worker-cursor.json"
-entries_file="$STATE_DIR/worker-entries.jsonl"
-
-since_args=()
-if [ -s "$cursor_file" ]; then
-  entry_id=$(jq -r '.entryId // empty' < "$cursor_file")
-  if [ -n "$entry_id" ]; then
-    since_args=(--since "$entry_id")
-  fi
-fi
-
-pi-ctl wait "$worker" --until turn-end
-pi-ctl tail "$worker" "${since_args[@]}" > "$entries_file"
-
-grep '"type":"pi_ctl_cursor"' "$entries_file" | tail -1 > "$cursor_file"
-# Only notify when there were non-cursor entries.
-if grep -v '"type":"pi_ctl_cursor"' "$entries_file" >/dev/null; then
-  pi-ctl prompt "$supervisor" - --and-wait < "$entries_file"
-fi
-```
-
-If `jq` is unavailable, use another JSON parser; do not rely on fragile human-readable output for orchestration.
