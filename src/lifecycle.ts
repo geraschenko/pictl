@@ -1,24 +1,30 @@
 /**
- * `pi-ctl suspend | archive | purge | resume` — stopping and reviving agents.
+ * `pi-ctl suspend | archive | purge | resume | gc` — stopping, reviving, and
+ * cleaning up agents.
  *
- * suspend, archive, and purge share the polite path: wait for full quiescence
- * (not streaming AND pending message queue empty), SIGTERM pi, SIGKILL
- * escalation if it lingers. suspend leaves the agent dormant; archive also
- * marks it hidden from `list`; purge tombstones and removes the directory (the
- * only destructive command). resume revives a dormant or archived agent.
+ * suspend, archive, and purge share the polite path: wait until idle (not
+ * streaming AND pending message queue empty), SIGTERM pi, SIGKILL escalation if
+ * it lingers. suspend leaves the agent dormant; archive also marks it hidden
+ * from `list`; purge tombstones and removes the directory (the only destructive
+ * command). resume revives a dormant or archived agent. gc removes the leftover
+ * dirs of interrupted purges and failed spawns.
  *
- * All accept multiple agents; ids are resolved up front (so a typo aborts
- * before anything is touched), then agents are acted on concurrently,
- * continuing past per-agent failures and reporting them at the end.
+ * All of suspend/archive/purge/resume accept multiple agents; ids are resolved
+ * up front (so a typo aborts before anything is touched), then agents are acted
+ * on concurrently, continuing past per-agent failures and reporting them at the
+ * end.
  */
 
 import { readFile, rm, writeFile } from "node:fs/promises";
 import { parseArgs } from "node:util";
 import {
   type AgentRecord,
+  agentDirPath,
   archivedPath,
+  classifyAgentDir,
   holderLogPath,
   isPidAlive,
+  listAgentIds,
   loadAgent,
   piSocketPath,
   reviveLockPath,
@@ -147,15 +153,15 @@ function killSilently(pid: number, signal: NodeJS.Signals): void {
   }
 }
 
-// TDC: We still have references to "quiescence". Do an audit for the old quiescent/idle terminology, and let's fix it.
-export class QuiescenceTimeoutError extends Error {}
+export class IdleTimeoutError extends Error {}
 
 /**
- * Wait until the agent is fully quiescent. State is re-checked only on
- * agent_end (once per turn), not per event. The waiter is registered before
- * each get_state so an agent_end landing between the two is not missed.
+ * Wait until the agent is fully idle (not streaming AND pending queue empty).
+ * State is re-checked only on agent_end (once per turn), not per event. The
+ * waiter is registered before each get_state so an agent_end landing between
+ * the two is not missed.
  */
-export async function waitQuiescent(
+export async function waitIdle(
   client: PiSocketClient,
   timeoutMs: number | undefined,
 ): Promise<void> {
@@ -177,12 +183,12 @@ export async function waitQuiescent(
 
     if (deadline === undefined) {
       if ((await nextAgentEnd) === "closed") {
-        throw new Error("pi socket closed while waiting for quiescence");
+        throw new Error("pi socket closed while waiting for idle");
       }
     } else {
       const remaining = deadline - Date.now();
       if (remaining <= 0) {
-        throw new QuiescenceTimeoutError();
+        throw new IdleTimeoutError();
       }
       // Cleared after the race; see the timer comment in terminatePi.
       let timeoutTimer: NodeJS.Timeout | undefined;
@@ -192,10 +198,10 @@ export async function waitQuiescent(
       const winner = await Promise.race([nextAgentEnd, timeout]);
       clearTimeout(timeoutTimer);
       if (winner === "timeout") {
-        throw new QuiescenceTimeoutError();
+        throw new IdleTimeoutError();
       }
       if (winner === "closed") {
-        throw new Error("pi socket closed while waiting for quiescence");
+        throw new Error("pi socket closed while waiting for idle");
       }
     }
   }
@@ -287,7 +293,7 @@ function parseStopArgs(
 /**
  * Resolve all prefixes before acting (so a typo aborts before anything is
  * touched), then run `action` on every agent concurrently — agents are
- * independent, and concurrency keeps quiescence waits from compounding.
+ * independent, and concurrency keeps idle waits from compounding.
  * Failures are collected and reported in input order.
  */
 async function forEachAgent(
@@ -310,7 +316,7 @@ async function forEachAgent(
   }
 }
 
-/** The quiescence-wait → SIGTERM → escalate → holder-gone sequence shared by kill and suspend. */
+/** The idle-wait → SIGTERM → escalate → holder-gone sequence shared by purge and suspend. */
 async function stopRunningAgent(
   agent: AgentRecord,
   timeoutMs: number | undefined,
@@ -324,7 +330,7 @@ async function stopRunningAgent(
     if (abortFirst) {
       await client.request({ type: "abort" });
     }
-    await waitQuiescent(client, timeoutMs);
+    await waitIdle(client, timeoutMs);
     await terminatePi(client, agent.piPid);
   } finally {
     client.close();
@@ -354,7 +360,7 @@ async function purgeOne(
     try {
       await stopRunningAgent(agent, timeoutMs, now);
     } catch (error) {
-      if (error instanceof QuiescenceTimeoutError) {
+      if (error instanceof IdleTimeoutError) {
         throw new Error(`still busy after ${timeoutMs! / 1000}s; not purged`);
       }
       throw error;
@@ -390,7 +396,7 @@ export async function runSuspend(argv: string[]): Promise<void> {
     try {
       await stopRunningAgent(agent, timeoutMs, false);
     } catch (error) {
-      if (error instanceof QuiescenceTimeoutError) {
+      if (error instanceof IdleTimeoutError) {
         throw new Error(
           `still busy after ${timeoutMs! / 1000}s; not suspended`,
         );
@@ -413,7 +419,7 @@ export async function runArchive(argv: string[]): Promise<void> {
       try {
         await stopRunningAgent(agent, timeoutMs, false);
       } catch (error) {
-        if (error instanceof QuiescenceTimeoutError) {
+        if (error instanceof IdleTimeoutError) {
           throw new Error(
             `still busy after ${timeoutMs! / 1000}s; not archived`,
           );
@@ -451,4 +457,27 @@ export async function runResume(argv: string[]): Promise<void> {
     });
     console.log(`resumed ${agent.id}`);
   });
+}
+
+/**
+ * Remove agent dirs that are tombstoned (an interrupted purge) or corrupt (no
+ * valid agent.json, e.g. a failed spawn). Uses the socket-free registry
+ * classification — gc never connects to a live agent, and a dormant or
+ * archived agent is not garbage.
+ */
+export async function runGc(argv: string[]): Promise<void> {
+  parseArgs({ args: argv, options: {} });
+  const agentIds = await listAgentIds();
+  let removed = 0;
+  for (const agentId of agentIds) {
+    const status = await classifyAgentDir(agentId);
+    if (status.kind === "tombstoned" || status.kind === "corrupt") {
+      await rm(agentDirPath(agentId), { recursive: true, force: true });
+      console.log(`removed ${agentId} (${status.kind})`);
+      removed += 1;
+    }
+  }
+  console.log(
+    removed === 0 ? "nothing to remove" : `removed ${removed} agent dir(s)`,
+  );
 }

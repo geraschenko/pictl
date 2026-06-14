@@ -13,12 +13,13 @@
  * by a fresh cursor record) and only entries created after the replacement
  * stream out.
  *
- * --until <cond> follows until a wait condition holds (turn-end|idle|
- * no-activity:<secs>), then drains any trailing entries and exits 0. It implies
- * --follow and is incompatible with --events.
+ * --until <cond> stops following once a wait condition holds (turn-end|idle|
+ * no-activity:<secs>) and exits 0; in entry mode it drains any trailing entries
+ * first. It implies --follow.
  *
  * --events instead streams the raw broadcast events as JSONL (implies
- * following; entry draining and --since do not apply).
+ * following; entry draining and --since do not apply). --until still applies —
+ * events stream until the condition holds.
  */
 
 import { parseArgs } from "node:util";
@@ -35,6 +36,7 @@ import {
   applyWaitCondition,
   parseWaitCondition,
   WAIT_UNTIL_USAGE,
+  type WaitCondition,
 } from "./wait.ts";
 
 const SOCKET_CONNECT_DEADLINE_MS = 5_000;
@@ -130,14 +132,26 @@ async function drainEntries(
   return lastEntryId;
 }
 
-async function streamEvents(socketPath: string): Promise<void> {
+async function streamEvents(
+  socketPath: string,
+  stopCondition: WaitCondition | undefined,
+): Promise<void> {
   const client = await connectWithRetry(
     socketPath,
     SOCKET_CONNECT_DEADLINE_MS,
     (event) => console.log(JSON.stringify(event)),
   );
-  await client.waitClosed();
-  throw new Error("pi socket closed");
+  try {
+    if (stopCondition === undefined) {
+      await client.waitClosed();
+      throw new Error("pi socket closed");
+    }
+    // Events keep printing via the connect callback; this watches the same
+    // connection for the stop condition and returns 0 when it holds.
+    await applyWaitCondition(client, stopCondition, undefined);
+  } finally {
+    client.close();
+  }
 }
 
 function handleFollowEvent(state: FollowState, event: SocketEvent): void {
@@ -203,10 +217,6 @@ export async function runTail(argv: string[]): Promise<void> {
   if (parsed.values.events && parsed.values.since !== undefined) {
     throw new UsageError("--events streams raw events; --since does not apply");
   }
-  if (parsed.values.events && parsed.values.until !== undefined) {
-    // TDC: Why not? It seems totally reasonable to stream raw events until idle/turn-end/no-activity.
-    throw new UsageError("--events streams raw events; --until does not apply");
-  }
   // --until implies --follow: it only makes sense while streaming.
   const stopCondition =
     parsed.values.until === undefined
@@ -218,7 +228,7 @@ export async function runTail(argv: string[]): Promise<void> {
   const socketPath = piSocketPath(agent.agentDir);
 
   if (parsed.values.events) {
-    await streamEvents(socketPath);
+    await streamEvents(socketPath, stopCondition);
     return;
   }
 

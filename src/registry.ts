@@ -7,6 +7,7 @@
 import { open, readdir, readFile, rename } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { fileExists } from "./util.ts";
 
 /**
  * pi defers writing a new session file until the first assistant message, so
@@ -117,13 +118,10 @@ export async function readAgentRecord(
  * some filesystems; with it, readers see either the old or the new content.
  *
  * agentDir is derived from the path (readAgentRecord repopulates it), so it is
- * stripped here rather than duplicated into the file.
+ * stripped from the persisted JSON rather than duplicated into the file.
  */
-export async function writeAgentRecord(
-  agentDir: string,  // TDC: remove this arg; get it out of record instead.
-  record: AgentRecord,
-): Promise<void> {
-  const { agentDir: _derived, ...persisted } = record;
+export async function writeAgentRecord(record: AgentRecord): Promise<void> {
+  const { agentDir, ...persisted } = record;
   const target = agentJsonPath(agentDir);
   const tmp = `${target}.tmp`;
   const handle = await open(tmp, "w");
@@ -157,7 +155,9 @@ export async function resolveAgentId(agentIdPrefix: string): Promise<string> {
   if (agentIds.includes(agentIdPrefix)) {
     return agentIdPrefix;
   }
-  const matches = agentIds.filter((agentId) => agentId.startsWith(agentIdPrefix));
+  const matches = agentIds.filter((agentId) =>
+    agentId.startsWith(agentIdPrefix),
+  );
   if (matches.length === 1) {
     return matches[0]!;
   }
@@ -190,4 +190,40 @@ export function isPidAlive(pid: number): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * The agent's status as far as on-disk markers and the holder pid can tell —
+ * no socket involved. A live holder is reported as `running`; distinguishing
+ * idle/streaming/unreachable needs an RPC probe (inspect.probeAgent builds on
+ * this). gc only needs the socket-free verdict, so it uses this directly.
+ */
+export type RegistryStatus =
+  | { kind: "tombstoned" }
+  | { kind: "corrupt"; error: string }
+  | { kind: "archived"; record: AgentRecord }
+  | { kind: "dormant"; record: AgentRecord }
+  | { kind: "running"; record: AgentRecord };
+
+export async function classifyAgentDir(
+  agentId: string,
+): Promise<RegistryStatus> {
+  const agentDir = agentDirPath(agentId);
+  if (await fileExists(tombstonePath(agentDir))) {
+    return { kind: "tombstoned" };
+  }
+  const read = await readAgentRecord(agentDir);
+  if (read.kind !== "ok") {
+    return {
+      kind: "corrupt",
+      error: read.kind === "missing" ? "no agent.json" : read.error,
+    };
+  }
+  const record = read.record;
+  if (!isPidAlive(record.holderPid)) {
+    return (await fileExists(archivedPath(agentDir)))
+      ? { kind: "archived", record }
+      : { kind: "dormant", record };
+  }
+  return { kind: "running", record };
 }

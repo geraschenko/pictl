@@ -26,7 +26,7 @@ async function writeAgent(agentId: string): Promise<void> {
     sessions: [],
     agentDir,
   };
-  await writeAgentRecord(agentDir, record);
+  await writeAgentRecord(record);
 }
 
 before(async () => {

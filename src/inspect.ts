@@ -1,25 +1,20 @@
 /**
- * `pi-ctl list | status | gc` — read-only inspection of the registry.
- * None of these revive dormant agents: a dead holder is not garbage.
+ * `pi-ctl list | status` — read-only inspection of the registry. Neither
+ * revives dormant agents: a dead holder is not garbage.
  */
 
-import { rm } from "node:fs/promises";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import type { RpcSessionState } from "@earendil-works/pi-coding-agent";
 import {
   type AgentRecord,
-  agentDirPath,
-  archivedPath,
+  classifyAgentDir,
   isPidAlive,
   listAgentIds,
   piSocketPath,
-  readAgentRecord,
   resolveAgentId,
-  tombstonePath,
 } from "./registry.ts";
 import { connectWithRetry, getState } from "./rpc.ts";
-import { fileExists } from "./util.ts";
 
 const PROBE_CONNECT_DEADLINE_MS = 2_000;
 
@@ -41,28 +36,20 @@ export interface AgentProbe {
 }
 
 export async function probeAgent(agentId: string): Promise<AgentProbe> {
-  const agentDir = agentDirPath(agentId);
-  if (await fileExists(tombstonePath(agentDir))) {
+  const classified = await classifyAgentDir(agentId);
+  if (classified.kind === "tombstoned") {
     return { agentId, status: "tombstoned" };
   }
-  const read = await readAgentRecord(agentDir);
-  if (read.kind !== "ok") {
-    return {
-      agentId,
-      status: "corrupt",
-      error: read.kind === "missing" ? "no agent.json" : read.error,
-    };
+  if (classified.kind === "corrupt") {
+    return { agentId, status: "corrupt", error: classified.error };
   }
-  const record = read.record;
-  if (!isPidAlive(record.holderPid)) {
-    const status = (await fileExists(archivedPath(agentDir)))
-      ? "archived"
-      : "dormant";
-    return { agentId, status, record };
+  if (classified.kind === "archived" || classified.kind === "dormant") {
+    return { agentId, status: classified.kind, record: classified.record };
   }
+  const record = classified.record;
   try {
     const client = await connectWithRetry(
-      piSocketPath(agentDir),
+      piSocketPath(record.agentDir),
       PROBE_CONNECT_DEADLINE_MS,
     );
     try {
@@ -202,22 +189,4 @@ export async function runStatus(argv: string[]): Promise<void> {
     }
     printProbe(probe);
   });
-}
-
-// TDC: why is this in inspect.ts instead of lifecycle.ts? I guess it's because it relies on probeAgent. Ok ... but this does feel a little funny. Do you have any thoughts on this?
-export async function runGc(argv: string[]): Promise<void> {
-  parseArgs({ args: argv, options: {} });
-  const agentIds = await listAgentIds();
-  let removed = 0;
-  for (const agentId of agentIds) {
-    const probe = await probeAgent(agentId);
-    if (probe.status === "tombstoned" || probe.status === "corrupt") {
-      await rm(agentDirPath(agentId), { recursive: true, force: true });
-      console.log(`removed ${agentId} (${probe.status})`);
-      removed += 1;
-    }
-  }
-  console.log(
-    removed === 0 ? "nothing to remove" : `removed ${removed} agent dir(s)`,
-  );
 }

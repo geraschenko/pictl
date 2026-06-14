@@ -1,8 +1,14 @@
 #!/usr/bin/env node
 import { DETACH_KEY_NAME, runAttach } from "./attach.ts";
 import { runHold } from "./holder.ts";
-import { runGc, runList, runStatus } from "./inspect.ts";
-import { runArchive, runPurge, runResume, runSuspend } from "./lifecycle.ts";
+import { runList, runStatus } from "./inspect.ts";
+import {
+  runArchive,
+  runGc,
+  runPurge,
+  runResume,
+  runSuspend,
+} from "./lifecycle.ts";
 import { rpcCommandHandlers, rpcCommandUsage } from "./rpc-commands.ts";
 import { runSpawn } from "./spawn.ts";
 import { runTail } from "./tail.ts";
@@ -33,10 +39,10 @@ commands:
   attach <agent>                                        attach this terminal (detach: ${DETACH_KEY_NAME})
   list [--cwd <dir>] [--all] [--json]                   list agents and their status
   status <agent>... [--json]                            detailed status of agents
-  suspend <agent>... [--timeout <secs>]                 wait for quiescence, then stop (agent goes dormant)
+  suspend <agent>... [--timeout <secs>]                 wait until idle, then stop (agent goes dormant)
   archive <agent>... [--timeout <secs>]                 suspend, then hide from list (until resumed)
   resume <agent>...                                     revive dormant agents on their last sessions
-  purge <agent>... [--timeout <secs>] [--now] [--force] wait for quiescence, then delete permanently
+  purge <agent>... [--timeout <secs>] [--now] [--force] wait until idle, then delete permanently
   gc                                                    remove tombstoned or corrupt agent dirs
   wait <agent> --until ${WAIT_UNTIL_USAGE} [--timeout <secs>]
                                                         block until the agent meets the condition

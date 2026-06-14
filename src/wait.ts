@@ -22,7 +22,7 @@
  */
 
 import { parseArgs } from "node:util";
-import { QuiescenceTimeoutError, waitQuiescent } from "./lifecycle.ts";
+import { IdleTimeoutError, waitIdle } from "./lifecycle.ts";
 import { isPidAlive, loadAgent, piSocketPath } from "./registry.ts";
 import { connectWithRetry, getState, type PiSocketClient } from "./rpc.ts";
 import { UsageError } from "./util.ts";
@@ -127,9 +127,9 @@ export async function applyWaitCondition(
       return;
     case "idle":
       try {
-        await waitQuiescent(client, timeoutMs);
+        await waitIdle(client, timeoutMs);
       } catch (error) {
-        if (error instanceof QuiescenceTimeoutError) {
+        if (error instanceof IdleTimeoutError) {
           throw new WaitTimeoutError(`still busy after ${timeoutMs! / 1000}s`);
         }
         throw error;

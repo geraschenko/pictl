@@ -303,15 +303,15 @@ export async function runHold(argv: string[]): Promise<void> {
     sessions,
     agentDir,
   };
-  await writeAgentRecord(agentDir, record);
+  await writeAgentRecord(record);
 
   // agent.json writes are serialized through this chain; session events can
   // arrive faster than a write completes.
   let writeQueue: Promise<void> = Promise.resolve();
   const queueRecordWrite = (): void => {
     writeQueue = writeQueue.then(
-      () => writeAgentRecord(agentDir, record),
-      () => writeAgentRecord(agentDir, record),
+      () => writeAgentRecord(record),
+      () => writeAgentRecord(record),
     );
   };
 

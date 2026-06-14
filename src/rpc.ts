@@ -227,7 +227,7 @@ export async function connectWithRetry(
 
 /**
  * Free function rather than a PiSocketClient method to keep the client purely
- * transport-level. Serves programmatic state checks (quiescence waits in
+ * transport-level. Serves programmatic state checks (idle waits in
  * lifecycle.ts, status probes in inspect.ts); the CLI passthrough in
  * rpc-commands.ts builds its commands from its own spec table instead.
  */
