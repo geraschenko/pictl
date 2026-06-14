@@ -46,14 +46,13 @@ There are at least three useful levels at which pictl might follow activity:
 2. **Entries** — session entries, hopefully recoverable from the event stream.
 3. **Messages** — user/assistant/tool-facing conversation messages, hopefully derivable from entries.
 
-The default for `prompt --and-tail` probably should not be the rawest form. It may want to return mostly **messages**, plus the id of the final entry/message in the series so the caller has a cursor.
+The default for `prompt --and-tail` should be **messages**, plus the id of the final entry/message in the series so the caller has a cursor. The raw events/entries contain ids; when pictl filter-maps them into messages, it should preserve enough id information to emit a final cursor even if the message-shaped records themselves do not naturally have ids.
 
-Open problem: pi messages do not currently include ids, so “message stream with cursor” may need either:
+Possible output shapes:
 
-- message-shaped output annotated with the backing entry id;
-- entry-shaped output by default;
-- a final cursor record separate from message records;
-- or a pi-side API change.
+- message-shaped records annotated with the backing entry id;
+- plain message-shaped records plus a final cursor record;
+- some hybrid that keeps default output pleasant while preserving resumability.
 
 ## Candidate flags
 
@@ -72,8 +71,7 @@ pictl tail --target <target> --events
 pictl tail --target <target> --raw
 ```
 
-Names are not decided. `--raw` is especially overloaded because RPC passthrough uses it for raw wire responses; using the same flag for “raw events” may be confusing.
-TDC: `--raw` is exactly correct here, not overloading. It means we're doing raw passthrough of the wire format.
+Names are not decided. `--raw` may be exactly the right name here: it would mean raw passthrough of the wire format.
 
 ## Tail as a filter-map over events
 
@@ -113,9 +111,9 @@ Questions:
 
 - Should `--and-wait` be kept as pure completion waiting, or replaced/repurposed as output streaming?
 - Is `--and-tail` the right name?
-- What should the default output format be: messages, entries, or something hybrid? TDC: default should be messages; I told you that already.
+- What exact message-shaped output should be the default?
 - Can entries be reliably recovered from the event stream without duplicating fragile pi internals?
 - Can messages be reliably derived from entries in the same way pi computes `get_messages`?
-- Should this logic live in pictl, pi, or both? TDC: this logic obviously has to live in pictl, unless pi already exports the filtermap (which I doubt)
-- What cursor should be emitted for message-level output if messages do not include ids? TDC: I explained this. The point is that the events/entries _do_ contain the ids, so when we filtermap to turn them into messages, we have to preserve the id of the last one. You clearly didn't understand this.
-- How should compaction, tree navigation, forks, and session replacement appear in the default stream? TDC: as events/entries, there is no issue. However, in the message stream, we should somehow indicate these events (even though they are not messages) because they do change the message set.
+- Should this logic live in pictl unless pi already exports a suitable filter-map?
+- For message-level output, what exact final cursor record should be emitted from the ids preserved during event/entry-to-message filter-mapping?
+- How should compaction, tree navigation, forks, and session replacement appear in the default message stream? In raw event/entry streams there is no issue, but in a message stream pictl should somehow indicate these non-message events because they change the message set.

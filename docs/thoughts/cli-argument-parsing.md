@@ -49,7 +49,7 @@ Unknown which of these are hard requirements yet:
 - nested commands, if command grammar ever grows;
 - clean separation between command definitions, parsing, and execution.
 
-TDC: I think I'd also like `--help` to be more punchy (just the most common commands), with a `--helpfull` (or similar) for the full listing.
+Help output may need two levels: a punchy default `--help` that shows only the most common commands, plus a full listing behind a flag such as `--helpfull` (name undecided).
 
 ## Relationship to other thoughts
 
