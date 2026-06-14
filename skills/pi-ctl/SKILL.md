@@ -14,7 +14,7 @@ For scripting/orchestration details, read [references/orchestration.md](referenc
 - Do **not** purge, force-kill, or take over agents you did not create unless the user explicitly asks.
 - When spawning subagents, give them clear role instructions and tell them relevant agent ids, including your own `$PI_AGENT_ID`.
 - Prefer `pi-ctl prompt ... --streaming-behavior ...` over raw `steer`/`follow-up`; it avoids races when the target's streaming state changes.
-- Use machine-readable output (`--json`, `tail`) for scripts; do not parse human TUI text.
+- Use machine-readable output for scripts (`list --json`, `status --json`, RPC `--raw`, `tail`); do not parse human TUI text.
 
 ## Identify yourself and discover nearby agents
 
@@ -88,8 +88,7 @@ pi-ctl get-session-stats <agent>
 
 For continuous or crash-resumable scripts, use `pi-ctl tail`; see [references/orchestration.md](references/orchestration.md).
 
-Most RPC passthrough commands print response data as JSON. Add `--json` to print the raw RPC response record.
-TDC: This is actually pretty confusing. Let's change it so that the flag is `--raw` instead of `--json`.
+Most RPC passthrough commands print response data as JSON. Add `--raw` to print the raw RPC response record.
 
 ## Spawn helper agents
 
@@ -100,24 +99,14 @@ pi-ctl prompt "$worker" "You are my worker agent. My agent id is $PI_AGENT_ID. P
 
 Use `--tag` to make helpers discoverable.
 
-## Lifecycle commands
+## When you are done with an agent
 
-TDC: I think the only thing we need in this main skill doc is `archive` for when you're done with an agent. Everything else is clutter that's only relevant in very specific situations since archive already suspends and resume happens automatically on commands that need it. Maybe is worth saying that archived agents are revived if you interact with them and can be seen with `list --all`.
-
-Non-destructive:
+Archive agents you created when you are done with them:
 
 ```bash
-pi-ctl suspend <agent>       # stop process; keep agent/session for revival
-pi-ctl resume <agent>        # revive a dormant/archived agent
-pi-ctl archive <agent>       # suspend and hide from normal list output
+pi-ctl archive <agent>
 ```
 
-Destructive:
+`archive` waits until the agent is idle, stops its process, and hides it from normal `pi-ctl list` output. Archived agents are still visible with `pi-ctl list --all` and are revived automatically if you interact with them later.
 
-```bash
-pi-ctl purge <agent>         # permanently delete after idle wait
-pi-ctl purge <agent> --now   # abort current turn first, then delete
-pi-ctl purge <agent> --force # last resort for wedged agents
-```
-
-Only purge agents you created or that the user explicitly told you to remove.
+Only use destructive lifecycle commands such as `purge` when the user explicitly tells you to remove an agent permanently.

@@ -53,7 +53,7 @@ commands:
                                                         --until <cond> follows until the condition,
                                                         --events streams raw events instead
 
-RPC passthrough (sent to the agent's pi process; --json prints the raw response):
+RPC passthrough (sent to the agent's pi process; --raw prints the raw response):
 ${rpcCommandUsage()}
 
 <agent> accepts an agent id (unique prefixes work). Use --tag at spawn time and

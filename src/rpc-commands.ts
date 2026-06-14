@@ -6,7 +6,7 @@
  *
  * Every subcommand takes the agent as its first positional, builds the typed
  * RPC command from the rest, sends it over the agent's pi.sock, and prints
- * the response's data as JSON (`--json` for the raw response record).
+ * the response's data as JSON (`--raw` for the raw response record).
  *
  * Flag names mirror pi's RpcCommand field names (kebab-cased) so users who
  * know the RPC surface can map them without guessing.
@@ -448,8 +448,8 @@ function cliInvocation(cliName: string, spec: RpcCliSpec): string {
   return parts.join(" ");
 }
 
-function printResponse(response: RpcResponse, rawJson: boolean): void {
-  if (rawJson) {
+function printResponse(response: RpcResponse, raw: boolean): void {
+  if (raw) {
     console.log(JSON.stringify(response));
     return;
   }
@@ -471,7 +471,7 @@ async function runRpcCliCommand(
       allowPositionals: true,
       options: {
         ...(spec.options ?? {}),
-        json: { type: "boolean" },
+        raw: { type: "boolean" },
       },
     });
   } catch (error) {
@@ -495,7 +495,7 @@ async function runRpcCliCommand(
   );
   try {
     const response = await client.request(command);
-    printResponse(response, parsed.values.json === true);
+    printResponse(response, parsed.values.raw === true);
     if (spec.afterResponse) {
       await spec.afterResponse(client, parsed.values);
     }
