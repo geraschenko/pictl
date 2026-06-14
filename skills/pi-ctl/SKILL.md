@@ -15,6 +15,7 @@ For scripting/orchestration details, read [references/orchestration.md](referenc
 - When spawning subagents, give them clear role instructions and tell them relevant agent ids, including your own `$PI_AGENT_ID`.
 - Prefer `pi-ctl prompt ... --streaming-behavior ...` over raw `steer`/`follow-up`; it avoids races when the target's streaming state changes.
 - Use machine-readable output for scripts (`list --json`, `status --json`, RPC `--raw`, `tail`); do not parse human TUI text.
+TDC: RPC already returns machine-readable json, and that's usually what you want. `--raw` should only be used if you really want to see the exact wire format.
 
 ## Identify yourself and discover nearby agents
 
@@ -89,6 +90,7 @@ pi-ctl get-session-stats <agent>
 For continuous or crash-resumable scripts, use `pi-ctl tail`; see [references/orchestration.md](references/orchestration.md).
 
 Most RPC passthrough commands print response data as JSON. Add `--raw` to print the raw RPC response record.
+TDC: I think `--raw` is a detail that should be left out of the main skill. Its usage should be very rare.
 
 ## Spawn helper agents
 

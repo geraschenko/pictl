@@ -27,7 +27,7 @@ else
 fi
 ```
 
-Most commands that need the socket transparently revive dormant or archived agents.
+Commands that need the socket transparently revive dormant or archived agents.
 
 ## Wait conditions
 
