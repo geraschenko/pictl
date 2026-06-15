@@ -137,8 +137,7 @@ Preserve `spawn` passthrough behavior:
 pictl spawn --cwd dir -- --session abc
 ```
 
-Preserve `_hold` behavior. It may be migrated into the Stricli command map. It is acceptable for `_hold` to appear in `--help-all`.
-TDC: look into "hideRoute" in the stricli docs: https://bloomberg.github.io/stricli/docs/features/command-routing/route-maps. I think that allows hiding some commands from documentation. Please review the rest of the documentation there to see if there are any other features we could be using, or any ways in which we're not aligning with the stricli philosophy.
+Preserve `_hold` behavior and migrate it into the Stricli command map. It is acceptable for `_hold` to appear in `--help-all`.
 
 ## Help and version behavior
 
@@ -162,7 +161,7 @@ Default `--help` should show common commands only. Initial common command list:
 - `archive`
 - `purge`
 
-`--help-all` should include all RPC passthrough commands. It is acceptable for `_hold` to appear in `--help-all`.
+Default `--help` visibility should be implemented with Stricli route-map `docs.hideRoute`: commands are hidden from default help unless their pictl command spec marks them as common. `--help-all` should include hidden routes, including all RPC passthrough commands. It is acceptable for `_hold` to appear in `--help-all`.
 
 `pictl --version` prints only the package version, matching pi's behavior:
 
@@ -192,19 +191,11 @@ The implementation should introduce a central CLI layer with these core types or
 ```ts
 export type TargetMode = "none" | "single" | "multiple";
 
-export interface CommandContext {
-  stdout: NodeJS.WriteStream;
-  stderr: NodeJS.WriteStream;
+export interface CommandContext extends StricliCommandContext {
+  process: StricliProcess;
   env: NodeJS.ProcessEnv;
   /** Empty for targetMode none; length 1 for single; length >= 1 for multiple. */
   targets: AgentRecord[];
-}
-
-export interface TargetSelection {
-  flagTargets: string[];
-  envTarget: string | undefined;
-  // TDC: why is selectedTargets part of the same structure? Shouldn't it be derived from the other two fields? Please explain this to me.
-  selectedTargets: string[];
 }
 ```
 
@@ -214,18 +205,15 @@ Target selection should be factored into pure and disk-backed helpers similar to
 export function determineTargets(
   targetMode: TargetMode,
   flagTargets: readonly string[],
-  envTarget: string | undefined,
+  env: NodeJS.ProcessEnv,
 ): string[];
 
 export async function resolveTargets(
-  targetMode: TargetMode,
-  flagTargets: readonly string[],
-  env: NodeJS.ProcessEnv,
+  targetInputs: readonly string[],
 ): Promise<AgentRecord[]>;
 ```
 
-`determineTargets` implements target precedence and cardinality rules without touching disk. `resolveTargets` calls `determineTargets` and loads each selected target into an `AgentRecord`.
-TDC: why not have resolveTargets accept the output of determineTargets and _just_ be responsible for resolving the strings to uuids and loading the agent information from disk? It seems clearer that way to me. For ergonomics, we can have determineTargets take env instead of envTarget.
+`determineTargets` implements target precedence and cardinality rules without touching disk. It reads `PICTL_TARGET` from the supplied `env`. `resolveTargets` accepts the output of `determineTargets` and is responsible only for resolving those target strings and loading the corresponding `AgentRecord`s.
 
 Command definitions should declare `targetMode`. The Stricli command adapter should inject `--target` / `-t` only for `single` and `multiple` commands.
 
@@ -234,7 +222,8 @@ The command-spec layer may be modeled as:
 ```ts
 interface PictlCommandSpec<FLAGS, ARGS extends readonly unknown[]> {
   targetMode: TargetMode;
-  hidden?: boolean;  // TDC: let's go with `common?: boolean` instead (the inverse of hidden), because it's a clearer mental model that we curate the list of common commands, not the list of hidden commands ... commands are hidden by default. Also, if the field is optional _and_ it's a boolean, there are three states, aren't there? Does typescript have a unit type? What's the convention in cases like this?
+  /** Marker field: commands are hidden from default help unless marked common. */
+  common?: true;
   docs: {
     brief: string;
     fullDescription?: string;
@@ -244,8 +233,7 @@ interface PictlCommandSpec<FLAGS, ARGS extends readonly unknown[]> {
     aliases?: Aliases<keyof FLAGS & string>;
     positional?: TypedPositionalParameters<ARGS, CommandContext>;
   };
-  // TDC: Would calling this field `func` be more consistent with stricli terminology? Don't change it without discussing this question with me first.
-  run: (
+  func: (
     this: CommandContext,
     flags: FLAGS,
     ...args: ARGS
@@ -261,7 +249,7 @@ Exact generic spelling may differ to fit Stricli ergonomics, but the implementat
 - command implementations receive a `CommandContext` with loaded, non-revived `AgentRecord`s;
 - command implementations decide whether to revive targets.
 
-If full injection is easy, command logic should prefer `CommandContext.stdout`, `CommandContext.stderr`, and `CommandContext.env` over direct `console.log`, `console.error`, and `process.env`, to improve testability.
+Command logic should prefer Stricli's isolated context (`this.process.stdout`, `this.process.stderr`, and `this.env`) over direct `console.log`, `console.error`, and `process.env` when practical. This follows Stricli's context model and improves testability.
 
 ## Success criteria
 
@@ -331,17 +319,19 @@ A likely implementation path:
 4. Build a Stricli app from centralized command specs.
 5. Migrate first-class commands to specs.
 6. Migrate RPC passthrough command specs into the same command-definition framework.
-7. Preserve `_hold` either as a Stricli command or as an internal command path; it is acceptable for it to appear in `--help-all`. TDC: I think it should be a stricli command.
+7. Migrate `_hold` as a Stricli command; it is acceptable for it to appear in `--help-all`.
 8. Add parser/dispatcher tests and a small CLI smoke test.
 9. Optionally evaluate `@stricli/auto-complete`; wire it in only if the integration is simple.
 
 Notes:
 
-- Stricli supports command route maps, generated help, aliases, typed flags, typed positionals, async handlers, `--help-all`, and version info.
+- Stricli supports command route maps, route-map `hideRoute`, generated help, aliases, typed flags, typed positionals, async handlers, isolated command context, `--help-all`, and version info.
 - Stricli does not naturally support global flags before the command; this spec intentionally avoids requiring that behavior.
 - Parse/usage validation should happen before target resolution so missing required positionals are reported before unknown target IDs.
 - `wait` and `status` need special care because they intentionally should not revive dormant agents.
 - Existing code currently mixes parsing, validation, and command execution. It may be useful to split command logic into functions that accept already-parsed values and `CommandContext`.
+- Configure Stricli with `scanner.caseStyle: "allow-kebab-for-camel"` so camelCase TypeScript flag names can appear as kebab-case CLI flags; allow documentation case style to follow Stricli's default conversion.
+- Stricli's autocomplete package currently focuses on bash. Keep autocomplete optional, and if included, keep hidden routes out of default completion proposals.
 - Building with stubs first is not required, but it is a good way to keep the type migration controlled.
 
 # WORK LOG
