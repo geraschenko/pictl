@@ -138,6 +138,7 @@ pictl spawn --cwd dir -- --session abc
 ```
 
 Preserve `_hold` behavior. It may be migrated into the Stricli command map. It is acceptable for `_hold` to appear in `--help-all`.
+TDC: look into "hideRoute" in the stricli docs: https://bloomberg.github.io/stricli/docs/features/command-routing/route-maps. I think that allows hiding some commands from documentation. Please review the rest of the documentation there to see if there are any other features we could be using, or any ways in which we're not aligning with the stricli philosophy.
 
 ## Help and version behavior
 
@@ -157,13 +158,9 @@ Default `--help` should show common commands only. Initial common command list:
 - `attach`
 - `prompt`
 - `tail`
-- `wait`
 - `status`
-- `suspend`
 - `archive`
-- `resume`
 - `purge`
-- `gc`
 
 `--help-all` should include all RPC passthrough commands. It is acceptable for `_hold` to appear in `--help-all`.
 
@@ -204,8 +201,9 @@ export interface CommandContext {
 }
 
 export interface TargetSelection {
-  explicitTargets: string[];
+  flagTargets: string[];
   envTarget: string | undefined;
+  // TDC: why is selectedTargets part of the same structure? Shouldn't it be derived from the other two fields? Please explain this to me.
   selectedTargets: string[];
 }
 ```
@@ -213,20 +211,21 @@ export interface TargetSelection {
 Target selection should be factored into pure and disk-backed helpers similar to:
 
 ```ts
-export function selectTargetInputs(
+export function determineTargets(
   targetMode: TargetMode,
-  explicitTargets: readonly string[],
+  flagTargets: readonly string[],
   envTarget: string | undefined,
 ): string[];
 
-export async function resolveTargetsForCommand(
+export async function resolveTargets(
   targetMode: TargetMode,
-  explicitTargets: readonly string[],
+  flagTargets: readonly string[],
   env: NodeJS.ProcessEnv,
 ): Promise<AgentRecord[]>;
 ```
 
-`selectTargetInputs` implements target precedence and cardinality rules without touching disk. `resolveTargetsForCommand` calls `selectTargetInputs` and loads each selected target into an `AgentRecord`.
+`determineTargets` implements target precedence and cardinality rules without touching disk. `resolveTargets` calls `determineTargets` and loads each selected target into an `AgentRecord`.
+TDC: why not have resolveTargets accept the output of determineTargets and _just_ be responsible for resolving the strings to uuids and loading the agent information from disk? It seems clearer that way to me. For ergonomics, we can have determineTargets take env instead of envTarget.
 
 Command definitions should declare `targetMode`. The Stricli command adapter should inject `--target` / `-t` only for `single` and `multiple` commands.
 
@@ -235,7 +234,7 @@ The command-spec layer may be modeled as:
 ```ts
 interface PictlCommandSpec<FLAGS, ARGS extends readonly unknown[]> {
   targetMode: TargetMode;
-  hidden?: boolean;
+  hidden?: boolean;  // TDC: let's go with `common?: boolean` instead (the inverse of hidden), because it's a clearer mental model that we curate the list of common commands, not the list of hidden commands ... commands are hidden by default. Also, if the field is optional _and_ it's a boolean, there are three states, aren't there? Does typescript have a unit type? What's the convention in cases like this?
   docs: {
     brief: string;
     fullDescription?: string;
@@ -245,6 +244,7 @@ interface PictlCommandSpec<FLAGS, ARGS extends readonly unknown[]> {
     aliases?: Aliases<keyof FLAGS & string>;
     positional?: TypedPositionalParameters<ARGS, CommandContext>;
   };
+  // TDC: Would calling this field `func` be more consistent with stricli terminology? Don't change it without discussing this question with me first.
   run: (
     this: CommandContext,
     flags: FLAGS,
@@ -327,11 +327,11 @@ A likely implementation path:
 
 1. Add `@stricli/core` as a pinned dependency.
 2. Add a small version/config helper mirroring pi's package-version approach.
-3. Add target selection helpers and pure tests for `selectTargetInputs`.
+3. Add target selection helpers and pure tests for `determineTargets`.
 4. Build a Stricli app from centralized command specs.
 5. Migrate first-class commands to specs.
 6. Migrate RPC passthrough command specs into the same command-definition framework.
-7. Preserve `_hold` either as a Stricli command or as an internal command path; it is acceptable for it to appear in `--help-all`.
+7. Preserve `_hold` either as a Stricli command or as an internal command path; it is acceptable for it to appear in `--help-all`. TDC: I think it should be a stricli command.
 8. Add parser/dispatcher tests and a small CLI smoke test.
 9. Optionally evaluate `@stricli/auto-complete`; wire it in only if the integration is simple.
 
