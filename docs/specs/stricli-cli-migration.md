@@ -396,14 +396,23 @@ Notes:
 
 - [x] Created spec from design discussion.
 - [x] Moved resolved thought docs into `docs/thoughts/old/`.
-- [ ] Add pinned `@stricli/core` dependency.
-- [ ] Implement central target selection helpers.
-- [ ] Add pure tests for target selection behavior.
-- [ ] Build Stricli app and command-spec adapter.
-- [ ] Migrate first-class commands.
-- [ ] Migrate RPC passthrough commands.
-- [ ] Preserve `spawn -- ...` passthrough behavior.
-- [ ] Preserve `_hold` behavior.
-- [ ] Add key-line help/version tests.
-- [ ] Add representative CLI smoke tests.
-- [ ] Evaluate optional autocomplete support and either implement or document deferral.
+- [x] Add pinned `@stricli/core` dependency.
+- [x] Implement central target selection helpers.
+- [x] Add pure tests for target selection behavior.
+- [x] Build Stricli app and command-spec adapter.
+- [x] Migrate first-class commands.
+- [x] Migrate RPC passthrough commands.
+- [x] Preserve `spawn -- ...` passthrough behavior.
+- [x] Preserve `_hold` behavior.
+- [x] Add key-line help/version tests.
+- [x] Add representative CLI smoke tests.
+- [x] Evaluate optional autocomplete support and either implement or document deferral.
+- [x] Ran `npm run check`, `npm run lint`, `npm run build`, and `npm test` successfully.
+
+# IMPLEMENTATION TIME DECISIONS
+
+- Implemented the Stricli command layer in `src/cli.ts` while preserving existing command implementations by adapting parsed Stricli flags/positionals back into the old command argv shape. This keeps the migration focused on centralized parsing/target semantics without a broad rewrite of command internals.
+- Target-taking command wrappers resolve targets with `loadAgent` before calling existing logic. Commands that need live sockets still decide revival through their existing `ensureAgentRunning` calls; status/wait continue to avoid revival.
+- RPC passthrough specs remain owned by `src/rpc-commands.ts`; that module now exports the spec table and command runner so the Stricli layer can generate RPC routes without duplicating the RPC surface.
+- `_hold` and `spawn` use Stricli's `allowArgumentEscapeSequence` plus rest positionals to preserve `--` passthrough behavior.
+- Autocomplete was deferred. `@stricli/auto-complete` is optional in this spec, and wiring it in would add another generated/runtime surface beyond the parser migration.

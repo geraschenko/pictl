@@ -34,7 +34,7 @@ type FlagValues = Record<
   string | boolean | Array<string | boolean> | undefined
 >;
 
-interface RpcCliSpec {
+export interface RpcCliSpec {
   /** Usage names for required positionals after `<agent>`, e.g. ["<message>"]. */
   positionals: string[];
   /** Usage text for optional flags, e.g. "[--since <entry-id>]". */
@@ -459,7 +459,7 @@ function printResponse(response: RpcResponse, raw: boolean): void {
   }
 }
 
-async function runRpcCliCommand(
+export async function runRpcCliCommand(
   cliName: string,
   spec: RpcCliSpec,
   argv: string[],
@@ -503,6 +503,8 @@ async function runRpcCliCommand(
     client.close();
   }
 }
+
+export const rpcCliSpecs = RPC_CLI_SPECS;
 
 export function rpcCommandHandlers(): Record<
   string,
