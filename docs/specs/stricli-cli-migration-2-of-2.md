@@ -4,8 +4,6 @@
 
 ## Status
 
-Draft for review. Do not implement until this spec is approved.
-
 This document supersedes implementation-shape decisions from `docs/specs/stricli-cli-migration-1-of-2.md` where they conflict. The user-facing grammar and behavior from part 1 still apply.
 
 ## Problem statement
