@@ -16,6 +16,7 @@ import { readFile } from "node:fs/promises";
 import { extname } from "node:path";
 import { parseArgs } from "node:util";
 import type { RpcCommand, RpcResponse } from "@earendil-works/pi-coding-agent";
+import { command, stringArg, type CommandContext } from "./cli.ts";
 import { ensureAgentRunning } from "./lifecycle.ts";
 import { piSocketPath } from "./registry.ts";
 import { connectWithRetry, type PiSocketClient } from "./rpc.ts";
@@ -159,7 +160,7 @@ function promptWaitCondition(values: FlagValues): WaitCondition | undefined {
   return values["and-wait"] === true ? { kind: "turn-end" } : undefined;
 }
 
-const RPC_CLI_SPECS: Record<string, RpcCliSpec> = {
+export const RPC_CLI_SPECS: Record<string, RpcCliSpec> = {
   prompt: {
     positionals: ["<message|->"],
     flagsUsage: `[--and-wait | --and-wait-until ${WAIT_UNTIL_USAGE}] [--streaming-behavior steer|follow-up] ${IMAGE_FLAG_USAGE}`,
@@ -505,7 +506,80 @@ export async function runRpcCliCommand(
 }
 
 // TDC: what's the point of defining a *second* constant in order to export it? Why not just export the first one?
-export const rpcCliSpecs = RPC_CLI_SPECS;
+function rpcArgvFromFlags(
+  flags: Readonly<Record<string, unknown>>,
+  positionals: readonly string[],
+): string[] {
+  const argv = [...positionals];
+  for (const [key, value] of Object.entries(flags)) {
+    if (key === "target") {
+      continue;
+    }
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        argv.push(`--${key}`, String(item));
+      }
+    } else if (value === true) {
+      argv.push(`--${key}`);
+    } else if (typeof value === "string") {
+      argv.push(`--${key}`, value);
+    }
+  }
+  return argv;
+}
+
+function rpcFlags(
+  options:
+    | Record<string, { type: "string" | "boolean"; multiple?: boolean }>
+    | undefined,
+) {
+  const flags: Record<string, unknown> = {
+    raw: { kind: "boolean", brief: "Print raw RPC response", optional: true },
+  };
+  for (const [name, opt] of Object.entries(options ?? {})) {
+    flags[name] =
+      opt.type === "boolean"
+        ? { kind: "boolean", brief: name, optional: true }
+        : {
+            kind: "parsed",
+            parse: String,
+            brief: name,
+            optional: true,
+            ...(opt.multiple ? { variadic: true } : {}),
+          };
+  }
+  return flags;
+}
+
+export const rpcCommands = Object.fromEntries(
+  Object.entries(RPC_CLI_SPECS).map(([name, spec]) => [
+    name,
+    command({
+      targetMode: "single",
+      common: name === "prompt" ? true : undefined,
+      docs: { brief: spec.summary },
+      parameters: {
+        flags: rpcFlags(spec.options),
+        positional: {
+          kind: "tuple",
+          parameters: spec.positionals.map((positional) =>
+            stringArg(positional, positional.replace(/[<>]/g, "")),
+          ),
+        },
+      },
+      func: async function (
+        this: CommandContext,
+        flags: Readonly<Record<string, unknown>>,
+        ...args: string[]
+      ) {
+        await runRpcCliCommand(name, spec, [
+          this.targets[0]!.id,
+          ...rpcArgvFromFlags(flags, args),
+        ]);
+      },
+    }),
+  ]),
+);
 
 export function rpcCommandHandlers(): Record<
   string,

@@ -17,6 +17,7 @@ import { delimiter, isAbsolute, join, resolve } from "node:path";
 import type { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
+import { argvFromFlags, command, restArgs } from "./cli.ts";
 import { agentDirPath, holderLogPath, pictlBaseDir } from "./registry.ts";
 import { splitAtDoubleDash } from "./util.ts";
 
@@ -137,6 +138,41 @@ export async function launchHolder(launch: HolderLaunch): Promise<void> {
     );
   }
 }
+
+export const spawnCommand = command({
+  targetMode: "none",
+  common: true,
+  docs: {
+    brief: "start an agent, print its id",
+    customUsage: [
+      "[--cwd <dir>] [--id <id>] [--tag <label>] [-- <pi args...>]",
+    ],
+  },
+  parameters: {
+    flags: {
+      cwd: {
+        kind: "parsed",
+        parse: String,
+        brief: "Working directory",
+        optional: true,
+      },
+      id: { kind: "parsed", parse: String, brief: "Agent id", optional: true },
+      tag: {
+        kind: "parsed",
+        parse: String,
+        brief: "Agent label",
+        optional: true,
+      },
+    },
+    positional: restArgs("pi arguments", "pi-arg"),
+  },
+  func: async (flags, ...piArgs: string[]) =>
+    runSpawn([
+      ...argvFromFlags(flags, [], ["cwd", "id", "tag"]),
+      "--",
+      ...piArgs,
+    ]),
+});
 
 export async function runSpawn(argv: string[]): Promise<void> {
   const { ownArgs, passthroughArgs: piArgs } = splitAtDoubleDash(argv);

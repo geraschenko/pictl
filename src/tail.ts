@@ -24,6 +24,7 @@
 
 import { parseArgs } from "node:util";
 import type { RpcResponse } from "@earendil-works/pi-coding-agent";
+import { argvFromFlags, command } from "./cli.ts";
 import { ensureAgentRunning } from "./lifecycle.ts";
 import { piSocketPath } from "./registry.ts";
 import {
@@ -182,6 +183,36 @@ function nextWake(state: FollowState, client: PiSocketClient): Promise<void> {
     void client.waitClosed().then(resolve);
   });
 }
+
+export const tailCommand = command({
+  targetMode: "single",
+  common: true,
+  docs: { brief: "session entries as JSONL, then a cursor record" },
+  parameters: {
+    flags: {
+      follow: { kind: "boolean", brief: "Follow new entries", optional: true },
+      since: {
+        kind: "parsed",
+        parse: String,
+        brief: "Start after entry id",
+        optional: true,
+      },
+      until: {
+        kind: "parsed",
+        parse: String,
+        brief: `Follow until ${WAIT_UNTIL_USAGE}`,
+        optional: true,
+      },
+      events: { kind: "boolean", brief: "Stream raw events", optional: true },
+    },
+  },
+  func: async function (flags) {
+    await runTail([
+      this.targets[0]!.id,
+      ...argvFromFlags(flags, ["follow", "events"], ["since", "until"]),
+    ]);
+  },
+});
 
 export async function runTail(argv: string[]): Promise<void> {
   let parsed: {

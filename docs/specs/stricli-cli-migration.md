@@ -411,8 +411,13 @@ Notes:
 
 # IMPLEMENTATION TIME DECISIONS
 
-- Implemented the Stricli command layer in `src/cli.ts` while preserving existing command implementations by adapting parsed Stricli flags/positionals back into the old command argv shape. This keeps the migration focused on centralized parsing/target semantics without a broad rewrite of command internals.
+- The shared spec type is named `CommandSpec`.
+- `src/cli.ts` is limited to shared CLI building blocks: `CommandSpec`, `CommandContext`, `TargetMode`, target determination/resolution, the `command(...)` adapter, shared argv/test helpers, localization, and Stricli run glue. It does not own individual command definitions.
+- Command-owning modules export Stricli-ready commands or route groups, not raw specs. This keeps flags/docs/implementation colocated and leaves room for a module to export a nested route map later without the root composer knowing its internals.
+- `src/main.ts` is the root composition point. It imports ordered route targets from command modules, concatenates them into the root route map, builds the app, and runs it.
+- Existing command implementations are still mostly preserved by adapting parsed Stricli flags/positionals back into the old command argv shape. This keeps the migration focused on centralized parsing/target semantics without a broad rewrite of command internals.
 - Target-taking command wrappers resolve targets with `loadAgent` before calling existing logic. Commands that need live sockets still decide revival through their existing `ensureAgentRunning` calls; status/wait continue to avoid revival.
-- RPC passthrough specs remain owned by `src/rpc-commands.ts`; that module now exports the spec table and command runner so the Stricli layer can generate RPC routes without duplicating the RPC surface.
+- RPC passthrough specs remain owned by `src/rpc-commands.ts`; that module now exports `RPC_CLI_SPECS` directly and also exports the generated `rpcCommands` route group.
 - `_hold` and `spawn` use Stricli's `allowArgumentEscapeSequence` plus rest positionals to preserve `--` passthrough behavior.
+- Current `CommandSpec` typing still contains broad casts in the shared adapter around Stricli's generic parameter typing. This is intentionally deferred for a follow-up cleanup; the structure refactor takes priority.
 - Autocomplete was deferred. `@stricli/auto-complete` is optional in this spec, and wiring it in would add another generated/runtime surface beyond the parser migration.

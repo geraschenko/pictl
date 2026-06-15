@@ -6,6 +6,7 @@
 
 import { connect, type Socket } from "node:net";
 import { parseArgs } from "node:util";
+import { command } from "./cli.ts";
 import {
   CURSOR_HOME,
   cursorToRow,
@@ -48,6 +49,15 @@ const CLEAR_SCREEN_SEQUENCE = `${CURSOR_HOME}${ERASE_SCREEN}`;
 function cursorToLastRow(): string {
   return cursorToRow(process.stdout.rows);
 }
+
+export const attachCommand = command({
+  targetMode: "single",
+  common: true,
+  docs: { brief: "attach this terminal to an agent" },
+  func: async function () {
+    await runAttach([this.targets[0]!.id]);
+  },
+});
 
 export async function runAttach(argv: string[]): Promise<void> {
   const { positionals } = parseArgs({

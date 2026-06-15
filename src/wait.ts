@@ -22,6 +22,7 @@
  */
 
 import { parseArgs } from "node:util";
+import { argvFromFlags, command } from "./cli.ts";
 import { IdleTimeoutError, waitIdle } from "./lifecycle.ts";
 import { isPidAlive, loadAgent, piSocketPath } from "./registry.ts";
 import { connectWithRetry, getState, type PiSocketClient } from "./rpc.ts";
@@ -140,6 +141,33 @@ export async function applyWaitCondition(
       return;
   }
 }
+
+export const waitCommand = command({
+  targetMode: "single",
+  docs: { brief: "block until the agent meets a condition" },
+  parameters: {
+    flags: {
+      until: {
+        kind: "parsed",
+        parse: String,
+        brief: `Wait condition (${WAIT_UNTIL_USAGE})`,
+        optional: true,
+      },
+      timeout: {
+        kind: "parsed",
+        parse: String,
+        brief: "Timeout in seconds",
+        optional: true,
+      },
+    },
+  },
+  func: async function (flags) {
+    await runWait([
+      this.targets[0]!.id,
+      ...argvFromFlags(flags, [], ["until", "timeout"]),
+    ]);
+  },
+});
 
 export async function runWait(argv: string[]): Promise<void> {
   let parsed: {

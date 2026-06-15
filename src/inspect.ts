@@ -6,6 +6,7 @@
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import type { RpcSessionState } from "@earendil-works/pi-coding-agent";
+import { argvFromFlags, command } from "./cli.ts";
 import {
   type AgentRecord,
   classifyAgentDir,
@@ -84,6 +85,30 @@ function formatTable(rows: string[][]): string {
     )
     .join("\n");
 }
+
+export const listCommand = command({
+  targetMode: "none",
+  common: true,
+  docs: { brief: "list agents and their status" },
+  parameters: {
+    flags: {
+      json: { kind: "boolean", brief: "Print JSON", optional: true },
+      all: {
+        kind: "boolean",
+        brief: "Include archived agents",
+        optional: true,
+      },
+      cwd: {
+        kind: "parsed",
+        parse: String,
+        brief: "Filter by cwd",
+        optional: true,
+      },
+    },
+  },
+  func: async (flags) =>
+    runList(argvFromFlags(flags, ["json", "all"], ["cwd"])),
+});
 
 export async function runList(argv: string[]): Promise<void> {
   const { values } = parseArgs({
@@ -164,6 +189,21 @@ function printProbe(probe: AgentProbe): void {
     }
   }
 }
+
+export const statusCommand = command({
+  targetMode: "multiple",
+  common: true,
+  docs: { brief: "detailed status of agents" },
+  parameters: {
+    flags: { json: { kind: "boolean", brief: "Print JSON", optional: true } },
+  },
+  func: async function (flags) {
+    await runStatus([
+      ...this.targets.map((target) => target.id),
+      ...argvFromFlags(flags, ["json"], []),
+    ]);
+  },
+});
 
 export async function runStatus(argv: string[]): Promise<void> {
   const { values, positionals } = parseArgs({

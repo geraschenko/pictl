@@ -3,7 +3,8 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { determineTargets, runCli } from "./cli.ts";
+import { determineTargets, runCliApp } from "./cli.ts";
+import { app } from "./main.ts";
 import { UsageError } from "./util.ts";
 
 test("determineTargets implements target precedence and cardinality", () => {
@@ -87,18 +88,18 @@ async function withRegistry<T>(fn: (dir: string) => Promise<T>): Promise<T> {
 
 test("help and version print key lines", async () => {
   const version = fakeProcess();
-  await runCli(["--version"], version.proc);
+  await runCliApp(app, ["--version"], version.proc);
   assert.equal(version.proc.exitCode, 0);
   assert.equal(version.stdout.trim(), "0.1.0");
 
   const help = fakeProcess();
-  await runCli(["--help"], help.proc);
+  await runCliApp(app, ["--help"], help.proc);
   assert.match(help.stdout, /COMMANDS/);
   assert.match(help.stdout, /^\s{2}prompt\s+send a prompt/m);
   assert.doesNotMatch(help.stdout, /^\s{2}steer\s+interject/m);
 
   const helpAll = fakeProcess();
-  await runCli(["--help-all"], helpAll.proc);
+  await runCliApp(app, ["--help-all"], helpAll.proc);
   assert.match(helpAll.stdout, /^\s{2}steer\s+interject/m);
   assert.match(helpAll.stdout, /^\s{2}_hold\s+internal holder daemon/m);
 });
@@ -109,23 +110,23 @@ test("representative parser behavior uses --target grammar", async () => {
     const oldLog = console.log;
     console.log = () => undefined;
     try {
-      await runCli(["status", "-t", "abc", "--json"], accepted.proc);
+      await runCliApp(app, ["status", "-t", "abc", "--json"], accepted.proc);
     } finally {
       console.log = oldLog;
     }
     assert.equal(accepted.proc.exitCode, 0);
 
     const oldPositional = fakeProcess();
-    await runCli(["status", "abc", "--json"], oldPositional.proc);
+    await runCliApp(app, ["status", "abc", "--json"], oldPositional.proc);
     assert.equal(oldPositional.proc.exitCode, 2);
     assert.match(oldPositional.stderr, /Too many arguments/);
 
     const noTargetCommand = fakeProcess();
-    await runCli(["list", "-t", "abc"], noTargetCommand.proc);
+    await runCliApp(app, ["list", "-t", "abc"], noTargetCommand.proc);
     assert.equal(noTargetCommand.proc.exitCode, 2);
 
     const globalTarget = fakeProcess();
-    await runCli(["-t", "abc", "prompt", "hello"], globalTarget.proc);
+    await runCliApp(app, ["-t", "abc", "prompt", "hello"], globalTarget.proc);
     assert.equal(globalTarget.proc.exitCode, 2);
     assert.match(globalTarget.stderr, /unknown command: -t/);
   });

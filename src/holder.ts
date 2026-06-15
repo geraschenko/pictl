@@ -8,6 +8,7 @@
 import { closeSync, writeSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { parseArgs } from "node:util";
+import { numberParser } from "@stricli/core";
 import { SerializeAddon } from "@xterm/addon-serialize";
 import {
   getAgentDir,
@@ -18,6 +19,7 @@ import {
 import xterm from "@xterm/headless";
 import pty from "node-pty";
 import { cursorTo, cursorToRow, HIDE_CURSOR, SHOW_CURSOR } from "./ansi.ts";
+import { argvFromFlags, command, restArgs } from "./cli.ts";
 import {
   type AgentRecord,
   holderLogPath,
@@ -202,6 +204,58 @@ export function projectTrustWouldBlock(cwd: string, piArgs: string[]): boolean {
     SettingsManager.create(cwd, agentDir).getDefaultProjectTrust() === "ask"
   );
 }
+
+export const holdCommand = command({
+  targetMode: "none",
+  docs: { brief: "internal holder daemon" },
+  parameters: {
+    flags: {
+      "agent-dir": {
+        kind: "parsed",
+        parse: String,
+        brief: "Agent dir",
+        optional: true,
+      },
+      "agent-id": {
+        kind: "parsed",
+        parse: String,
+        brief: "Agent id",
+        optional: true,
+      },
+      cwd: {
+        kind: "parsed",
+        parse: String,
+        brief: "Working directory",
+        optional: true,
+      },
+      "pi-bin": {
+        kind: "parsed",
+        parse: String,
+        brief: "pi binary",
+        optional: true,
+      },
+      resume: { kind: "boolean", brief: "Resume", optional: true },
+      tag: { kind: "parsed", parse: String, brief: "Tag", optional: true },
+      "ready-fd": {
+        kind: "parsed",
+        parse: numberParser,
+        brief: "Ready fd",
+        optional: true,
+      },
+    },
+    positional: restArgs("pi arguments", "pi-arg"),
+  },
+  func: async (flags, ...piArgs: string[]) =>
+    runHold([
+      ...argvFromFlags(
+        flags,
+        ["resume"],
+        ["agent-dir", "agent-id", "cwd", "pi-bin", "tag", "ready-fd"],
+      ),
+      "--",
+      ...piArgs,
+    ]),
+});
 
 export async function runHold(argv: string[]): Promise<void> {
   const args = parseHoldArgs(argv);

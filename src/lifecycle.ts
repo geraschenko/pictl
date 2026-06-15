@@ -17,6 +17,7 @@
 
 import { readFile, rm, writeFile } from "node:fs/promises";
 import { parseArgs } from "node:util";
+import { argvFromFlags, command } from "./cli.ts";
 import {
   type AgentRecord,
   agentDirPath,
@@ -375,6 +376,94 @@ async function purgeOne(
   await rm(agent.agentDir, { recursive: true, force: true });
   console.log(`purged ${agent.id}`);
 }
+
+export const suspendCommand = command({
+  targetMode: "multiple",
+  docs: { brief: "wait until idle, then stop" },
+  parameters: {
+    flags: {
+      timeout: {
+        kind: "parsed",
+        parse: String,
+        brief: "Timeout in seconds",
+        optional: true,
+      },
+    },
+  },
+  func: async function (flags) {
+    await runSuspend([
+      ...this.targets.map((target) => target.id),
+      ...argvFromFlags(flags, [], ["timeout"]),
+    ]);
+  },
+});
+
+export const archiveCommand = command({
+  targetMode: "multiple",
+  common: true,
+  docs: { brief: "suspend, then hide from list" },
+  parameters: {
+    flags: {
+      timeout: {
+        kind: "parsed",
+        parse: String,
+        brief: "Timeout in seconds",
+        optional: true,
+      },
+    },
+  },
+  func: async function (flags) {
+    await runArchive([
+      ...this.targets.map((target) => target.id),
+      ...argvFromFlags(flags, [], ["timeout"]),
+    ]);
+  },
+});
+
+export const resumeCommand = command({
+  targetMode: "multiple",
+  docs: { brief: "revive dormant agents" },
+  func: async function () {
+    await runResume(this.targets.map((target) => target.id));
+  },
+});
+
+export const purgeCommand = command({
+  targetMode: "multiple",
+  common: true,
+  docs: { brief: "wait until idle, then delete permanently" },
+  parameters: {
+    flags: {
+      timeout: {
+        kind: "parsed",
+        parse: String,
+        brief: "Timeout in seconds",
+        optional: true,
+      },
+      now: { kind: "boolean", brief: "Abort first", optional: true },
+      force: { kind: "boolean", brief: "Kill and delete", optional: true },
+    },
+  },
+  func: async function (flags) {
+    await runPurge([
+      ...this.targets.map((target) => target.id),
+      ...argvFromFlags(flags, ["now", "force"], ["timeout"]),
+    ]);
+  },
+});
+
+export const gcCommand = command({
+  targetMode: "none",
+  docs: { brief: "remove tombstoned or corrupt agent dirs" },
+  func: async () => runGc([]),
+});
+
+export const lifecycleCommands = {
+  suspend: suspendCommand,
+  archive: archiveCommand,
+  resume: resumeCommand,
+  purge: purgeCommand,
+} as const;
 
 export async function runPurge(argv: string[]): Promise<void> {
   const { agentPrefixes, timeoutMs, flags } = parseStopArgs(argv, {
