@@ -16,8 +16,14 @@
  */
 
 import { readFile, rm, writeFile } from "node:fs/promises";
-import { parseArgs } from "node:util";
-import { argvFromFlags, command } from "./cli.ts";
+import {
+  commandMultiTarget,
+  commandNoTarget,
+  multiTargets,
+  secondsFlag,
+  trueFlag,
+  type CommandContext,
+} from "./cli.ts";
 import {
   type AgentRecord,
   agentDirPath,
@@ -259,36 +265,13 @@ async function waitPidGone(pid: number, deadlineMs: number): Promise<void> {
   }
 }
 
-interface StopArgs {
-  agentPrefixes: string[];
-  timeoutMs: number | undefined;
-  flags: Record<string, boolean | undefined>;
+interface TimeoutFlags {
+  timeout?: number;
 }
 
-function parseStopArgs(
-  argv: string[],
-  extraOptions: Record<string, { type: "boolean" }>,
-): StopArgs {
-  const { values, positionals } = parseArgs({
-    args: argv,
-    allowPositionals: true,
-    options: { timeout: { type: "string" }, ...extraOptions },
-  });
-  if (positionals.length === 0) {
-    throw new Error("expected at least one agent id");
-  }
-  const timeoutMs =
-    values.timeout === undefined ? undefined : Number(values.timeout) * 1000;
-  if (timeoutMs !== undefined && !Number.isFinite(timeoutMs)) {
-    throw new Error(`invalid --timeout: ${values.timeout}`);
-  }
-  const flags: Record<string, boolean | undefined> = {};
-  for (const key of Object.keys(extraOptions)) {
-    flags[key] = (values as Record<string, boolean | string | undefined>)[
-      key
-    ] as boolean | undefined;
-  }
-  return { agentPrefixes: positionals, timeoutMs, flags };
+interface PurgeFlags extends TimeoutFlags {
+  now?: true;
+  force?: true;
 }
 
 /**
@@ -298,10 +281,9 @@ function parseStopArgs(
  * Failures are collected and reported in input order.
  */
 async function forEachAgent(
-  prefixes: string[],
+  agents: readonly AgentRecord[],
   action: (agent: AgentRecord) => Promise<void>,
 ): Promise<void> {
-  const agents = await Promise.all(prefixes.map(loadAgent));
   const failures = await Promise.all(
     agents.map((agent) =>
       action(agent).then(
@@ -344,6 +326,7 @@ async function purgeOne(
   timeoutMs: number | undefined,
   now: boolean,
   force: boolean,
+  write: (message: string) => void,
 ): Promise<void> {
   if (force) {
     killSilently(agent.piPid, "SIGKILL");
@@ -353,7 +336,7 @@ async function purgeOne(
       waitPidGone(agent.holderPid, PROCESS_EXIT_DEADLINE_MS),
     ]);
     await rm(agent.agentDir, { recursive: true, force: true });
-    console.log(`purged ${agent.id} (forced)`);
+    write(`purged ${agent.id} (forced)\n`);
     return;
   }
 
@@ -374,112 +357,33 @@ async function purgeOne(
     `${new Date().toISOString()}\n`,
   );
   await rm(agent.agentDir, { recursive: true, force: true });
-  console.log(`purged ${agent.id}`);
+  write(`purged ${agent.id}\n`);
 }
 
-export const suspendCommand = command({
-  targetMode: "multiple",
-  docs: { brief: "wait until idle, then stop" },
-  parameters: {
-    flags: {
-      timeout: {
-        kind: "parsed",
-        parse: String,
-        brief: "Timeout in seconds",
-        optional: true,
-      },
-    },
-  },
-  func: async function (flags) {
-    await runSuspend([
-      ...this.targets.map((target) => target.id),
-      ...argvFromFlags(flags, [], ["timeout"]),
-    ]);
-  },
-});
-
-export const archiveCommand = command({
-  targetMode: "multiple",
-  common: true,
-  docs: { brief: "suspend, then hide from list" },
-  parameters: {
-    flags: {
-      timeout: {
-        kind: "parsed",
-        parse: String,
-        brief: "Timeout in seconds",
-        optional: true,
-      },
-    },
-  },
-  func: async function (flags) {
-    await runArchive([
-      ...this.targets.map((target) => target.id),
-      ...argvFromFlags(flags, [], ["timeout"]),
-    ]);
-  },
-});
-
-export const resumeCommand = command({
-  targetMode: "multiple",
-  docs: { brief: "revive dormant agents" },
-  func: async function () {
-    await runResume(this.targets.map((target) => target.id));
-  },
-});
-
-export const purgeCommand = command({
-  targetMode: "multiple",
-  common: true,
-  docs: { brief: "wait until idle, then delete permanently" },
-  parameters: {
-    flags: {
-      timeout: {
-        kind: "parsed",
-        parse: String,
-        brief: "Timeout in seconds",
-        optional: true,
-      },
-      now: { kind: "boolean", brief: "Abort first", optional: true },
-      force: { kind: "boolean", brief: "Kill and delete", optional: true },
-    },
-  },
-  func: async function (flags) {
-    await runPurge([
-      ...this.targets.map((target) => target.id),
-      ...argvFromFlags(flags, ["now", "force"], ["timeout"]),
-    ]);
-  },
-});
-
-export const gcCommand = command({
-  targetMode: "none",
-  docs: { brief: "remove tombstoned or corrupt agent dirs" },
-  func: async () => runGc([]),
-});
-
-export const lifecycleCommands = {
-  suspend: suspendCommand,
-  archive: archiveCommand,
-  resume: resumeCommand,
-  purge: purgeCommand,
-} as const;
-
-export async function runPurge(argv: string[]): Promise<void> {
-  const { agentPrefixes, timeoutMs, flags } = parseStopArgs(argv, {
-    now: { type: "boolean" },
-    force: { type: "boolean" },
-  });
-  await forEachAgent(agentPrefixes, (agent) =>
-    purgeOne(agent, timeoutMs, flags.now ?? false, flags.force ?? false),
+export async function purge(
+  this: CommandContext,
+  flags: PurgeFlags,
+): Promise<void> {
+  await forEachAgent(multiTargets(this), (agent) =>
+    purgeOne(
+      agent,
+      flags.timeout === undefined ? undefined : flags.timeout * 1000,
+      flags.now === true,
+      flags.force === true,
+      (message) => this.process.stdout.write(message),
+    ),
   );
 }
 
-export async function runSuspend(argv: string[]): Promise<void> {
-  const { agentPrefixes, timeoutMs } = parseStopArgs(argv, {});
-  await forEachAgent(agentPrefixes, async (agent) => {
+export async function suspend(
+  this: CommandContext,
+  flags: TimeoutFlags,
+): Promise<void> {
+  const timeoutMs =
+    flags.timeout === undefined ? undefined : flags.timeout * 1000;
+  await forEachAgent(multiTargets(this), async (agent) => {
     if (!isPidAlive(agent.holderPid)) {
-      console.log(`${agent.id} is already dormant`);
+      this.process.stdout.write(`${agent.id} is already dormant\n`);
       return;
     }
     try {
@@ -492,18 +396,17 @@ export async function runSuspend(argv: string[]): Promise<void> {
       }
       throw error;
     }
-    console.log(`suspended ${agent.id}`);
+    this.process.stdout.write(`suspended ${agent.id}\n`);
   });
 }
 
-/**
- * Stop a running agent (like suspend) and mark it archived so `list` hides it
- * by default; the record and its sessions are kept and any resume (explicit or
- * implicit) clears the flag. The deliberate destructive path is `purge`.
- */
-export async function runArchive(argv: string[]): Promise<void> {
-  const { agentPrefixes, timeoutMs } = parseStopArgs(argv, {});
-  await forEachAgent(agentPrefixes, async (agent) => {
+export async function archive(
+  this: CommandContext,
+  flags: TimeoutFlags,
+): Promise<void> {
+  const timeoutMs =
+    flags.timeout === undefined ? undefined : flags.timeout * 1000;
+  await forEachAgent(multiTargets(this), async (agent) => {
     if (isPidAlive(agent.holderPid)) {
       try {
         await stopRunningAgent(agent, timeoutMs, false);
@@ -517,23 +420,15 @@ export async function runArchive(argv: string[]): Promise<void> {
       }
     }
     await setArchived(agent.agentDir, true);
-    console.log(`archived ${agent.id}`);
+    this.process.stdout.write(`archived ${agent.id}\n`);
   });
 }
 
-export async function runResume(argv: string[]): Promise<void> {
-  const { positionals } = parseArgs({
-    args: argv,
-    allowPositionals: true,
-    options: {},
-  });
-  if (positionals.length === 0) {
-    throw new Error("expected at least one agent id");
-  }
-  await forEachAgent(positionals, async (agent) => {
+export async function resume(this: CommandContext): Promise<void> {
+  await forEachAgent(multiTargets(this), async (agent) => {
     await setArchived(agent.agentDir, false);
     if (isPidAlive(agent.holderPid)) {
-      console.log(`${agent.id} is already running`);
+      this.process.stdout.write(`${agent.id} is already running\n`);
       return;
     }
     await launchHolder({
@@ -544,29 +439,79 @@ export async function runResume(argv: string[]): Promise<void> {
       piArgs: agent.spawnArgs,
       resume: true,
     });
-    console.log(`resumed ${agent.id}`);
+    this.process.stdout.write(`resumed ${agent.id}\n`);
   });
 }
 
-/**
- * Remove agent dirs that are tombstoned (an interrupted purge) or corrupt (no
- * valid agent.json, e.g. a failed spawn). Uses the socket-free registry
- * classification — gc never connects to a live agent, and a dormant or
- * archived agent is not garbage.
- */
-export async function runGc(argv: string[]): Promise<void> {
-  parseArgs({ args: argv, options: {} });
+export async function gc(this: CommandContext): Promise<void> {
   const agentIds = await listAgentIds();
   let removed = 0;
   for (const agentId of agentIds) {
     const status = await classifyAgentDir(agentId);
     if (status.kind === "tombstoned" || status.kind === "corrupt") {
       await rm(agentDirPath(agentId), { recursive: true, force: true });
-      console.log(`removed ${agentId} (${status.kind})`);
+      this.process.stdout.write(`removed ${agentId} (${status.kind})\n`);
       removed += 1;
     }
   }
-  console.log(
-    removed === 0 ? "nothing to remove" : `removed ${removed} agent dir(s)`,
+  this.process.stdout.write(
+    removed === 0 ? "nothing to remove\n" : `removed ${removed} agent dir(s)\n`,
   );
 }
+
+/**
+ * Stop a running agent (like suspend) and mark it archived so `list` hides it
+ * by default; the record and its sessions are kept and any resume (explicit or
+ * implicit) clears the flag. The deliberate destructive path is `purge`.
+ */
+
+const timeoutFlags = {
+  timeout: secondsFlag(),
+} as const;
+
+const suspendCommand = commandMultiTarget<TimeoutFlags>({
+  docs: { brief: "wait until idle, then stop" },
+  parameters: { flags: timeoutFlags },
+  func: suspend,
+});
+
+const archiveCommand = commandMultiTarget<TimeoutFlags>({
+  common: true,
+  docs: { brief: "suspend, then hide from list" },
+  parameters: { flags: timeoutFlags },
+  func: archive,
+});
+
+const resumeCommand = commandMultiTarget({
+  docs: { brief: "revive dormant agents" },
+  func: resume,
+});
+
+const purgeCommand = commandMultiTarget<PurgeFlags>({
+  common: true,
+  docs: { brief: "wait until idle, then delete permanently" },
+  parameters: {
+    flags: {
+      timeout: secondsFlag(),
+      now: trueFlag("Abort first"),
+      force: trueFlag("Kill and delete"),
+    },
+  },
+  func: purge,
+});
+
+const gcCommand = commandNoTarget({
+  docs: { brief: "remove tombstoned or corrupt agent dirs" },
+  func: gc,
+});
+
+export const lifecycleRoutes = {
+  suspend: suspendCommand,
+  archive: archiveCommand,
+  resume: resumeCommand,
+  purge: purgeCommand,
+} as const;
+
+export const gcRoute = {
+  gc: gcCommand,
+} as const;

@@ -316,11 +316,25 @@ Acceptance criteria include:
 # WORK LOG
 
 - [x] Created part-2 spec draft after review feedback on the typed Stricli migration.
-- [ ] Get approval on this spec before implementation.
-- [ ] Refactor shared CLI builders/types.
-- [ ] Migrate first-class command modules to typed Stricli command functions.
-- [ ] Remove old `runX(argv)` parser entrypoints.
-- [ ] Migrate RPC commands away from `RpcCliSpec` if feasible.
-- [ ] Replace direct console/env/process usage where practical.
-- [ ] Add/update tests for typed parsing and target behavior.
-- [ ] Run check/lint/format/test.
+- [x] Get approval on this spec before implementation.
+- [x] Refactor shared CLI builders/types.
+- [x] Migrate first-class command modules to typed Stricli command functions.
+- [x] Remove old `runX(argv)` parser entrypoints.
+- [x] Migrate RPC commands away from `RpcCliSpec` if feasible.
+- [x] Replace direct console/env/process usage where practical.
+- [x] Add/update tests for typed parsing and target behavior.
+- [x] Run check/lint/format/test.
+
+# IMPLEMENTATION NOTES
+
+- Implemented mode-specific builders: `commandNoTarget`, `commandOneTarget`, and `commandMultiTarget`.
+- Removed the exported `TargetMode` type and the old generic `command(...)` adapter. `determineTargets` still accepts the string mode internally because the pure target selection helper is part of the tested behavior from part 1.
+- Removed `argvFromFlags`, old command `runX(argv)` parser entrypoints, and `RpcCliSpec`.
+- RPC routes are now explicit Stricli command definitions in `src/rpc-commands.ts`. This introduces some repetition, but keeps RPC flags/positionals typed and avoids recreating a parallel CLI-spec table.
+- `attach` now uses the Stricli context process for stdin/stdout TTY operations. `CommandContext.process` is extended with the Node process APIs pictl commands need.
+- Remaining broad casts in `src/cli.ts`:
+  1. `commandNoTarget`, `parameters: (spec.parameters ?? {}) as TypedCommandParameters<...>`: `CommandSpec.parameters` is the same Stricli parameter shape but stored behind an optional wrapper so the default `{}` case can be shared. TypeScript cannot prove the conditional default preserves Stricli's `TypedCommandParameters` conditional type for all generic `FLAGS`/`ARGS`. It is locally safe because the object comes directly from `CommandSpec<FLAGS, ARGS>`, whose fields are typed using Stricli's `FlagParametersForType` and `TypedPositionalParameters` for the same generic arguments. Removing this likely requires splitting the no-flags/no-positionals cases into overloads or reusing Stricli's exact builder argument type in `CommandSpec`.
+  2. `commandOneTarget`, `commandFlags as FLAGS`: after destructuring `target` out of `FLAGS & { target?: string }`, TypeScript infers an object-rest type rather than recovering the original generic `FLAGS`. It is locally safe because `target` is the only property added by the wrapper and command-specific flags intentionally exclude target. Removing this likely requires a helper type or command-function wrapper shape that can prove `Omit<AugmentedFlags, "target">` is `FLAGS`.
+  3. `commandOneTarget`, composed `parameters as unknown as TypedCommandParameters<AugmentedFlags, ...>`: the object merges shared target flag/alias definitions with command-specific parameters. TypeScript cannot prove that spreading two independently valid flag maps yields the exact conditional mapped type for the augmented generic. It is locally safe because the shared target flag supplies the only added flag and all command-specific flags come from `CommandSpec<FLAGS, ARGS>`. Removing this likely requires exposing target in the type-level flag map before the merge, or builder overloads specialized for every flags/no-flags and args/no-args combination.
+  4. `commandMultiTarget`, `commandFlags as FLAGS`: same reason as `commandOneTarget`, except the wrapper removes `target?: readonly string[]`.
+  5. `commandMultiTarget`, composed `parameters as unknown as TypedCommandParameters<AugmentedFlags, ...>`: same reason as `commandOneTarget`, except the shared target flag is variadic.

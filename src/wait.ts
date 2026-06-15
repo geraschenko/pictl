@@ -1,30 +1,17 @@
-/**
- * `pictl wait <agent> --until turn-end|idle|no-activity:<secs>` — block until
- * the agent reaches a condition. Exit codes: 0 condition met, 1 runtime error,
- * 2 usage error, 3 `--timeout` expired.
- *
- * - turn-end: the next `agent_end` with `willRetry === false` (a true value
- *   announces an auto-retry continuation, not a turn end). Returns immediately
- *   only when fully idle — a pending queued message counts as a turn that must
- *   end, which is what makes sequential `prompt; wait` race-free.
- * - idle: not streaming AND pending queue empty (the common condition, so it
- *   gets the short name).
- * - no-activity:<secs>: no socket events for N seconds, regardless of streaming
- *   state; catches turns stalled on human-facing UI, which `idle` never reports.
- *   N may be fractional (e.g. `no-activity:0.5`).
- *
- * The shared condition parser/applier (`parseWaitCondition`/`applyWaitCondition`)
- * is reused by `tail --until` and `prompt --and-wait-until`.
- *
- * A dormant or archived agent is reported as having met any of these conditions
- * immediately — its process is doing nothing — and is never revived: revival
- * would only produce a guaranteed-idle agent (pi never resumes mid-turn work).
+/*
+ * `pictl wait --target <agent> --until turn-end|idle|no-activity:<secs>` —
+ * block until the agent reaches a condition. Exit codes: 0 condition met,
+ * 1 runtime error, 2 usage error, 3 `--timeout` expired.
  */
 
-import { parseArgs } from "node:util";
-import { argvFromFlags, command } from "./cli.ts";
+import {
+  commandOneTarget,
+  oneTarget,
+  secondsFlag,
+  type CommandContext,
+} from "./cli.ts";
 import { IdleTimeoutError, waitIdle } from "./lifecycle.ts";
-import { isPidAlive, loadAgent, piSocketPath } from "./registry.ts";
+import { isPidAlive, piSocketPath } from "./registry.ts";
 import { connectWithRetry, getState, type PiSocketClient } from "./rpc.ts";
 import { UsageError } from "./util.ts";
 
@@ -39,6 +26,11 @@ export type WaitCondition =
   | { kind: "no-activity"; idleMs: number };
 
 export const WAIT_UNTIL_USAGE = "turn-end|idle|no-activity:<secs>";
+
+interface WaitFlags {
+  until: WaitCondition;
+  timeout?: number;
+}
 
 export function parseWaitCondition(value: string): WaitCondition {
   if (value === "turn-end") {
@@ -142,67 +134,11 @@ export async function applyWaitCondition(
   }
 }
 
-export const waitCommand = command({
-  targetMode: "single",
-  docs: { brief: "block until the agent meets a condition" },
-  parameters: {
-    flags: {
-      until: {
-        kind: "parsed",
-        parse: String,
-        brief: `Wait condition (${WAIT_UNTIL_USAGE})`,
-        optional: true,
-      },
-      timeout: {
-        kind: "parsed",
-        parse: String,
-        brief: "Timeout in seconds",
-        optional: true,
-      },
-    },
-  },
-  func: async function (flags) {
-    await runWait([
-      this.targets[0]!.id,
-      ...argvFromFlags(flags, [], ["until", "timeout"]),
-    ]);
-  },
-});
-
-export async function runWait(argv: string[]): Promise<void> {
-  let parsed: {
-    values: { until?: string; timeout?: string };
-    positionals: string[];
-  };
-  try {
-    parsed = parseArgs({
-      args: argv,
-      allowPositionals: true,
-      options: { until: { type: "string" }, timeout: { type: "string" } },
-    });
-  } catch (error) {
-    throw new UsageError(
-      error instanceof Error ? error.message : String(error),
-    );
-  }
-  if (parsed.positionals.length !== 1 || parsed.values.until === undefined) {
-    throw new UsageError(
-      `usage: pictl wait <agent> --until ${WAIT_UNTIL_USAGE} [--timeout <secs>]`,
-    );
-  }
-  const condition = parseWaitCondition(parsed.values.until);
-  const timeoutMs =
-    parsed.values.timeout === undefined
-      ? undefined
-      : Number(parsed.values.timeout) * 1000;
-  if (
-    timeoutMs !== undefined &&
-    !(Number.isFinite(timeoutMs) && timeoutMs >= 0)
-  ) {
-    throw new UsageError(`invalid --timeout: ${parsed.values.timeout}`);
-  }
-
-  const agent = await loadAgent(parsed.positionals[0]!);
+export async function wait(
+  this: CommandContext,
+  flags: WaitFlags,
+): Promise<void> {
+  const agent = oneTarget(this);
   if (!isPidAlive(agent.holderPid)) {
     // Dormant/archived: the process is doing nothing, so the condition is
     // already met. Don't revive — a revived agent is guaranteed idle anyway.
@@ -213,8 +149,31 @@ export async function runWait(argv: string[]): Promise<void> {
     SOCKET_CONNECT_DEADLINE_MS,
   );
   try {
-    await applyWaitCondition(client, condition, timeoutMs);
+    await applyWaitCondition(
+      client,
+      flags.until,
+      flags.timeout === undefined ? undefined : flags.timeout * 1000,
+    );
   } finally {
     client.close();
   }
 }
+
+const waitCommand = commandOneTarget<WaitFlags>({
+  docs: { brief: "block until the agent meets a condition" },
+  parameters: {
+    flags: {
+      until: {
+        kind: "parsed",
+        parse: parseWaitCondition,
+        brief: `Wait condition (${WAIT_UNTIL_USAGE})`,
+      },
+      timeout: secondsFlag(),
+    },
+  },
+  func: wait,
+});
+
+export const waitRoute = {
+  wait: waitCommand,
+} as const;

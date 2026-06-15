@@ -1,22 +1,18 @@
-/**
+/*
  * CLI ↔ RPC passthrough: one subcommand per command in pi's `RpcCommand`
- * union (full mirror — omissions need a very good reason). This is the only
- * module that should need editing when pi's RPC surface changes; the
- * subcommand table and usage text in main.ts are generated from it.
- *
- * Every subcommand takes the agent as its first positional, builds the typed
- * RPC command from the rest, sends it over the agent's pi.sock, and prints
- * the response's data as JSON (`--raw` for the raw response record).
- *
- * Flag names mirror pi's RpcCommand field names (kebab-cased) so users who
- * know the RPC surface can map them without guessing.
+ * union. This module owns the RPC command-line surface.
  */
 
 import { readFile } from "node:fs/promises";
 import { extname } from "node:path";
-import { parseArgs } from "node:util";
 import type { RpcCommand, RpcResponse } from "@earendil-works/pi-coding-agent";
-import { command, stringArg, type CommandContext } from "./cli.ts";
+import {
+  commandOneTarget,
+  oneTarget,
+  stringArg,
+  trueFlag,
+  type CommandContext,
+} from "./cli.ts";
 import { ensureAgentRunning } from "./lifecycle.ts";
 import { piSocketPath } from "./registry.ts";
 import { connectWithRetry, type PiSocketClient } from "./rpc.ts";
@@ -30,25 +26,45 @@ import {
 
 const SOCKET_CONNECT_DEADLINE_MS = 5_000;
 
-type FlagValues = Record<
-  string,
-  string | boolean | Array<string | boolean> | undefined
->;
+interface RawFlags {
+  raw?: true;
+}
 
-export interface RpcCliSpec {
-  /** Usage names for required positionals after `<agent>`, e.g. ["<message>"]. */
-  positionals: string[];
-  /** Usage text for optional flags, e.g. "[--since <entry-id>]". */
-  flagsUsage?: string;
-  summary: string;
-  options?: Record<string, { type: "string" | "boolean"; multiple?: boolean }>;
-  /** Positional arity is validated by the runner; enum-valued args validate here. */
-  build: (
-    positionals: string[],
-    values: FlagValues,
-  ) => RpcCommand | Promise<RpcCommand>;
-  /** Runs after the response is printed, on the same connection (e.g. prompt --wait). */
-  afterResponse?: (client: PiSocketClient, values: FlagValues) => Promise<void>;
+interface ImageFlags {
+  image?: readonly string[];
+}
+
+interface PromptFlags extends RawFlags, ImageFlags {
+  andWait?: true;
+  andWaitUntil?: WaitCondition;
+  streamingBehavior?: "steer" | "follow-up";
+}
+
+interface ParentSessionFlags extends RawFlags {
+  parentSession?: string;
+}
+
+interface CustomInstructionsFlags extends RawFlags {
+  customInstructions?: string;
+}
+
+interface BashFlags extends RawFlags {
+  excludeFromContext?: true;
+}
+
+interface OutputPathFlags extends RawFlags {
+  outputPath?: string;
+}
+
+interface SinceFlags extends RawFlags {
+  since?: string;
+}
+
+interface NavigateTreeFlags extends RawFlags {
+  summarize?: true;
+  customInstructions?: string;
+  replaceInstructions?: true;
+  label?: string;
 }
 
 function oneOf<T extends string>(
@@ -102,20 +118,24 @@ const IMAGE_MIME_TYPES: Record<string, string> = {
   webp: "image/webp",
 };
 
-const IMAGE_OPTION = { image: { type: "string", multiple: true } } as const;
-const IMAGE_FLAG_USAGE = "[--image <path>]...";
+const rawFlag = trueFlag("Print raw RPC response");
+const imageFlag = {
+  kind: "parsed",
+  parse: String,
+  brief: "Attach image path",
+  optional: true,
+  variadic: true,
+} as const;
 
-/** Read `--image` paths (repeatable) into pi's inline base64 image content. */
 async function imagesFromFlags(
-  values: FlagValues,
+  imagePaths: readonly string[] | undefined,
 ): Promise<{ images?: ImageContent[] }> {
-  const imagePaths = values.image;
-  if (!Array.isArray(imagePaths) || imagePaths.length === 0) {
+  if (imagePaths === undefined || imagePaths.length === 0) {
     return {};
   }
   const images = await Promise.all(
     imagePaths.map(async (imagePath): Promise<ImageContent> => {
-      const extension = extname(String(imagePath)).slice(1).toLowerCase();
+      const extension = extname(imagePath).slice(1).toLowerCase();
       const mimeType = IMAGE_MIME_TYPES[extension];
       if (mimeType === undefined) {
         throw new UsageError(
@@ -124,7 +144,7 @@ async function imagesFromFlags(
       }
       let data: Buffer;
       try {
-        data = await readFile(String(imagePath));
+        data = await readFile(imagePath);
       } catch (error) {
         throw new Error(
           `--image ${imagePath}: ${error instanceof Error ? error.message : String(error)}`,
@@ -136,483 +156,632 @@ async function imagesFromFlags(
   return { images };
 }
 
-/** `prompt -` and friends read the message from stdin. */
-async function readStdin(): Promise<string> {
+async function readStdin(
+  stdin: AsyncIterable<Buffer | string>,
+): Promise<string> {
   let data = "";
-  for await (const chunk of process.stdin) {
+  for await (const chunk of stdin) {
     data += chunk.toString();
   }
-  // Strip a single trailing newline, matching shell `$(...)` capture so
-  // `echo msg | pictl prompt -` sends "msg", not "msg\n".
   return data.replace(/\n$/, "");
 }
 
-function messageFrom(positional: string): string | Promise<string> {
-  return positional === "-" ? readStdin() : positional;
+async function messageFrom(
+  context: CommandContext,
+  positional: string,
+): Promise<string> {
+  return positional === "-" ? readStdin(context.process.stdin) : positional;
 }
 
-/** The wait condition for `prompt --and-wait[-until]`, or undefined for neither. */
-function promptWaitCondition(values: FlagValues): WaitCondition | undefined {
-  const until = values["and-wait-until"];
-  if (typeof until === "string") {
-    return parseWaitCondition(until);
-  }
-  return values["and-wait"] === true ? { kind: "turn-end" } : undefined;
+function promptWaitCondition(flags: PromptFlags): WaitCondition | undefined {
+  return (
+    flags.andWaitUntil ??
+    (flags.andWait === true ? { kind: "turn-end" } : undefined)
+  );
 }
 
-const RPC_CLI_SPECS: Record<string, RpcCliSpec> = {
-  prompt: {
-    positionals: ["<message|->"],
-    flagsUsage: `[--and-wait | --and-wait-until ${WAIT_UNTIL_USAGE}] [--streaming-behavior steer|follow-up] ${IMAGE_FLAG_USAGE}`,
-    summary:
-      "send a prompt (errors while streaming without --streaming-behavior)",
-    options: {
-      "and-wait": { type: "boolean" },
-      "and-wait-until": { type: "string" },
-      "streaming-behavior": { type: "string" },
-      ...IMAGE_OPTION,
-    },
-    build: async ([message], values) => ({
-      type: "prompt",
-      message: await messageFrom(message!),
-      ...(await imagesFromFlags(values)),
-      ...(typeof values["streaming-behavior"] === "string" && {
-        streamingBehavior:
-          oneOf(
-            values["streaming-behavior"],
-            ["steer", "follow-up"],
-            "--streaming-behavior",
-          ) === "steer"
-            ? ("steer" as const)
-            : ("followUp" as const),
-      }),
-    }),
-    // --and-wait[-until] blocks until the prompted turn meets the condition, on
-    // this same connection so it is race-free by construction. Default is
-    // turn-end; --and-wait-until takes wait's full vocabulary.
-    afterResponse: async (client, values) => {
-      const condition = promptWaitCondition(values);
-      if (condition !== undefined) {
-        await applyWaitCondition(client, condition, undefined);
-      }
-    },
-  },
-  steer: {
-    positionals: ["<message|->"],
-    flagsUsage: IMAGE_FLAG_USAGE,
-    summary: "interject into the current turn",
-    options: { ...IMAGE_OPTION },
-    build: async ([message], values) => ({
-      type: "steer",
-      message: await messageFrom(message!),
-      ...(await imagesFromFlags(values)),
-    }),
-  },
-  "follow-up": {
-    positionals: ["<message|->"],
-    flagsUsage: IMAGE_FLAG_USAGE,
-    summary: "queue a message for after the current turn",
-    options: { ...IMAGE_OPTION },
-    build: async ([message], values) => ({
-      type: "follow_up",
-      message: await messageFrom(message!),
-      ...(await imagesFromFlags(values)),
-    }),
-  },
-  abort: {
-    positionals: [],
-    summary: "abort the current turn",
-    build: () => ({ type: "abort" }),
-  },
-  "new-session": {
-    positionals: [],
-    flagsUsage: "[--parent-session <path>]",
-    summary: "start a fresh session",
-    options: { "parent-session": { type: "string" } },
-    build: (_positionals, values) => ({
-      type: "new_session",
-      ...(typeof values["parent-session"] === "string" && {
-        parentSession: values["parent-session"],
-      }),
-    }),
-  },
-  "get-state": {
-    positionals: [],
-    summary: "session state (model, streaming, pending queue, ...)",
-    build: () => ({ type: "get_state" }),
-  },
-  "set-model": {
-    positionals: ["<provider>", "<model-id>"],
-    summary: "switch model",
-    build: ([provider, modelId]) => ({
-      type: "set_model",
-      provider: provider!,
-      modelId: modelId!,
-    }),
-  },
-  "cycle-model": {
-    positionals: [],
-    summary: "cycle to the next model",
-    build: () => ({ type: "cycle_model" }),
-  },
-  "get-available-models": {
-    positionals: [],
-    summary: "list models",
-    build: () => ({ type: "get_available_models" }),
-  },
-  "set-thinking-level": {
-    positionals: ["<level>"],
-    summary: "set thinking level",
-    build: ([level]) => ({
-      type: "set_thinking_level",
-      level: oneOf(level!, THINKING_LEVELS, "thinking level"),
-    }),
-  },
-  "cycle-thinking-level": {
-    positionals: [],
-    summary: "cycle thinking level",
-    build: () => ({ type: "cycle_thinking_level" }),
-  },
-  "set-steering-mode": {
-    positionals: ["<all|one-at-a-time>"],
-    summary: "how queued steering messages are delivered",
-    build: ([mode]) => ({
-      type: "set_steering_mode",
-      mode: oneOf(mode!, QUEUE_MODES, "steering mode"),
-    }),
-  },
-  "set-follow-up-mode": {
-    positionals: ["<all|one-at-a-time>"],
-    summary: "how queued follow-ups are delivered",
-    build: ([mode]) => ({
-      type: "set_follow_up_mode",
-      mode: oneOf(mode!, QUEUE_MODES, "follow-up mode"),
-    }),
-  },
-  compact: {
-    positionals: [],
-    flagsUsage: "[--custom-instructions <text>]",
-    summary: "compact the session context",
-    options: { "custom-instructions": { type: "string" } },
-    build: (_positionals, values) => ({
-      type: "compact",
-      ...(typeof values["custom-instructions"] === "string" && {
-        customInstructions: values["custom-instructions"],
-      }),
-    }),
-  },
-  "set-auto-compaction": {
-    positionals: ["<on|off>"],
-    summary: "toggle auto-compaction",
-    build: ([enabled]) => ({
-      type: "set_auto_compaction",
-      enabled: parseOnOff(enabled!, "auto-compaction"),
-    }),
-  },
-  "set-auto-retry": {
-    positionals: ["<on|off>"],
-    summary: "toggle auto-retry of failed turns",
-    build: ([enabled]) => ({
-      type: "set_auto_retry",
-      enabled: parseOnOff(enabled!, "auto-retry"),
-    }),
-  },
-  "abort-retry": {
-    positionals: [],
-    summary: "cancel a pending auto-retry",
-    build: () => ({ type: "abort_retry" }),
-  },
-  bash: {
-    positionals: ["<command>"],
-    flagsUsage: "[--exclude-from-context]",
-    summary: "run a shell command via the agent",
-    options: { "exclude-from-context": { type: "boolean" } },
-    build: ([command], values) => ({
-      type: "bash",
-      command: command!,
-      ...(values["exclude-from-context"] === true && {
-        excludeFromContext: true,
-      }),
-    }),
-  },
-  "abort-bash": {
-    positionals: [],
-    summary: "abort a running bash command",
-    build: () => ({ type: "abort_bash" }),
-  },
-  "get-session-stats": {
-    positionals: [],
-    summary: "token/cost stats",
-    build: () => ({ type: "get_session_stats" }),
-  },
-  "export-html": {
-    positionals: [],
-    flagsUsage: "[--output-path <path>]",
-    summary: "export the session as HTML",
-    options: { "output-path": { type: "string" } },
-    build: (_positionals, values) => ({
-      type: "export_html",
-      ...(typeof values["output-path"] === "string" && {
-        outputPath: values["output-path"],
-      }),
-    }),
-  },
-  "switch-session": {
-    positionals: ["<session-path>"],
-    summary: "switch to another session file",
-    build: ([sessionPath]) => ({
-      type: "switch_session",
-      sessionPath: sessionPath!,
-    }),
-  },
-  fork: {
-    positionals: ["<entry-id>"],
-    summary: "fork the session from an entry",
-    build: ([entryId]) => ({ type: "fork", entryId: entryId! }),
-  },
-  clone: {
-    positionals: [],
-    summary: "clone the session",
-    build: () => ({ type: "clone" }),
-  },
-  "get-fork-messages": {
-    positionals: [],
-    summary: "list fork points",
-    build: () => ({ type: "get_fork_messages" }),
-  },
-  "get-entries": {
-    positionals: [],
-    flagsUsage: "[--since <entry-id>]",
-    summary: "session entries (cursors are session-scoped)",
-    options: { since: { type: "string" } },
-    build: (_positionals, values) => ({
-      type: "get_entries",
-      ...(typeof values.since === "string" && { since: values.since }),
-    }),
-  },
-  "get-tree": {
-    positionals: [],
-    summary: "session entry tree",
-    build: () => ({ type: "get_tree" }),
-  },
-  "navigate-tree": {
-    positionals: ["<target-id>"],
-    flagsUsage:
-      "[--summarize] [--custom-instructions <text>] [--replace-instructions] [--label <text>]",
-    summary: "move the session leaf to another entry",
-    options: {
-      summarize: { type: "boolean" },
-      "custom-instructions": { type: "string" },
-      "replace-instructions": { type: "boolean" },
-      label: { type: "string" },
-    },
-    build: ([targetId], values) => ({
-      type: "navigate_tree",
-      targetId: targetId!,
-      ...(values.summarize === true && { summarize: true }),
-      ...(typeof values["custom-instructions"] === "string" && {
-        customInstructions: values["custom-instructions"],
-      }),
-      ...(values["replace-instructions"] === true && {
-        replaceInstructions: true,
-      }),
-      ...(typeof values.label === "string" && { label: values.label }),
-    }),
-  },
-  "get-last-assistant-text": {
-    positionals: [],
-    summary: "text of the last assistant message",
-    build: () => ({ type: "get_last_assistant_text" }),
-  },
-  "set-session-name": {
-    positionals: ["<name>"],
-    summary: "name the session",
-    build: ([name]) => ({ type: "set_session_name", name: name! }),
-  },
-  "get-messages": {
-    positionals: [],
-    summary: "full message history",
-    build: () => ({ type: "get_messages" }),
-  },
-  "get-commands": {
-    positionals: [],
-    summary: "slash commands available via prompt",
-    build: () => ({ type: "get_commands" }),
-  },
-};
-
-function cliInvocation(cliName: string, spec: RpcCliSpec): string {
-  const parts = [`pictl ${cliName} <agent>`, ...spec.positionals];
-  if (spec.flagsUsage) {
-    parts.push(spec.flagsUsage);
-  }
-  return parts.join(" ");
-}
-
-function printResponse(response: RpcResponse, raw: boolean): void {
+function printResponse(
+  context: CommandContext,
+  response: RpcResponse,
+  raw: boolean,
+): void {
   if (raw) {
-    console.log(JSON.stringify(response));
+    context.process.stdout.write(`${JSON.stringify(response)}\n`);
     return;
   }
   const data = (response as { data?: unknown }).data;
   if (data !== undefined) {
-    console.log(JSON.stringify(data, null, 2));
+    context.process.stdout.write(`${JSON.stringify(data, null, 2)}\n`);
   }
 }
 
-export async function runRpcCliCommand(
-  cliName: string,
-  spec: RpcCliSpec,
-  argv: string[],
+async function sendRpc(
+  context: CommandContext,
+  command: RpcCommand,
+  raw: boolean,
+  afterResponse?: (client: PiSocketClient) => Promise<void>,
 ): Promise<void> {
-  let parsed: { values: FlagValues; positionals: string[] };
-  try {
-    parsed = parseArgs({
-      args: argv,
-      allowPositionals: true,
-      options: {
-        ...(spec.options ?? {}),
-        raw: { type: "boolean" },
-      },
-    });
-  } catch (error) {
-    throw new UsageError(
-      `${error instanceof Error ? error.message : String(error)}\nusage: ${cliInvocation(cliName, spec)}`,
-    );
-  }
-  const [agentIdPrefix, ...commandPositionals] = parsed.positionals;
-  if (
-    agentIdPrefix === undefined ||
-    commandPositionals.length !== spec.positionals.length
-  ) {
-    throw new UsageError(`usage: ${cliInvocation(cliName, spec)}`);
-  }
-  const command = await spec.build(commandPositionals, parsed.values);
-
-  const agent = await ensureAgentRunning(agentIdPrefix);
+  const agent = await ensureAgentRunning(oneTarget(context).id);
   const client = await connectWithRetry(
     piSocketPath(agent.agentDir),
     SOCKET_CONNECT_DEADLINE_MS,
   );
   try {
     const response = await client.request(command);
-    printResponse(response, parsed.values.raw === true);
-    if (spec.afterResponse) {
-      await spec.afterResponse(client, parsed.values);
+    printResponse(context, response, raw);
+    if (afterResponse) {
+      await afterResponse(client);
     }
   } finally {
     client.close();
   }
 }
 
-function rpcArgvFromFlags(
-  flags: Readonly<Record<string, unknown>>,
-  positionals: readonly string[],
-): string[] {
-  const argv = [...positionals];
-  for (const [key, value] of Object.entries(flags)) {
-    if (key === "target") {
-      continue;
-    }
-    if (Array.isArray(value)) {
-      for (const item of value) {
-        argv.push(`--${key}`, String(item));
-      }
-    } else if (value === true) {
-      argv.push(`--${key}`);
-    } else if (typeof value === "string") {
-      argv.push(`--${key}`, value);
-    }
-  }
-  return argv;
-}
-
-function rpcFlags(
-  options:
-    | Record<string, { type: "string" | "boolean"; multiple?: boolean }>
-    | undefined,
-) {
-  const flags: Record<string, unknown> = {
-    raw: { kind: "boolean", brief: "Print raw RPC response", optional: true },
-  };
-  for (const [name, opt] of Object.entries(options ?? {})) {
-    flags[name] =
-      opt.type === "boolean"
-        ? { kind: "boolean", brief: name, optional: true }
-        : {
-            kind: "parsed",
-            parse: String,
-            brief: name,
-            optional: true,
-            ...(opt.multiple ? { variadic: true } : {}),
-          };
-  }
-  return flags;
-}
-
-export const rpcCommands = Object.fromEntries(
-  Object.entries(RPC_CLI_SPECS).map(([name, spec]) => [
-    name,
-    command({
-      targetMode: "single",
-      common: name === "prompt" ? true : undefined,
-      docs: { brief: spec.summary },
-      parameters: {
-        flags: rpcFlags(spec.options),
-        positional: {
-          kind: "tuple",
-          parameters: spec.positionals.map((positional) =>
-            stringArg(positional, positional.replace(/[<>]/g, "")),
-          ),
-        },
-      },
-      func: async function (
-        this: CommandContext,
-        flags: Readonly<Record<string, unknown>>,
-        ...args: string[]
-      ) {
-        await runRpcCliCommand(name, spec, [
-          this.targets[0]!.id,
-          ...rpcArgvFromFlags(flags, args),
-        ]);
-      },
+export async function prompt(
+  this: CommandContext,
+  flags: PromptFlags,
+  message: string,
+): Promise<void> {
+  const command: RpcCommand = {
+    type: "prompt",
+    message: await messageFrom(this, message),
+    ...(await imagesFromFlags(flags.image)),
+    ...(flags.streamingBehavior !== undefined && {
+      streamingBehavior:
+        flags.streamingBehavior === "steer" ? "steer" : "followUp",
     }),
-  ]),
-);
-
-export function rpcCommandHandlers(): Record<
-  string,
-  (argv: string[]) => Promise<void>
-> {
-  return Object.fromEntries(
-    Object.entries(RPC_CLI_SPECS).map(([cliName, spec]) => [
-      cliName,
-      (argv: string[]) => runRpcCliCommand(cliName, spec, argv),
-    ]),
-  );
-}
-
-/**
- * Usage lines for main.ts, aligned like the hand-written command table.
- * Summaries align to the longest invocation that fits the cap; a rare
- * outlier (navigate-tree) overflows rather than stretching every line.
- */
-export function rpcCommandUsage(): string {
-  const alignmentCapColumns = 60;
-  const rows = Object.entries(RPC_CLI_SPECS).map(([cliName, spec]) => {
-    const invocation = cliInvocation(cliName, spec).replace(/^pictl /, "");
-    return [invocation, spec.summary] as const;
+  };
+  await sendRpc(this, command, flags.raw === true, async (client) => {
+    const condition = promptWaitCondition(flags);
+    if (condition !== undefined) {
+      await applyWaitCondition(client, condition, undefined);
+    }
   });
-  const width = Math.max(
-    ...rows
-      .map(([invocation]) => invocation.length)
-      .filter((length) => length <= alignmentCapColumns),
-  );
-  return rows
-    .map(([invocation, summary]) =>
-      invocation.length <= width
-        ? `  ${invocation.padEnd(width + 2)}${summary}`
-        : `  ${invocation}  ${summary}`,
-    )
-    .join("\n");
 }
+
+export async function steer(
+  this: CommandContext,
+  flags: RawFlags & ImageFlags,
+  message: string,
+): Promise<void> {
+  await sendRpc(
+    this,
+    {
+      type: "steer",
+      message: await messageFrom(this, message),
+      ...(await imagesFromFlags(flags.image)),
+    },
+    flags.raw === true,
+  );
+}
+
+export async function followUp(
+  this: CommandContext,
+  flags: RawFlags & ImageFlags,
+  message: string,
+): Promise<void> {
+  await sendRpc(
+    this,
+    {
+      type: "follow_up",
+      message: await messageFrom(this, message),
+      ...(await imagesFromFlags(flags.image)),
+    },
+    flags.raw === true,
+  );
+}
+
+async function sendSimple(
+  context: CommandContext,
+  flags: RawFlags,
+  command: RpcCommand,
+): Promise<void> {
+  await sendRpc(context, command, flags.raw === true);
+}
+
+const promptCommand = commandOneTarget<PromptFlags, [string]>({
+  common: true,
+  docs: {
+    brief:
+      "send a prompt (errors while streaming without --streaming-behavior)",
+  },
+  parameters: {
+    flags: {
+      raw: rawFlag,
+      andWait: trueFlag("Wait for turn end after prompting"),
+      andWaitUntil: {
+        kind: "parsed",
+        parse: parseWaitCondition,
+        brief: `Wait until ${WAIT_UNTIL_USAGE} after prompting`,
+        optional: true,
+      },
+      streamingBehavior: {
+        kind: "enum",
+        values: ["steer", "follow-up"],
+        brief: "Behavior while the agent is streaming",
+        optional: true,
+      },
+      image: imageFlag,
+    },
+    positional: {
+      kind: "tuple",
+      parameters: [stringArg("Message", "message|-")],
+    },
+  },
+  func: prompt,
+});
+
+const steerCommand = commandOneTarget<RawFlags & ImageFlags, [string]>({
+  docs: { brief: "interject into the current turn" },
+  parameters: {
+    flags: { raw: rawFlag, image: imageFlag },
+    positional: {
+      kind: "tuple",
+      parameters: [stringArg("Message", "message|-")],
+    },
+  },
+  func: steer,
+});
+
+const followUpCommand = commandOneTarget<RawFlags & ImageFlags, [string]>({
+  docs: { brief: "queue a message for after the current turn" },
+  parameters: {
+    flags: { raw: rawFlag, image: imageFlag },
+    positional: {
+      kind: "tuple",
+      parameters: [stringArg("Message", "message|-")],
+    },
+  },
+  func: followUp,
+});
+
+const abortCommand = commandOneTarget<RawFlags>({
+  docs: { brief: "abort the current turn" },
+  parameters: { flags: { raw: rawFlag } },
+  func(flags) {
+    return sendSimple(this, flags, { type: "abort" });
+  },
+});
+
+const newSessionCommand = commandOneTarget<ParentSessionFlags>({
+  docs: { brief: "start a fresh session" },
+  parameters: {
+    flags: {
+      raw: rawFlag,
+      parentSession: {
+        kind: "parsed",
+        parse: String,
+        brief: "Parent session path",
+        optional: true,
+      },
+    },
+  },
+  func(flags) {
+    return sendSimple(this, flags, {
+      type: "new_session",
+      ...(flags.parentSession !== undefined && {
+        parentSession: flags.parentSession,
+      }),
+    });
+  },
+});
+
+const getStateCommand = commandOneTarget<RawFlags>({
+  docs: { brief: "session state (model, streaming, pending queue, ...)" },
+  parameters: { flags: { raw: rawFlag } },
+  func(flags) {
+    return sendSimple(this, flags, { type: "get_state" });
+  },
+});
+
+const setModelCommand = commandOneTarget<RawFlags, [string, string]>({
+  docs: { brief: "switch model" },
+  parameters: {
+    flags: { raw: rawFlag },
+    positional: {
+      kind: "tuple",
+      parameters: [
+        stringArg("Provider", "provider"),
+        stringArg("Model id", "model-id"),
+      ],
+    },
+  },
+  func(flags, provider, modelId) {
+    return sendSimple(this, flags, { type: "set_model", provider, modelId });
+  },
+});
+
+const cycleModelCommand = commandOneTarget<RawFlags>({
+  docs: { brief: "cycle to the next model" },
+  parameters: { flags: { raw: rawFlag } },
+  func(flags) {
+    return sendSimple(this, flags, { type: "cycle_model" });
+  },
+});
+
+const getAvailableModelsCommand = commandOneTarget<RawFlags>({
+  docs: { brief: "list models" },
+  parameters: { flags: { raw: rawFlag } },
+  func(flags) {
+    return sendSimple(this, flags, { type: "get_available_models" });
+  },
+});
+
+const setThinkingLevelCommand = commandOneTarget<
+  RawFlags,
+  [(typeof THINKING_LEVELS)[number]]
+>({
+  docs: { brief: "set thinking level" },
+  parameters: {
+    flags: { raw: rawFlag },
+    positional: {
+      kind: "tuple",
+      parameters: [
+        {
+          ...stringArg("Thinking level", "level"),
+          parse: (value: string) =>
+            oneOf(value, THINKING_LEVELS, "thinking level"),
+        },
+      ],
+    },
+  },
+  func(flags, level) {
+    return sendSimple(this, flags, { type: "set_thinking_level", level });
+  },
+});
+
+const cycleThinkingLevelCommand = commandOneTarget<RawFlags>({
+  docs: { brief: "cycle thinking level" },
+  parameters: { flags: { raw: rawFlag } },
+  func(flags) {
+    return sendSimple(this, flags, { type: "cycle_thinking_level" });
+  },
+});
+
+const setSteeringModeCommand = commandOneTarget<
+  RawFlags,
+  ["all" | "one-at-a-time"]
+>({
+  docs: { brief: "how queued steering messages are delivered" },
+  parameters: {
+    flags: { raw: rawFlag },
+    positional: {
+      kind: "tuple",
+      parameters: [
+        {
+          ...stringArg("Mode", "all|one-at-a-time"),
+          parse: (value: string) => oneOf(value, QUEUE_MODES, "steering mode"),
+        },
+      ],
+    },
+  },
+  func(flags, mode) {
+    return sendSimple(this, flags, { type: "set_steering_mode", mode });
+  },
+});
+
+const setFollowUpModeCommand = commandOneTarget<
+  RawFlags,
+  ["all" | "one-at-a-time"]
+>({
+  docs: { brief: "how queued follow-ups are delivered" },
+  parameters: {
+    flags: { raw: rawFlag },
+    positional: {
+      kind: "tuple",
+      parameters: [
+        {
+          ...stringArg("Mode", "all|one-at-a-time"),
+          parse: (value: string) => oneOf(value, QUEUE_MODES, "follow-up mode"),
+        },
+      ],
+    },
+  },
+  func(flags, mode) {
+    return sendSimple(this, flags, { type: "set_follow_up_mode", mode });
+  },
+});
+
+const compactCommand = commandOneTarget<CustomInstructionsFlags>({
+  docs: { brief: "compact the session context" },
+  parameters: {
+    flags: {
+      raw: rawFlag,
+      customInstructions: {
+        kind: "parsed",
+        parse: String,
+        brief: "Custom instructions",
+        optional: true,
+      },
+    },
+  },
+  func(flags) {
+    return sendSimple(this, flags, {
+      type: "compact",
+      ...(flags.customInstructions !== undefined && {
+        customInstructions: flags.customInstructions,
+      }),
+    });
+  },
+});
+
+const setAutoCompactionCommand = commandOneTarget<RawFlags, [boolean]>({
+  docs: { brief: "toggle auto-compaction" },
+  parameters: {
+    flags: { raw: rawFlag },
+    positional: {
+      kind: "tuple",
+      parameters: [
+        {
+          ...stringArg("Enabled", "on|off"),
+          parse: (value: string) => parseOnOff(value, "auto-compaction"),
+        },
+      ],
+    },
+  },
+  func(flags, enabled) {
+    return sendSimple(this, flags, { type: "set_auto_compaction", enabled });
+  },
+});
+
+const setAutoRetryCommand = commandOneTarget<RawFlags, [boolean]>({
+  docs: { brief: "toggle auto-retry of failed turns" },
+  parameters: {
+    flags: { raw: rawFlag },
+    positional: {
+      kind: "tuple",
+      parameters: [
+        {
+          ...stringArg("Enabled", "on|off"),
+          parse: (value: string) => parseOnOff(value, "auto-retry"),
+        },
+      ],
+    },
+  },
+  func(flags, enabled) {
+    return sendSimple(this, flags, { type: "set_auto_retry", enabled });
+  },
+});
+
+const abortRetryCommand = commandOneTarget<RawFlags>({
+  docs: { brief: "cancel a pending auto-retry" },
+  parameters: { flags: { raw: rawFlag } },
+  func(flags) {
+    return sendSimple(this, flags, { type: "abort_retry" });
+  },
+});
+
+const bashCommand = commandOneTarget<BashFlags, [string]>({
+  docs: { brief: "run a shell command via the agent" },
+  parameters: {
+    flags: {
+      raw: rawFlag,
+      excludeFromContext: trueFlag("Exclude from context"),
+    },
+    positional: {
+      kind: "tuple",
+      parameters: [stringArg("Command", "command")],
+    },
+  },
+  func(flags, command) {
+    return sendSimple(this, flags, {
+      type: "bash",
+      command,
+      ...(flags.excludeFromContext === true && { excludeFromContext: true }),
+    });
+  },
+});
+
+const abortBashCommand = commandOneTarget<RawFlags>({
+  docs: { brief: "abort a running bash command" },
+  parameters: { flags: { raw: rawFlag } },
+  func(flags) {
+    return sendSimple(this, flags, { type: "abort_bash" });
+  },
+});
+
+const getSessionStatsCommand = commandOneTarget<RawFlags>({
+  docs: { brief: "token/cost stats" },
+  parameters: { flags: { raw: rawFlag } },
+  func(flags) {
+    return sendSimple(this, flags, { type: "get_session_stats" });
+  },
+});
+
+const exportHtmlCommand = commandOneTarget<OutputPathFlags>({
+  docs: { brief: "export the session as HTML" },
+  parameters: {
+    flags: {
+      raw: rawFlag,
+      outputPath: {
+        kind: "parsed",
+        parse: String,
+        brief: "Output path",
+        optional: true,
+      },
+    },
+  },
+  func(flags) {
+    return sendSimple(this, flags, {
+      type: "export_html",
+      ...(flags.outputPath !== undefined && { outputPath: flags.outputPath }),
+    });
+  },
+});
+
+const switchSessionCommand = commandOneTarget<RawFlags, [string]>({
+  docs: { brief: "switch to another session file" },
+  parameters: {
+    flags: { raw: rawFlag },
+    positional: {
+      kind: "tuple",
+      parameters: [stringArg("Session path", "session-path")],
+    },
+  },
+  func(flags, sessionPath) {
+    return sendSimple(this, flags, { type: "switch_session", sessionPath });
+  },
+});
+
+const forkCommand = commandOneTarget<RawFlags, [string]>({
+  docs: { brief: "fork the session from an entry" },
+  parameters: {
+    flags: { raw: rawFlag },
+    positional: {
+      kind: "tuple",
+      parameters: [stringArg("Entry id", "entry-id")],
+    },
+  },
+  func(flags, entryId) {
+    return sendSimple(this, flags, { type: "fork", entryId });
+  },
+});
+
+const cloneCommand = commandOneTarget<RawFlags>({
+  docs: { brief: "clone the session" },
+  parameters: { flags: { raw: rawFlag } },
+  func(flags) {
+    return sendSimple(this, flags, { type: "clone" });
+  },
+});
+
+const getForkMessagesCommand = commandOneTarget<RawFlags>({
+  docs: { brief: "list fork points" },
+  parameters: { flags: { raw: rawFlag } },
+  func(flags) {
+    return sendSimple(this, flags, { type: "get_fork_messages" });
+  },
+});
+
+const getEntriesCommand = commandOneTarget<SinceFlags>({
+  docs: { brief: "session entries (cursors are session-scoped)" },
+  parameters: {
+    flags: {
+      raw: rawFlag,
+      since: {
+        kind: "parsed",
+        parse: String,
+        brief: "Entry id",
+        optional: true,
+      },
+    },
+  },
+  func(flags) {
+    return sendSimple(this, flags, {
+      type: "get_entries",
+      ...(flags.since !== undefined && { since: flags.since }),
+    });
+  },
+});
+
+const getTreeCommand = commandOneTarget<RawFlags>({
+  docs: { brief: "session entry tree" },
+  parameters: { flags: { raw: rawFlag } },
+  func(flags) {
+    return sendSimple(this, flags, { type: "get_tree" });
+  },
+});
+
+const navigateTreeCommand = commandOneTarget<NavigateTreeFlags, [string]>({
+  docs: { brief: "move the session leaf to another entry" },
+  parameters: {
+    flags: {
+      raw: rawFlag,
+      summarize: trueFlag("Summarize"),
+      customInstructions: {
+        kind: "parsed",
+        parse: String,
+        brief: "Custom instructions",
+        optional: true,
+      },
+      replaceInstructions: trueFlag("Replace instructions"),
+      label: { kind: "parsed", parse: String, brief: "Label", optional: true },
+    },
+    positional: {
+      kind: "tuple",
+      parameters: [stringArg("Target id", "target-id")],
+    },
+  },
+  func(flags, targetId) {
+    return sendSimple(this, flags, {
+      type: "navigate_tree",
+      targetId,
+      ...(flags.summarize === true && { summarize: true }),
+      ...(flags.customInstructions !== undefined && {
+        customInstructions: flags.customInstructions,
+      }),
+      ...(flags.replaceInstructions === true && { replaceInstructions: true }),
+      ...(flags.label !== undefined && { label: flags.label }),
+    });
+  },
+});
+
+const getLastAssistantTextCommand = commandOneTarget<RawFlags>({
+  docs: { brief: "text of the last assistant message" },
+  parameters: { flags: { raw: rawFlag } },
+  func(flags) {
+    return sendSimple(this, flags, { type: "get_last_assistant_text" });
+  },
+});
+
+const setSessionNameCommand = commandOneTarget<RawFlags, [string]>({
+  docs: { brief: "name the session" },
+  parameters: {
+    flags: { raw: rawFlag },
+    positional: { kind: "tuple", parameters: [stringArg("Name", "name")] },
+  },
+  func(flags, name) {
+    return sendSimple(this, flags, { type: "set_session_name", name });
+  },
+});
+
+const getMessagesCommand = commandOneTarget<RawFlags>({
+  docs: { brief: "full message history" },
+  parameters: { flags: { raw: rawFlag } },
+  func(flags) {
+    return sendSimple(this, flags, { type: "get_messages" });
+  },
+});
+
+const getCommandsCommand = commandOneTarget<RawFlags>({
+  docs: { brief: "slash commands available via prompt" },
+  parameters: { flags: { raw: rawFlag } },
+  func(flags) {
+    return sendSimple(this, flags, { type: "get_commands" });
+  },
+});
+
+export const rpcRoutes = {
+  prompt: promptCommand,
+  steer: steerCommand,
+  "follow-up": followUpCommand,
+  abort: abortCommand,
+  "new-session": newSessionCommand,
+  "get-state": getStateCommand,
+  "set-model": setModelCommand,
+  "cycle-model": cycleModelCommand,
+  "get-available-models": getAvailableModelsCommand,
+  "set-thinking-level": setThinkingLevelCommand,
+  "cycle-thinking-level": cycleThinkingLevelCommand,
+  "set-steering-mode": setSteeringModeCommand,
+  "set-follow-up-mode": setFollowUpModeCommand,
+  compact: compactCommand,
+  "set-auto-compaction": setAutoCompactionCommand,
+  "set-auto-retry": setAutoRetryCommand,
+  "abort-retry": abortRetryCommand,
+  bash: bashCommand,
+  "abort-bash": abortBashCommand,
+  "get-session-stats": getSessionStatsCommand,
+  "export-html": exportHtmlCommand,
+  "switch-session": switchSessionCommand,
+  fork: forkCommand,
+  clone: cloneCommand,
+  "get-fork-messages": getForkMessagesCommand,
+  "get-entries": getEntriesCommand,
+  "get-tree": getTreeCommand,
+  "navigate-tree": navigateTreeCommand,
+  "get-last-assistant-text": getLastAssistantTextCommand,
+  "set-session-name": setSessionNameCommand,
+  "get-messages": getMessagesCommand,
+  "get-commands": getCommandsCommand,
+} as const;

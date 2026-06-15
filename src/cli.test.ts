@@ -107,13 +107,7 @@ test("help and version print key lines", async () => {
 test("representative parser behavior uses --target grammar", async () => {
   await withRegistry(async () => {
     const accepted = fakeProcess();
-    const oldLog = console.log;
-    console.log = () => undefined;
-    try {
-      await runCliApp(app, ["status", "-t", "abc", "--json"], accepted.proc);
-    } finally {
-      console.log = oldLog;
-    }
+    await runCliApp(app, ["status", "-t", "abc", "--json"], accepted.proc);
     assert.equal(accepted.proc.exitCode, 0);
 
     const oldPositional = fakeProcess();

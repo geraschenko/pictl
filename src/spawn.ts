@@ -16,10 +16,8 @@ import { mkdir } from "node:fs/promises";
 import { delimiter, isAbsolute, join, resolve } from "node:path";
 import type { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
-import { parseArgs } from "node:util";
-import { argvFromFlags, command, restArgs } from "./cli.ts";
+import { commandNoTarget, restArgs, type CommandContext } from "./cli.ts";
 import { agentDirPath, holderLogPath, pictlBaseDir } from "./registry.ts";
-import { splitAtDoubleDash } from "./util.ts";
 
 export interface HolderLaunch {
   agentDir: string;
@@ -42,8 +40,8 @@ function isExecutableFile(path: string): boolean {
 }
 
 /** PICTL_PI_BIN wins; otherwise search PATH for `pi`. Returns an absolute path. */
-export function resolvePiBin(): string {
-  const fromEnv = process.env.PICTL_PI_BIN;
+export function resolvePiBin(env: NodeJS.ProcessEnv = process.env): string {
+  const fromEnv = env.PICTL_PI_BIN;
   if (fromEnv) {
     const absolute = resolve(fromEnv);
     if (!isExecutableFile(absolute)) {
@@ -51,7 +49,7 @@ export function resolvePiBin(): string {
     }
     return absolute;
   }
-  for (const pathDir of (process.env.PATH ?? "").split(delimiter)) {
+  for (const pathDir of (env.PATH ?? "").split(delimiter)) {
     if (pathDir === "") {
       continue;
     }
@@ -139,8 +137,47 @@ export async function launchHolder(launch: HolderLaunch): Promise<void> {
   }
 }
 
-export const spawnCommand = command({
-  targetMode: "none",
+interface SpawnFlags {
+  cwd?: string;
+  id?: string;
+  tag?: string;
+}
+
+export async function spawn(
+  this: CommandContext,
+  flags: SpawnFlags,
+  ...piArgs: string[]
+): Promise<void> {
+  const agentId = flags.id ?? randomUUID();
+  const cwd = resolve(flags.cwd ?? process.cwd());
+  const piBin = resolvePiBin(this.env);
+  const agentDir = agentDirPath(agentId);
+
+  await mkdir(pictlBaseDir(), { recursive: true });
+  try {
+    await mkdir(agentDir);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+      throw new Error(`agent '${agentId}' already exists`);
+    }
+    throw error;
+  }
+
+  // On failure the dir is left in place so holder.log can be inspected;
+  // `pictl gc` removes dirs that never got an agent.json.
+  await launchHolder({
+    agentDir,
+    agentId,
+    cwd,
+    piBin,
+    piArgs,
+    resume: false,
+    tag: flags.tag,
+  });
+  this.process.stdout.write(`${agentId}\n`);
+}
+
+const spawnCommand = commandNoTarget<SpawnFlags, string[]>({
   common: true,
   docs: {
     brief: "start an agent, print its id",
@@ -166,50 +203,9 @@ export const spawnCommand = command({
     },
     positional: restArgs("pi arguments", "pi-arg"),
   },
-  func: async (flags, ...piArgs: string[]) =>
-    runSpawn([
-      ...argvFromFlags(flags, [], ["cwd", "id", "tag"]),
-      "--",
-      ...piArgs,
-    ]),
+  func: spawn,
 });
 
-export async function runSpawn(argv: string[]): Promise<void> {
-  const { ownArgs, passthroughArgs: piArgs } = splitAtDoubleDash(argv);
-  const { values } = parseArgs({
-    args: ownArgs,
-    options: {
-      cwd: { type: "string" },
-      id: { type: "string" },
-      tag: { type: "string" },
-    },
-  });
-
-  const agentId = values.id ?? randomUUID();
-  const cwd = resolve(values.cwd ?? process.cwd());
-  const piBin = resolvePiBin();
-  const agentDir = agentDirPath(agentId);
-
-  await mkdir(pictlBaseDir(), { recursive: true });
-  try {
-    await mkdir(agentDir);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "EEXIST") {
-      throw new Error(`agent '${agentId}' already exists`);
-    }
-    throw error;
-  }
-
-  // On failure the dir is left in place so holder.log can be inspected;
-  // `pictl gc` removes dirs that never got an agent.json.
-  await launchHolder({
-    agentDir,
-    agentId,
-    cwd,
-    piBin,
-    piArgs,
-    resume: false,
-    tag: values.tag,
-  });
-  console.log(agentId);
-}
+export const spawnRoute = {
+  spawn: spawnCommand,
+} as const;

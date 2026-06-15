@@ -1,12 +1,10 @@
-/**
- * `pictl attach <agent>` — connect the local terminal to an agent's PTY via
- * the holder's tty.sock: raw-mode stdin, snapshot render, then bidirectional
- * byte proxying until the detach keybinding.
+/*
+ * `pictl attach --target <agent>` — connect the local terminal to an agent's
+ * PTY via the holder's tty.sock: raw-mode stdin, snapshot render, then
+ * bidirectional byte proxying until the detach keybinding.
  */
 
 import { connect, type Socket } from "node:net";
-import { parseArgs } from "node:util";
-import { command } from "./cli.ts";
 import {
   CURSOR_HOME,
   cursorToRow,
@@ -17,12 +15,13 @@ import {
   SAVE_CURSOR,
   SHOW_CURSOR,
 } from "./ansi.ts";
+import { commandOneTarget, oneTarget, type CommandContext } from "./cli.ts";
 import { ensureAgentRunning } from "./lifecycle.ts";
 import { ttySocketPath } from "./registry.ts";
 import {
+  decodeExit,
   encodeFrame,
   encodeResize,
-  decodeExit,
   FrameDecoder,
   FrameType,
 } from "./tty-protocol.ts";
@@ -40,43 +39,24 @@ const TERMINAL_RESTORE_SEQUENCE = `${SHOW_CURSOR}${DISABLE_BRACKETED_PASTE}${RES
 /** Render the snapshot from the holder's emulator origin: home, clear. */
 const CLEAR_SCREEN_SEQUENCE = `${CURSOR_HOME}${ERASE_SCREEN}`;
 
-/**
- * pi leaves the cursor at its editor line with the footer drawn below it;
- * printing there would leave the footer as ghost text around the shell
- * prompt. Park the cursor on the last row so the exit message and the prompt
- * land below everything pi drew.
- */
-function cursorToLastRow(): string {
-  return cursorToRow(process.stdout.rows);
-}
+export async function attach(this: CommandContext): Promise<void> {
+  const { id: targetId } = oneTarget(this);
+  const { id: agentId, agentDir } = await ensureAgentRunning(targetId);
+  const { stdin, stdout } = this.process;
 
-export const attachCommand = command({
-  targetMode: "single",
-  common: true,
-  docs: { brief: "attach this terminal to an agent" },
-  func: async function () {
-    await runAttach([this.targets[0]!.id]);
-  },
-});
-
-export async function runAttach(argv: string[]): Promise<void> {
-  // TDC: ok, this is still very dumb. The point of migrating to stricli was to offload the parsing onto it. Why are we still parsing arguments manually? Should each command be defining its own flags struct?
-  const { positionals } = parseArgs({
-    args: argv,
-    allowPositionals: true,
-    options: {},
-  });
-  if (positionals.length !== 1) {
-    throw new Error("expected exactly one agent id");
-  }
-  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+  if (!stdin.isTTY || !stdout.isTTY) {
     throw new Error("attach requires stdin and stdout to be a terminal");
   }
-  const { id: agentId, agentDir } = await ensureAgentRunning(positionals[0]!);
+
+  // pi leaves the cursor at its editor line with the footer drawn below it;
+  // printing there would leave the footer as ghost text around the shell
+  // prompt. Park the cursor on the last row so the exit message and the prompt
+  // land below everything pi drew.
+  const cursorToLastRow = (): string => cursorToRow(stdout.rows);
 
   const socket = await connectToTty(ttySocketPath(agentDir), agentId);
-  process.stdin.setRawMode(true);
-  process.stdin.resume();
+  stdin.setRawMode(true);
+  stdin.resume();
 
   // Drawn over the last row right after the snapshot, so it is visible on
   // attach instead of being wiped by the snapshot's screen clear; pi's next
@@ -85,25 +65,25 @@ export async function runAttach(argv: string[]): Promise<void> {
   const attachHint = `${SAVE_CURSOR}${cursorToLastRow()}${RESET_SGR}attached to ${agentId}; detach: ${DETACH_KEY_NAME}${RESTORE_CURSOR}`;
 
   const finish = (exitCode: number, message: string): never => {
-    process.stdin.setRawMode(false);
-    process.stdin.pause();
-    process.stdout.write(
+    stdin.setRawMode(false);
+    stdin.pause();
+    stdout.write(
       `${cursorToLastRow()}${TERMINAL_RESTORE_SEQUENCE}\r\n${message}\n`,
     );
     socket.destroy();
-    process.exit(exitCode);
+    this.process.exit(exitCode);
   };
 
   const sendResize = (): void => {
     socket.write(
       encodeResize({
-        cols: process.stdout.columns,
-        rows: process.stdout.rows,
+        cols: stdout.columns,
+        rows: stdout.rows,
       }),
     );
   };
   sendResize();
-  process.stdout.on("resize", sendResize);
+  stdout.on("resize", sendResize);
 
   const frameDecoder = new FrameDecoder();
   socket.on("data", (chunk) => {
@@ -111,12 +91,12 @@ export async function runAttach(argv: string[]): Promise<void> {
       for (const frame of frameDecoder.push(chunk)) {
         switch (frame.type) {
           case FrameType.snapshot:
-            process.stdout.write(CLEAR_SCREEN_SEQUENCE);
-            process.stdout.write(frame.payload);
-            process.stdout.write(attachHint);
+            stdout.write(CLEAR_SCREEN_SEQUENCE);
+            stdout.write(frame.payload);
+            stdout.write(attachHint);
             break;
           case FrameType.output:
-            process.stdout.write(frame.payload);
+            stdout.write(frame.payload);
             break;
           case FrameType.exit:
             finish(0, `agent exited: ${decodeExit(frame.payload).reason}`);
@@ -134,7 +114,7 @@ export async function runAttach(argv: string[]): Promise<void> {
   socket.on("close", () => finish(1, "connection to agent holder lost"));
   socket.on("error", () => socket.destroy());
 
-  process.stdin.on("data", (chunk: Buffer) => {
+  stdin.on("data", (chunk: Buffer) => {
     const detachIndex = chunk.indexOf(DETACH_KEY);
     if (detachIndex === -1) {
       socket.write(encodeFrame(FrameType.input, chunk));
@@ -151,6 +131,16 @@ export async function runAttach(argv: string[]): Promise<void> {
   // goes through finish() and process.exit.
   return new Promise<never>(() => {});
 }
+
+const attachCommand = commandOneTarget({
+  common: true,
+  docs: { brief: "attach this terminal to an agent" },
+  func: attach,
+});
+
+export const attachRoute = {
+  attach: attachCommand,
+} as const;
 
 async function connectToTty(
   socketPath: string,

@@ -7,7 +7,6 @@
 
 import { closeSync, writeSync } from "node:fs";
 import { rm } from "node:fs/promises";
-import { parseArgs } from "node:util";
 import { numberParser } from "@stricli/core";
 import { SerializeAddon } from "@xterm/addon-serialize";
 import {
@@ -19,7 +18,12 @@ import {
 import xterm from "@xterm/headless";
 import pty from "node-pty";
 import { cursorTo, cursorToRow, HIDE_CURSOR, SHOW_CURSOR } from "./ansi.ts";
-import { argvFromFlags, command, restArgs } from "./cli.ts";
+import {
+  commandNoTarget,
+  restArgs,
+  trueFlag,
+  type CommandContext,
+} from "./cli.ts";
 import {
   type AgentRecord,
   holderLogPath,
@@ -35,56 +39,20 @@ import {
   type SocketEvent,
 } from "./rpc.ts";
 import { TtyServer } from "./tty-server.ts";
-import { fileExists, splitAtDoubleDash } from "./util.ts";
+import { fileExists } from "./util.ts";
 
 const PTY_COLS = 80;
 const PTY_ROWS = 24;
 const RPC_CONNECT_DEADLINE_MS = 30_000;
 
-interface HoldArgs {
+interface HoldFlags {
   agentDir: string;
   agentId: string;
   cwd: string;
   piBin: string;
-  resume: boolean;
-  tag: string | undefined;
-  readyFd: number | undefined;
-  piArgs: string[];
-}
-
-function parseHoldArgs(argv: string[]): HoldArgs {
-  const { ownArgs, passthroughArgs } = splitAtDoubleDash(argv);
-  const { values } = parseArgs({
-    args: ownArgs,
-    options: {
-      "agent-dir": { type: "string" },
-      "agent-id": { type: "string" },
-      cwd: { type: "string" },
-      "pi-bin": { type: "string" },
-      resume: { type: "boolean", default: false },
-      tag: { type: "string" },
-      "ready-fd": { type: "string" },
-    },
-  });
-  if (
-    !values["agent-dir"] ||
-    !values["agent-id"] ||
-    !values.cwd ||
-    !values["pi-bin"]
-  ) {
-    throw new Error("_hold requires --agent-dir, --agent-id, --cwd, --pi-bin");
-  }
-  return {
-    agentDir: values["agent-dir"],
-    agentId: values["agent-id"],
-    cwd: values.cwd,
-    piBin: values["pi-bin"],
-    resume: values.resume ?? false,
-    tag: values.tag,
-    readyFd:
-      values["ready-fd"] === undefined ? undefined : Number(values["ready-fd"]),
-    piArgs: passthroughArgs,
-  };
+  resume?: true;
+  tag?: string;
+  readyFd?: number;
 }
 
 function signalReady(
@@ -118,9 +86,12 @@ async function revivalSessionArgs(
   return [];
 }
 
-function ptyEnv(agentId: string): Record<string, string> {
+function ptyEnv(
+  agentId: string,
+  processEnv: NodeJS.ProcessEnv,
+): Record<string, string> {
   const env: Record<string, string> = {};
-  for (const [key, value] of Object.entries(process.env)) {
+  for (const [key, value] of Object.entries(processEnv)) {
     if (value !== undefined) {
       env[key] = value;
     }
@@ -205,61 +176,14 @@ export function projectTrustWouldBlock(cwd: string, piArgs: string[]): boolean {
   );
 }
 
-export const holdCommand = command({
-  targetMode: "none",
-  docs: { brief: "internal holder daemon" },
-  parameters: {
-    flags: {
-      "agent-dir": {
-        kind: "parsed",
-        parse: String,
-        brief: "Agent dir",
-        optional: true,
-      },
-      "agent-id": {
-        kind: "parsed",
-        parse: String,
-        brief: "Agent id",
-        optional: true,
-      },
-      cwd: {
-        kind: "parsed",
-        parse: String,
-        brief: "Working directory",
-        optional: true,
-      },
-      "pi-bin": {
-        kind: "parsed",
-        parse: String,
-        brief: "pi binary",
-        optional: true,
-      },
-      resume: { kind: "boolean", brief: "Resume", optional: true },
-      tag: { kind: "parsed", parse: String, brief: "Tag", optional: true },
-      "ready-fd": {
-        kind: "parsed",
-        parse: numberParser,
-        brief: "Ready fd",
-        optional: true,
-      },
-    },
-    positional: restArgs("pi arguments", "pi-arg"),
-  },
-  func: async (flags, ...piArgs: string[]) =>
-    runHold([
-      ...argvFromFlags(
-        flags,
-        ["resume"],
-        ["agent-dir", "agent-id", "cwd", "pi-bin", "tag", "ready-fd"],
-      ),
-      "--",
-      ...piArgs,
-    ]),
-});
-
-export async function runHold(argv: string[]): Promise<void> {
-  const args = parseHoldArgs(argv);
+export async function hold(
+  this: CommandContext,
+  flags: HoldFlags,
+  ...piArgs: string[]
+): Promise<void> {
+  const args = { ...flags, resume: flags.resume === true, piArgs };
   const { agentDir, agentId } = args;
+  const proc = this.process;
 
   const existing = await readAgentRecord(agentDir);
   const createdAt =
@@ -277,7 +201,7 @@ export async function runHold(argv: string[]): Promise<void> {
       `pi would block on the project-trust prompt in ${args.cwd}; ` +
       `pass --[no-]approve (pictl spawn -- --approve) or trust/distrust ` +
       `the directory once interactively by running pi there.`;
-    console.error(`[holder] ${message}`);
+    proc.stderr.write(`[holder] ${message}\n`);
     signalReady(args.readyFd, { ok: false, error: message });
     return;
   }
@@ -298,7 +222,7 @@ export async function runHold(argv: string[]): Promise<void> {
       cols: PTY_COLS,
       rows: PTY_ROWS,
       cwd: args.cwd,
-      env: ptyEnv(agentId),
+      env: ptyEnv(agentId, this.env),
     },
   );
 
@@ -352,7 +276,7 @@ export async function runHold(argv: string[]): Promise<void> {
     ...(tag !== undefined && { tag }),
     piBin: args.piBin,
     spawnArgs: args.piArgs,
-    holderPid: process.pid,
+    holderPid: proc.pid,
     piPid: piProcess.pid,
     sessions,
     agentDir,
@@ -385,20 +309,20 @@ export async function runHold(argv: string[]): Promise<void> {
           rm(piSocketPath(agentDir), { force: true }),
           rm(ttySocketPath(agentDir), { force: true }),
         ]);
-        process.exit(code);
+        proc.exit(code);
       });
   };
 
   piProcess.onExit(({ exitCode }) => {
-    console.log(`[holder] pi exited with code ${exitCode}`);
+    proc.stdout.write(`[holder] pi exited with code ${exitCode}\n`);
     cleanupAndExit(exitCode);
   });
   // Any termination request to the holder means "shut the agent down":
   // forward as SIGTERM so pi exits cleanly. Forwarding SIGINT verbatim would
   // be wrong — interactive pi treats it as "abort the current turn" and
   // keeps running, leaving a holder that was asked to die still alive.
-  process.on("SIGTERM", () => piProcess.kill("SIGTERM"));
-  process.on("SIGINT", () => piProcess.kill("SIGTERM"));
+  proc.on("SIGTERM", () => piProcess.kill("SIGTERM"));
+  proc.on("SIGINT", () => piProcess.kill("SIGTERM"));
 
   const handleEvent = (event: SocketEvent): void => {
     if (!isSessionChangedEvent(event)) {
@@ -434,9 +358,35 @@ export async function runHold(argv: string[]): Promise<void> {
     const message =
       `could not connect to pi socket: ${String(error)} ` +
       `(log: ${holderLogPath(agentDir)})`;
-    console.error(`[holder] ${message}`);
+    proc.stderr.write(`[holder] ${message}\n`);
     signalReady(args.readyFd, { ok: false, error: message });
     piProcess.kill("SIGKILL");
     cleanupAndExit(1);
   }
 }
+
+const holdCommand = commandNoTarget<HoldFlags, string[]>({
+  docs: { brief: "internal holder daemon" },
+  parameters: {
+    flags: {
+      agentDir: { kind: "parsed", parse: String, brief: "Agent dir" },
+      agentId: { kind: "parsed", parse: String, brief: "Agent id" },
+      cwd: { kind: "parsed", parse: String, brief: "Working directory" },
+      piBin: { kind: "parsed", parse: String, brief: "pi binary" },
+      resume: trueFlag("Resume"),
+      tag: { kind: "parsed", parse: String, brief: "Tag", optional: true },
+      readyFd: {
+        kind: "parsed",
+        parse: numberParser,
+        brief: "Ready fd",
+        optional: true,
+      },
+    },
+    positional: restArgs("pi arguments", "pi-arg"),
+  },
+  func: hold,
+});
+
+export const internalRoutes = {
+  _hold: holdCommand,
+} as const;

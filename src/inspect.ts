@@ -1,19 +1,23 @@
-/**
+/*
  * `pictl list | status` — read-only inspection of the registry. Neither
  * revives dormant agents: a dead holder is not garbage.
  */
 
 import { resolve } from "node:path";
-import { parseArgs } from "node:util";
 import type { RpcSessionState } from "@earendil-works/pi-coding-agent";
-import { argvFromFlags, command } from "./cli.ts";
+import {
+  commandMultiTarget,
+  commandNoTarget,
+  multiTargets,
+  trueFlag,
+  type CommandContext,
+} from "./cli.ts";
 import {
   type AgentRecord,
   classifyAgentDir,
   isPidAlive,
   listAgentIds,
   piSocketPath,
-  resolveAgentId,
 } from "./registry.ts";
 import { connectWithRetry, getState } from "./rpc.ts";
 
@@ -34,6 +38,16 @@ export interface AgentProbe {
   record?: AgentRecord;
   state?: RpcSessionState;
   error?: string;
+}
+
+interface ListFlags {
+  json?: true;
+  all?: true;
+  cwd?: string;
+}
+
+interface StatusFlags {
+  json?: true;
 }
 
 export async function probeAgent(agentId: string): Promise<AgentProbe> {
@@ -86,45 +100,16 @@ function formatTable(rows: string[][]): string {
     .join("\n");
 }
 
-export const listCommand = command({
-  targetMode: "none",
-  common: true,
-  docs: { brief: "list agents and their status" },
-  parameters: {
-    flags: {
-      json: { kind: "boolean", brief: "Print JSON", optional: true },
-      all: {
-        kind: "boolean",
-        brief: "Include archived agents",
-        optional: true,
-      },
-      cwd: {
-        kind: "parsed",
-        parse: String,
-        brief: "Filter by cwd",
-        optional: true,
-      },
-    },
-  },
-  func: async (flags) =>
-    runList(argvFromFlags(flags, ["json", "all"], ["cwd"])),
-});
-
-export async function runList(argv: string[]): Promise<void> {
-  const { values } = parseArgs({
-    args: argv,
-    options: {
-      json: { type: "boolean", default: false },
-      all: { type: "boolean", default: false },
-      cwd: { type: "string" },
-    },
-  });
-  const cwdFilter = values.cwd === undefined ? undefined : resolve(values.cwd);
+export async function list(
+  this: CommandContext,
+  flags: ListFlags,
+): Promise<void> {
+  const cwdFilter = flags.cwd === undefined ? undefined : resolve(flags.cwd);
   const agentIds = await listAgentIds();
   let probes = await Promise.all(agentIds.map(probeAgent));
   // Archived agents are kept but hidden unless asked for; --cwd matches the
   // agent's recorded working directory exactly (resolved).
-  if (!values.all) {
+  if (flags.all !== true) {
     probes = probes.filter((probe) => probe.status !== "archived");
   }
   if (cwdFilter !== undefined) {
@@ -134,12 +119,12 @@ export async function runList(argv: string[]): Promise<void> {
     (a.record?.createdAt ?? "").localeCompare(b.record?.createdAt ?? ""),
   );
 
-  if (values.json) {
-    console.log(JSON.stringify(probes, null, 2));
+  if (flags.json === true) {
+    this.process.stdout.write(`${JSON.stringify(probes, null, 2)}\n`);
     return;
   }
   if (probes.length === 0) {
-    console.log("no agents");
+    this.process.stdout.write("no agents\n");
     return;
   }
   const rows = [["ID", "TAG", "STATUS", "CWD", "CREATED"]];
@@ -152,81 +137,91 @@ export async function runList(argv: string[]): Promise<void> {
       probe.record?.createdAt ?? "-",
     ]);
   }
-  console.log(formatTable(rows));
+  this.process.stdout.write(`${formatTable(rows)}\n`);
 }
 
-function printProbe(probe: AgentProbe): void {
-  console.log(`id:       ${probe.agentId}`);
-  console.log(
+function formatProbe(probe: AgentProbe): string {
+  const lines = [
+    `id:       ${probe.agentId}`,
     `status:   ${probe.status}${probe.error ? ` (${probe.error})` : ""}`,
-  );
+  ];
   if (probe.record) {
     if (probe.record.tag !== undefined) {
-      console.log(`tag:      ${probe.record.tag}`);
+      lines.push(`tag:      ${probe.record.tag}`);
     }
-    console.log(`cwd:      ${probe.record.cwd}`);
-    console.log(`created:  ${probe.record.createdAt}`);
-    console.log(`pi bin:   ${probe.record.piBin}`);
-    console.log(`args:     ${probe.record.spawnArgs.join(" ") || "-"}`);
-    console.log(
+    lines.push(`cwd:      ${probe.record.cwd}`);
+    lines.push(`created:  ${probe.record.createdAt}`);
+    lines.push(`pi bin:   ${probe.record.piBin}`);
+    lines.push(`args:     ${probe.record.spawnArgs.join(" ") || "-"}`);
+    lines.push(
       `holder:   pid ${probe.record.holderPid}${isPidAlive(probe.record.holderPid) ? "" : " (dead)"}`,
     );
-    console.log(
+    lines.push(
       `pi:       pid ${probe.record.piPid}${isPidAlive(probe.record.piPid) ? "" : " (dead)"}`,
     );
   }
   if (probe.state) {
-    console.log(
+    lines.push(
       `model:    ${probe.state.model ? `${probe.state.model.provider}/${probe.state.model.id}` : "-"}`,
     );
-    console.log(`session:  ${probe.state.sessionFile ?? "(in-memory)"}`);
-    console.log(`pending:  ${probe.state.pendingMessageCount} message(s)`);
+    lines.push(`session:  ${probe.state.sessionFile ?? "(in-memory)"}`);
+    lines.push(`pending:  ${probe.state.pendingMessageCount} message(s)`);
   }
   if (probe.record && probe.record.sessions.length > 0) {
-    console.log("sessions:");
+    lines.push("sessions:");
     for (const entry of probe.record.sessions) {
-      console.log(`  ${entry.sessionFile}`);
+      lines.push(`  ${entry.sessionFile}`);
     }
   }
+  return lines.join("\n");
 }
 
-export const statusCommand = command({
-  targetMode: "multiple",
+export async function status(
+  this: CommandContext,
+  flags: StatusFlags,
+): Promise<void> {
+  const probes = await Promise.all(
+    multiTargets(this).map((target) => probeAgent(target.id)),
+  );
+
+  if (flags.json === true) {
+    this.process.stdout.write(`${JSON.stringify(probes, null, 2)}\n`);
+    return;
+  }
+  this.process.stdout.write(`${probes.map(formatProbe).join("\n\n")}\n`);
+}
+
+const listCommand = commandNoTarget<ListFlags>({
+  common: true,
+  docs: { brief: "list agents and their status" },
+  parameters: {
+    flags: {
+      json: trueFlag("Print JSON"),
+      all: trueFlag("Include archived agents"),
+      cwd: {
+        kind: "parsed",
+        parse: String,
+        brief: "Filter by cwd",
+        optional: true,
+      },
+    },
+  },
+  func: list,
+});
+
+const statusCommand = commandMultiTarget<StatusFlags>({
   common: true,
   docs: { brief: "detailed status of agents" },
   parameters: {
-    flags: { json: { kind: "boolean", brief: "Print JSON", optional: true } },
+    flags: { json: trueFlag("Print JSON") },
   },
-  func: async function (flags) {
-    await runStatus([
-      ...this.targets.map((target) => target.id),
-      ...argvFromFlags(flags, ["json"], []),
-    ]);
-  },
+  func: status,
 });
 
-export async function runStatus(argv: string[]): Promise<void> {
-  const { values, positionals } = parseArgs({
-    args: argv,
-    allowPositionals: true,
-    options: { json: { type: "boolean", default: false } },
-  });
-  if (positionals.length === 0) {
-    throw new Error("expected at least one agent id");
-  }
-  const agentIds = await Promise.all(
-    positionals.map((address) => resolveAgentId(address)),
-  );
-  const probes = await Promise.all(agentIds.map(probeAgent));
+export const listRoute = {
+  list: listCommand,
+} as const;
 
-  if (values.json) {
-    console.log(JSON.stringify(probes, null, 2));
-    return;
-  }
-  probes.forEach((probe, index) => {
-    if (index > 0) {
-      console.log("");
-    }
-    printProbe(probe);
-  });
-}
+export const statusRoute = {
+  status: statusCommand,
+} as const;

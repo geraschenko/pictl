@@ -1,30 +1,17 @@
-/**
- * `pictl tail <agent> [--follow] [--since <entry-id>] [--until <cond>]
- * [--events]` — session entries as JSONL on stdout, one entry per line,
- * followed by a `{"type":"pictl_cursor","sessionId":...,"entryId":...}` record
- * so callers can persist their place (cursors are session-scoped: persist the
- * sessionId alongside, and expect "entry not found" after `/new`, `/resume`,
- * fork, or clone — pictl does not interweave session files).
- *
- * --follow keeps the connection open and streams subsequent entries. Events
- * are only wakeups: every drain re-issues `get_entries --since <cursor>`, so
- * the session file remains the single source of truth. A session replacement
- * mid-follow quietly resyncs the cursor to the new session's tip (announced
- * by a fresh cursor record) and only entries created after the replacement
- * stream out.
- *
- * --until <cond> stops following once a wait condition holds (turn-end|idle|
- * no-activity:<secs>) and exits 0; in entry mode it drains any trailing entries
- * first. It implies --follow.
- *
- * --events instead streams the raw broadcast events as JSONL (implies
- * following; entry draining and --since do not apply). --until still applies —
- * events stream until the condition holds.
+/*
+ * `pictl tail --target <agent> [--follow] [--since <entry-id>]
+ * [--until <cond>] [--events]` — session entries as JSONL on stdout, one
+ * entry per line, followed by a cursor record so callers can persist their
+ * place.
  */
 
-import { parseArgs } from "node:util";
 import type { RpcResponse } from "@earendil-works/pi-coding-agent";
-import { argvFromFlags, command } from "./cli.ts";
+import {
+  commandOneTarget,
+  oneTarget,
+  trueFlag,
+  type CommandContext,
+} from "./cli.ts";
 import { ensureAgentRunning } from "./lifecycle.ts";
 import { piSocketPath } from "./registry.ts";
 import {
@@ -42,12 +29,6 @@ import {
 
 const SOCKET_CONNECT_DEADLINE_MS = 5_000;
 
-/**
- * Event types that fire per streamed token; waking on them would hammer
- * get_entries during a turn. Everything else (including event types this
- * code does not know about) is a wakeup — entries only materialize at
- * message/turn boundaries, so the next non-noisy event drains them.
- */
 const STREAMING_NOISE_EVENTS = new Set([
   "message_update",
   "tool_execution_update",
@@ -58,6 +39,13 @@ type GetEntriesData = Extract<
   { command: "get_entries"; success: true }
 >["data"];
 
+interface TailFlags {
+  follow?: true;
+  since?: string;
+  until?: WaitCondition;
+  events?: true;
+}
+
 function entriesFrom(response: RpcResponse): GetEntriesData["entries"] {
   // client.request throws on success: false, so the cast is safe here.
   return (
@@ -66,15 +54,16 @@ function entriesFrom(response: RpcResponse): GetEntriesData["entries"] {
 }
 
 function printCursorRecord(
+  write: (text: string) => void,
   sessionId: string | undefined,
   entryId: string | null,
 ): void {
-  console.log(
-    JSON.stringify({
+  write(
+    `${JSON.stringify({
       type: "pictl_cursor",
       sessionId: sessionId ?? null,
       entryId,
-    }),
+    })}\n`,
   );
 }
 
@@ -90,21 +79,11 @@ interface FollowState {
   stopError: Error | undefined;
 }
 
-/**
- * Fetch entries after `cursor`, print them, and return the advanced cursor
- * (unchanged when nothing new). The cursor is the last printed entry's id —
- * file order — not the response's leafId, which tree navigation can move
- * backwards onto an already-printed entry.
- *
- * Takes the state rather than a sessionId snapshot: the per-connection
- * session_changed event may still be in flight when the drain starts, but pi
- * sends it before any response, so by the time the response resolves the
- * state carries the session id.
- */
 async function drainEntries(
   client: PiSocketClient,
   state: FollowState,
   cursor: string | undefined,
+  write: (text: string) => void,
 ): Promise<string | undefined> {
   let response;
   try {
@@ -126,29 +105,28 @@ async function drainEntries(
     return cursor;
   }
   for (const entry of entries) {
-    console.log(JSON.stringify(entry));
+    write(`${JSON.stringify(entry)}\n`);
   }
   const lastEntryId = entries[entries.length - 1]!.id;
-  printCursorRecord(state.sessionId, lastEntryId);
+  printCursorRecord(write, state.sessionId, lastEntryId);
   return lastEntryId;
 }
 
 async function streamEvents(
   socketPath: string,
   stopCondition: WaitCondition | undefined,
+  write: (text: string) => void,
 ): Promise<void> {
   const client = await connectWithRetry(
     socketPath,
     SOCKET_CONNECT_DEADLINE_MS,
-    (event) => console.log(JSON.stringify(event)),
+    (event) => write(`${JSON.stringify(event)}\n`),
   );
   try {
     if (stopCondition === undefined) {
       await client.waitClosed();
       throw new Error("pi socket closed");
     }
-    // Events keep printing via the connect callback; this watches the same
-    // connection for the stop condition and returns 0 when it holds.
     await applyWaitCondition(client, stopCondition, undefined);
   } finally {
     client.close();
@@ -158,8 +136,6 @@ async function streamEvents(
 function handleFollowEvent(state: FollowState, event: SocketEvent): void {
   if (event.type === "session_changed") {
     const announcedSessionId = (event as { sessionId?: string }).sessionId;
-    // The first session_changed (right after hello) announces the current
-    // session — identity, not replacement.
     if (state.sessionId === undefined) {
       state.sessionId = announcedSessionId;
     } else if (announcedSessionId !== state.sessionId) {
@@ -184,82 +160,23 @@ function nextWake(state: FollowState, client: PiSocketClient): Promise<void> {
   });
 }
 
-export const tailCommand = command({
-  targetMode: "single",
-  common: true,
-  docs: { brief: "session entries as JSONL, then a cursor record" },
-  parameters: {
-    flags: {
-      follow: { kind: "boolean", brief: "Follow new entries", optional: true },
-      since: {
-        kind: "parsed",
-        parse: String,
-        brief: "Start after entry id",
-        optional: true,
-      },
-      until: {
-        kind: "parsed",
-        parse: String,
-        brief: `Follow until ${WAIT_UNTIL_USAGE}`,
-        optional: true,
-      },
-      events: { kind: "boolean", brief: "Stream raw events", optional: true },
-    },
-  },
-  func: async function (flags) {
-    await runTail([
-      this.targets[0]!.id,
-      ...argvFromFlags(flags, ["follow", "events"], ["since", "until"]),
-    ]);
-  },
-});
-
-export async function runTail(argv: string[]): Promise<void> {
-  let parsed: {
-    values: {
-      follow?: boolean;
-      since?: string;
-      until?: string;
-      events?: boolean;
-    };
-    positionals: string[];
-  };
-  try {
-    parsed = parseArgs({
-      args: argv,
-      allowPositionals: true,
-      options: {
-        follow: { type: "boolean" },
-        since: { type: "string" },
-        until: { type: "string" },
-        events: { type: "boolean" },
-      },
-    });
-  } catch (error) {
-    throw new UsageError(
-      error instanceof Error ? error.message : String(error),
-    );
-  }
-  if (parsed.positionals.length !== 1) {
-    throw new UsageError(
-      `usage: pictl tail <agent> [--follow] [--since <entry-id>] [--until ${WAIT_UNTIL_USAGE}] [--events]`,
-    );
-  }
-  if (parsed.values.events && parsed.values.since !== undefined) {
+export async function tail(
+  this: CommandContext,
+  flags: TailFlags,
+): Promise<void> {
+  if (flags.events === true && flags.since !== undefined) {
     throw new UsageError("--events streams raw events; --since does not apply");
   }
-  // --until implies --follow: it only makes sense while streaming.
-  const stopCondition =
-    parsed.values.until === undefined
-      ? undefined
-      : parseWaitCondition(parsed.values.until);
-  const follow = parsed.values.follow === true || stopCondition !== undefined;
-
-  const agent = await ensureAgentRunning(parsed.positionals[0]!);
+  const stopCondition = flags.until;
+  const follow = flags.follow === true || stopCondition !== undefined;
+  const agent = await ensureAgentRunning(oneTarget(this).id);
   const socketPath = piSocketPath(agent.agentDir);
+  const write = (text: string): void => {
+    this.process.stdout.write(text);
+  };
 
-  if (parsed.values.events) {
-    await streamEvents(socketPath, stopCondition);
+  if (flags.events === true) {
+    await streamEvents(socketPath, stopCondition, write);
     return;
   }
 
@@ -277,17 +194,14 @@ export async function runTail(argv: string[]): Promise<void> {
     (event) => handleFollowEvent(state, event),
   );
   try {
-    let cursor = await drainEntries(client, state, parsed.values.since);
-    if (cursor === undefined || cursor === parsed.values.since) {
-      // Nothing printed yet; emit the cursor record the caller persists.
-      printCursorRecord(state.sessionId, cursor ?? null);
+    let cursor = await drainEntries(client, state, flags.since, write);
+    if (cursor === undefined || cursor === flags.since) {
+      printCursorRecord(write, state.sessionId, cursor ?? null);
     }
     if (!follow) {
       return;
     }
     if (stopCondition !== undefined) {
-      // Run the stop condition alongside the drain loop. When it resolves we
-      // wake the loop, which breaks after a final drain of trailing entries.
       void applyWaitCondition(client, stopCondition, undefined).then(
         () => {
           state.stopRequested = true;
@@ -313,15 +227,12 @@ export async function runTail(argv: string[]): Promise<void> {
       }
       if (state.resyncNeeded) {
         state.resyncNeeded = false;
-        cursor = await resyncToSessionTip(client, state);
+        cursor = await resyncToSessionTip(client, state, write);
         continue;
       }
       try {
-        cursor = await drainEntries(client, state, cursor);
+        cursor = await drainEntries(client, state, cursor, write);
       } catch (error) {
-        // A drain can race the session_changed broadcast: the cursor belongs
-        // to the replaced session and pi reports it unknown. Resync instead
-        // of dying; the next iteration handles it.
         if (
           error instanceof Error &&
           error.message.includes("Entry not found")
@@ -335,11 +246,8 @@ export async function runTail(argv: string[]): Promise<void> {
     if (state.stopError !== undefined) {
       throw state.stopError;
     }
-    // The agent_end that satisfied the condition may have produced entries the
-    // loop has not drained yet. Best-effort final drain; a session swap racing
-    // the stop leaves nothing for us to print, so ignore a stale cursor.
     try {
-      await drainEntries(client, state, cursor);
+      await drainEntries(client, state, cursor, write);
     } catch (error) {
       if (
         !(error instanceof Error && error.message.includes("Entry not found"))
@@ -352,19 +260,43 @@ export async function runTail(argv: string[]): Promise<void> {
   }
 }
 
-/**
- * After a session replacement the old cursor is meaningless; position at the
- * new session's last entry without printing history (only entries created
- * after the replacement should stream), announcing the new position.
- */
+const tailCommand = commandOneTarget<TailFlags>({
+  common: true,
+  docs: { brief: "session entries as JSONL, then a cursor record" },
+  parameters: {
+    flags: {
+      follow: trueFlag("Follow new entries"),
+      since: {
+        kind: "parsed",
+        parse: String,
+        brief: "Start after entry id",
+        optional: true,
+      },
+      until: {
+        kind: "parsed",
+        parse: parseWaitCondition,
+        brief: `Follow until ${WAIT_UNTIL_USAGE}`,
+        optional: true,
+      },
+      events: trueFlag("Stream raw events"),
+    },
+  },
+  func: tail,
+});
+
+export const tailRoute = {
+  tail: tailCommand,
+} as const;
+
 async function resyncToSessionTip(
   client: PiSocketClient,
   state: FollowState,
+  write: (text: string) => void,
 ): Promise<string | undefined> {
   const response = await client.request({ type: "get_entries" });
   const entries = entriesFrom(response);
   const lastEntryId =
     entries.length === 0 ? undefined : entries[entries.length - 1]!.id;
-  printCursorRecord(state.sessionId, lastEntryId ?? null);
+  printCursorRecord(write, state.sessionId, lastEntryId ?? null);
   return lastEntryId;
 }

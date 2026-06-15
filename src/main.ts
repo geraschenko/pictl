@@ -1,37 +1,30 @@
 #!/usr/bin/env node
+import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { buildApplication, buildRouteMap, type RouteMap } from "@stricli/core";
-import { cliLocalization, runCliApp, type CommandContext } from "./cli.ts";
-import { attachCommand } from "./attach.ts";
-import { holdCommand } from "./holder.ts";
-import { listCommand, statusCommand } from "./inspect.ts";
-import { gcCommand, lifecycleCommands } from "./lifecycle.ts";
-import { rpcCommands } from "./rpc-commands.ts";
-import { spawnCommand } from "./spawn.ts";
-import { tailCommand } from "./tail.ts";
+import { buildApplication, buildRouteMap } from "@stricli/core";
+import { cliLocalization, runCliApp } from "./cli.ts";
+import { attachRoute } from "./attach.ts";
+import { internalRoutes } from "./holder.ts";
+import { listRoute, statusRoute } from "./inspect.ts";
+import { gcRoute, lifecycleRoutes } from "./lifecycle.ts";
+import { rpcRoutes } from "./rpc-commands.ts";
+import { spawnRoute } from "./spawn.ts";
+import { tailRoute } from "./tail.ts";
 import { UsageError } from "./util.ts";
 import { VERSION } from "./version.ts";
-import { waitCommand, WaitTimeoutError } from "./wait.ts";
-
-const coreCommands = {
-  spawn: spawnCommand,
-  list: listCommand,
-  attach: attachCommand,
-  status: statusCommand,
-  wait: waitCommand,
-  tail: tailCommand,
-  gc: gcCommand,
-} as const;
-
-const internalCommands = {
-  _hold: holdCommand,
-} as const;
+import { waitRoute, WaitTimeoutError } from "./wait.ts";
 
 const routes = {
-  ...coreCommands,
-  ...lifecycleCommands,
-  ...rpcCommands,
-  ...internalCommands,
+  ...spawnRoute,
+  ...listRoute,
+  ...attachRoute,
+  ...statusRoute,
+  ...waitRoute,
+  ...tailRoute,
+  ...gcRoute,
+  ...lifecycleRoutes,
+  ...rpcRoutes,
+  ...internalRoutes,
 };
 
 function routeIsCommon(route: unknown): boolean {
@@ -45,12 +38,12 @@ const hideRoute = Object.fromEntries(
 );
 
 const root = buildRouteMap({
-  routes: routes as never,
+  routes,
   docs: {
     brief: "Spawn, observe, control, and attach to pi agents",
     hideRoute,
   },
-}) as RouteMap<CommandContext>;
+});
 
 export const app = buildApplication(root, {
   name: "pictl",
@@ -65,6 +58,10 @@ export const app = buildApplication(root, {
   localization: cliLocalization,
 });
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+const entryPath = process.argv[1];
+if (
+  entryPath !== undefined &&
+  realpathSync(entryPath) === fileURLToPath(import.meta.url)
+) {
   await runCliApp(app, process.argv.slice(2));
 }
