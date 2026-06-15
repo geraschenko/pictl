@@ -13,7 +13,7 @@ This spec replaces the current ad hoc parser structure with a centralized Stricl
 
 The new CLI grammar intentionally removes positional agent arguments. Commands that operate on agents select them with `--target` / `-t`, or with the `PICTL_TARGET` environment variable as a fallback.
 
-Use `@stricli/core`, pinned in `package.json`. Do not use the plain `stricli` npm package. Stricli documentation is available in the local clone at `/home/anton/git/stricli/docs/docs`; prefer reading those MDX files during implementation.
+Use `@stricli/core`, pinned in `package.json` (current version at spec time: `1.2.7`). Do not use the plain `stricli` npm package. Stricli documentation is available in the local clone at `/home/anton/git/stricli/docs/docs`; prefer reading those MDX files during implementation.
 
 ## User-facing command grammar
 
@@ -163,7 +163,7 @@ Default `--help` should show common commands only. Initial common command list:
 
 Default `--help` visibility should be implemented with Stricli route-map `docs.hideRoute`: commands are hidden from default help unless their pictl command spec marks them as common. `--help-all` should include hidden routes, including all RPC passthrough commands. It is acceptable for `_hold` to appear in `--help-all`.
 
-Do not introduce arbitrary help tags or custom grouped help output in this spec. Command ordering should be by category, while `common?: true` is only a default-help visibility filter. For example, `prompt` is an RPC passthrough command and should be ordered with the RPC commands in `--help-all`, even though it is also common and visible in default `--help`. Stricli appears to list commands in route-map order, so the implementation may approximate category grouping by ordering routes deliberately.
+Do not introduce arbitrary help tags, category fields, or custom grouped help output in this spec. `common?: true` is only a default-help visibility filter. Help ordering should come from how command modules export ordered command groups and how the main app concatenates those groups into the Stricli route map. For example, `prompt` is an RPC passthrough command and should be ordered with the RPC commands in `--help-all`, even though it is also common and visible in default `--help`. Stricli appears to list commands in route-map order, so deliberate route-map construction is the lightweight substitute for grouped headings.
 
 `pictl --version` prints only the package version, matching pi's behavior:
 
@@ -191,6 +191,8 @@ Preserve existing output behavior except where help formatting necessarily chang
 The implementation should introduce a central CLI layer with these core types or close equivalents:
 
 ```ts
+import type { CommandContext as StricliCommandContext, StricliProcess } from "@stricli/core";
+
 export type TargetMode = "none" | "single" | "multiple";
 
 export interface CommandContext extends StricliCommandContext {
@@ -224,8 +226,6 @@ The command-spec layer may be modeled as:
 ```ts
 interface PictlCommandSpec<FLAGS, ARGS extends readonly unknown[]> {
   targetMode: TargetMode;
-  /** Help/category ordering; does not by itself control default help visibility. */
-  category: "core" | "inspection" | "lifecycle" | "rpc" | "internal";
   /** Marker field: commands are hidden from default help unless marked common. */
   common?: true;
   docs: {
@@ -245,11 +245,52 @@ interface PictlCommandSpec<FLAGS, ARGS extends readonly unknown[]> {
 }
 ```
 
+Command modules should export ordered partial route/spec maps. The main app should concatenate those maps to build the final Stricli route map, preserving insertion order as the lightweight help-ordering mechanism:
+
+```ts
+export const coreCommands = {
+  spawn: spawnCommand,
+  list: listCommand,
+  attach: attachCommand,
+  status: statusCommand,
+  wait: waitCommand,
+  tail: tailCommand,
+  gc: gcCommand,
+} as const;
+
+export const lifecycleCommands = {
+  suspend: suspendCommand,
+  archive: archiveCommand,
+  resume: resumeCommand,
+  purge: purgeCommand,
+} as const;
+
+export const rpcCommands = {
+  prompt: promptCommand,
+  steer: steerCommand,
+  // ...all other RPC passthrough commands, in deliberate order
+} as const;
+
+export const internalCommands = {
+  _hold: holdCommand,
+} as const;
+
+const routes = {
+  ...coreCommands,
+  ...lifecycleCommands,
+  ...rpcCommands,
+  ...internalCommands,
+};
+```
+
+The exact group names and membership can follow the existing TypeScript module organization. Do not add a `category` or `tags` field just to drive help ordering.
+
 Exact generic spelling may differ to fit Stricli ergonomics, but the implementation should preserve the design intent:
 
 - command definitions are centralized;
 - `targetMode` is declared once per command;
-- `category` controls route-map ordering for help output, while `common?: true` controls default-help visibility;
+- `common?: true` controls default-help visibility;
+- help ordering comes from ordered command-group exports and deliberate route-map construction, not from a category/tag field;
 - target parsing and target resolution are enforced by a shared wrapper;
 - command implementations receive a `CommandContext` with loaded, non-revived `AgentRecord`s;
 - command implementations decide whether to revive targets.
@@ -322,17 +363,25 @@ A likely implementation path:
 2. Add a small version/config helper mirroring pi's package-version approach.
 3. Add target selection helpers and pure tests for `determineTargets`.
 4. Build a Stricli app from centralized command specs.
-5. Migrate first-class commands to specs.
-6. Migrate RPC passthrough command specs into the same command-definition framework.
+5. Migrate first-class commands to ordered command-group exports.
+6. Migrate RPC passthrough command specs into the same command-definition framework, exporting them as an ordered RPC command group.
 7. Migrate `_hold` as a Stricli command; it is acceptable for it to appear in `--help-all`.
 8. Add parser/dispatcher tests and a small CLI smoke test.
 9. Optionally evaluate `@stricli/auto-complete`; wire it in only if the integration is simple.
+
+Project constraints and current code orientation:
+
+- pictl is TypeScript, ESM (`"type": "module"`), built with plain `tsc`; keep the existing style of explicit `.ts` source imports.
+- `src/main.ts` currently owns top-level dispatch and manual global usage text.
+- `src/rpc-commands.ts` currently owns the RPC passthrough command table and generated usage lines; preserve the one-module discipline for RPC surface changes while adapting it to the new command-spec/route-map structure.
+- First-class command implementations currently live in `src/spawn.ts`, `src/attach.ts`, `src/inspect.ts`, `src/lifecycle.ts`, `src/tail.ts`, `src/wait.ts`, and `src/holder.ts`.
+- Existing commands commonly accept `argv: string[]` and parse internally. During migration, prefer moving parsing into Stricli specs and leaving command logic as functions over parsed values plus `CommandContext`.
 
 Notes:
 
 - Stricli docs should be read from `/home/anton/git/stricli/docs/docs` when questions arise during implementation.
 - Stricli supports command route maps, route-map `hideRoute`, generated help, aliases, typed flags, typed positionals, async handlers, isolated command context, `--help-all`, and version info.
-- Stricli appears to preserve route-map order in command help, which can be used as a lightweight substitute for grouped headings. Order commands by category; do not sort common commands to the top merely because they are common.
+- Stricli appears to preserve route-map order in command help, which can be used as a lightweight substitute for grouped headings. Use ordered command-group exports and concatenate them deliberately when constructing the route map; do not sort common commands to the top merely because they are common.
 - Stricli does not naturally support global flags before the command; this spec intentionally avoids requiring that behavior.
 - Parse/usage validation should happen before target resolution so missing required positionals are reported before unknown target IDs.
 - `wait` and `status` need special care because they intentionally should not revive dormant agents.
