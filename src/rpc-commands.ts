@@ -504,6 +504,7 @@ export async function runRpcCliCommand(
   }
 }
 
+// TDC: what's the point of defining a *second* constant in order to export it? Why not just export the first one?
 export const rpcCliSpecs = RPC_CLI_SPECS;
 
 export function rpcCommandHandlers(): Record<

@@ -37,7 +37,7 @@ export interface CommandContext extends StricliCommandContext {
 }
 
 type Flags = Record<string, unknown>;
-type Spec = {
+type CommandSpec = {
   targetMode: TargetMode;
   common?: true;
   docs: { brief: string; fullDescription?: string; customUsage?: string[] };
@@ -143,7 +143,7 @@ function rpcArgvFromFlags(
   return argv;
 }
 
-function withTargets(spec: Spec): Spec["func"] {
+function withTargets(spec: CommandSpec): CommandSpec["func"] {
   return async function (
     this: CommandContext,
     flags: Flags,
@@ -178,7 +178,7 @@ function targetFlag(mode: TargetMode): Record<string, unknown> {
   };
 }
 
-function command(spec: Spec) {
+function command(spec: CommandSpec) {
   return buildCommand({
     func: withTargets(spec) as never,
     parameters: {
@@ -358,7 +358,7 @@ const coreSpecs = {
     docs: { brief: "remove tombstoned or corrupt agent dirs" },
     func: async () => runGc([]),
   },
-} satisfies Record<string, Spec>;
+} satisfies Record<string, CommandSpec>;
 
 const lifecycleSpecs = {
   suspend: {
@@ -432,7 +432,7 @@ const lifecycleSpecs = {
       ]);
     },
   },
-} satisfies Record<string, Spec>;
+} satisfies Record<string, CommandSpec>;
 
 function rpcFlags(
   options:
@@ -483,7 +483,7 @@ const rpcSpecs = Object.fromEntries(
           ...rpcArgvFromFlags(flags, args),
         ]);
       },
-    } satisfies Spec,
+    } satisfies CommandSpec,
   ]),
 );
 
@@ -539,9 +539,9 @@ const internalSpecs = {
         ...piArgs,
       ]),
   },
-} satisfies Record<string, Spec>;
+} satisfies Record<string, CommandSpec>;
 
-const specs: Record<string, Spec> = {
+const specs: Record<string, CommandSpec> = {
   ...coreSpecs,
   ...lifecycleSpecs,
   ...rpcSpecs,
