@@ -13,7 +13,7 @@ This spec replaces the current ad hoc parser structure with a centralized Stricl
 
 The new CLI grammar intentionally removes positional agent arguments. Commands that operate on agents select them with `--target` / `-t`, or with the `PICTL_TARGET` environment variable as a fallback.
 
-Use `@stricli/core`, pinned in `package.json`. Do not use the plain `stricli` npm package.
+Use `@stricli/core`, pinned in `package.json`. Do not use the plain `stricli` npm package. Stricli documentation is available in the local clone at `/home/anton/git/stricli/docs/docs`; prefer reading those MDX files during implementation.
 
 ## User-facing command grammar
 
@@ -163,6 +163,8 @@ Default `--help` should show common commands only. Initial common command list:
 
 Default `--help` visibility should be implemented with Stricli route-map `docs.hideRoute`: commands are hidden from default help unless their pictl command spec marks them as common. `--help-all` should include hidden routes, including all RPC passthrough commands. It is acceptable for `_hold` to appear in `--help-all`.
 
+Do not introduce arbitrary help tags or custom grouped help output in this spec. Command ordering should be by category, while `common?: true` is only a default-help visibility filter. For example, `prompt` is an RPC passthrough command and should be ordered with the RPC commands in `--help-all`, even though it is also common and visible in default `--help`. Stricli appears to list commands in route-map order, so the implementation may approximate category grouping by ordering routes deliberately.
+
 `pictl --version` prints only the package version, matching pi's behavior:
 
 ```text
@@ -222,6 +224,8 @@ The command-spec layer may be modeled as:
 ```ts
 interface PictlCommandSpec<FLAGS, ARGS extends readonly unknown[]> {
   targetMode: TargetMode;
+  /** Help/category ordering; does not by itself control default help visibility. */
+  category: "core" | "inspection" | "lifecycle" | "rpc" | "internal";
   /** Marker field: commands are hidden from default help unless marked common. */
   common?: true;
   docs: {
@@ -245,6 +249,7 @@ Exact generic spelling may differ to fit Stricli ergonomics, but the implementat
 
 - command definitions are centralized;
 - `targetMode` is declared once per command;
+- `category` controls route-map ordering for help output, while `common?: true` controls default-help visibility;
 - target parsing and target resolution are enforced by a shared wrapper;
 - command implementations receive a `CommandContext` with loaded, non-revived `AgentRecord`s;
 - command implementations decide whether to revive targets.
@@ -325,7 +330,9 @@ A likely implementation path:
 
 Notes:
 
+- Stricli docs should be read from `/home/anton/git/stricli/docs/docs` when questions arise during implementation.
 - Stricli supports command route maps, route-map `hideRoute`, generated help, aliases, typed flags, typed positionals, async handlers, isolated command context, `--help-all`, and version info.
+- Stricli appears to preserve route-map order in command help, which can be used as a lightweight substitute for grouped headings. Order commands by category; do not sort common commands to the top merely because they are common.
 - Stricli does not naturally support global flags before the command; this spec intentionally avoids requiring that behavior.
 - Parse/usage validation should happen before target resolution so missing required positionals are reported before unknown target IDs.
 - `wait` and `status` need special care because they intentionally should not revive dormant agents.
