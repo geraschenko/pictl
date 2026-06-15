@@ -21,6 +21,7 @@ export interface CommandContext extends StricliCommandContext {
   targets: AgentRecord[];
 }
 
+// TDC: Doesn't having a totally generic Flags undermine the point of stricli's strict typing? Should each command have its own flags struct which is convertible to this type?
 export type Flags = Readonly<Record<string, unknown>>;
 
 export interface CommandSpec {
@@ -149,8 +150,9 @@ export function command(spec: CommandSpec) {
   );
 }
 
+// TDC: What the fuck?! Why are you defining a function to *undo* the whole thing we're trying to do.
 export function argvFromFlags(
-  flags: Readonly<Record<string, unknown>>,
+  flags: Readonly<Record<string, unknown>>,  // TDC: Flags? Why not use the types you define?
   booleanNames: string[],
   stringNames: string[],
 ): string[] {

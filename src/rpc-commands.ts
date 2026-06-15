@@ -160,7 +160,7 @@ function promptWaitCondition(values: FlagValues): WaitCondition | undefined {
   return values["and-wait"] === true ? { kind: "turn-end" } : undefined;
 }
 
-export const RPC_CLI_SPECS: Record<string, RpcCliSpec> = {
+const RPC_CLI_SPECS: Record<string, RpcCliSpec> = {
   prompt: {
     positionals: ["<message|->"],
     flagsUsage: `[--and-wait | --and-wait-until ${WAIT_UNTIL_USAGE}] [--streaming-behavior steer|follow-up] ${IMAGE_FLAG_USAGE}`,
@@ -505,7 +505,6 @@ export async function runRpcCliCommand(
   }
 }
 
-// TDC: what's the point of defining a *second* constant in order to export it? Why not just export the first one?
 function rpcArgvFromFlags(
   flags: Readonly<Record<string, unknown>>,
   positionals: readonly string[],

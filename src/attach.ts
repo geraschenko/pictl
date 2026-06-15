@@ -60,6 +60,7 @@ export const attachCommand = command({
 });
 
 export async function runAttach(argv: string[]): Promise<void> {
+  // TDC: ok, this is still very dumb. The point of migrating to stricli was to offload the parsing onto it. Why are we still parsing arguments manually? Should each command be defining its own flags struct?
   const { positionals } = parseArgs({
     args: argv,
     allowPositionals: true,
