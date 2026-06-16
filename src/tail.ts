@@ -26,7 +26,6 @@ import type { RpcResponse } from "@earendil-works/pi-coding-agent";
 import {
   booleanFlag,
   commandOneTarget,
-  defineFlags,
   oneTarget,
   parsedFlag,
   stringFlag,
@@ -65,16 +64,6 @@ type GetEntriesData = Extract<
   RpcResponse,
   { command: "get_entries"; success: true }
 >["data"];
-
-const tailFlags = defineFlags({
-  follow: booleanFlag("Follow new entries"),
-  since: stringFlag("Start after entry id"),
-  until: parsedFlag(`Follow until ${WAIT_UNTIL_USAGE}`, parseWaitCondition),
-  // TODO: should events be renamed "raw" to be consistent with rpc command flags?
-  events: booleanFlag("Stream raw events"),
-});
-
-type TailFlags = InferFlags<typeof tailFlags>;
 
 function entriesFrom(response: RpcResponse): GetEntriesData["entries"] {
   // client.request throws on success: false, so the cast is safe here.
@@ -204,6 +193,16 @@ function nextWake(state: FollowState, client: PiSocketClient): Promise<void> {
     void client.waitClosed().then(resolve);
   });
 }
+
+const tailFlags = {
+  follow: booleanFlag("Follow new entries"),
+  since: stringFlag("Start after entry id"),
+  until: parsedFlag(`Follow until ${WAIT_UNTIL_USAGE}`, parseWaitCondition),
+  // TODO: should events be renamed "raw" to be consistent with rpc command flags?
+  events: booleanFlag("Stream raw events"),
+};
+
+type TailFlags = InferFlags<typeof tailFlags>;
 
 export async function tail(
   this: CommandContext,

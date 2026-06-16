@@ -2,9 +2,9 @@
 import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { buildApplication, buildRouteMap } from "@stricli/core";
-import { cliLocalization, runCliApp } from "./cli.ts";
+import { runCliApp } from "./cli.ts";
 import { attachRoute } from "./attach.ts";
-import { internalRoutes } from "./holder.ts";
+import { internalRoutes } from "./daemon.ts";
 import { listRoute, statusRoute } from "./inspect.ts";
 import { gcRoute, lifecycleRoutes } from "./lifecycle.ts";
 import { rpcRoutes } from "./rpc-commands.ts";
@@ -54,7 +54,6 @@ export const app = buildApplication(root, {
   },
   determineExitCode: (error) =>
     error instanceof WaitTimeoutError ? 3 : error instanceof UsageError ? 2 : 1,
-  localization: cliLocalization,  // TDC: delete this line?
 });
 
 const entryPath = process.argv[1];

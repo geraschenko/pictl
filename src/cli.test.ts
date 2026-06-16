@@ -101,7 +101,10 @@ test("help and version print key lines", async () => {
   const helpAll = fakeProcess();
   await runCliApp(app, ["--help-all"], helpAll.proc);
   assert.match(helpAll.stdout, /^\s{2}steer\s+interject/m);
-  assert.match(helpAll.stdout, /^\s{2}_hold\s+internal holder daemon/m);
+  assert.match(
+    helpAll.stdout,
+    /^\s{2}_daemon\s+Internal command to launch a single-agent pi daemon/m,
+  );
 });
 
 test("representative parser behavior uses --target grammar", async () => {
@@ -122,6 +125,6 @@ test("representative parser behavior uses --target grammar", async () => {
     const globalTarget = fakeProcess();
     await runCliApp(app, ["-t", "abc", "prompt", "hello"], globalTarget.proc);
     assert.equal(globalTarget.proc.exitCode, 2);
-    assert.match(globalTarget.stderr, /unknown command: -t/);
+    assert.match(globalTarget.stderr, /No command registered for `-t`/);
   });
 });

@@ -12,11 +12,8 @@
  *   target when there's no target(s) specified.
  */
 import {
-  ArgumentScannerError,
   buildCommand,
-  formatMessageForArgumentScannerError,
   run,
-  text_en,
   type Aliases,
   type Command,
   type CommandContext as StricliCommandContext,
@@ -88,11 +85,7 @@ const multiTargetFlags = {
   CommandContext
 >;
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
-// TDC: why is this function exported? It looks like it's only used it tests, but I don't want to communicate that this is part of the public interface of this file. How should we deal with this? Is there a way to say that tests are allowed to use functions that aren't exported? Same question for several other exported functions in this file.
+/** @internal Exported for focused tests of target precedence/cardinality. */
 export function determineTargets(
   targetMode: "none" | "single" | "multiple",
   flagTargets: readonly string[],
@@ -190,13 +183,6 @@ export type InferFlags<F extends Record<string, unknown>> = {
     undefined
   >;
 };
-
-// TDC: why does defineFlags need to exist? Using a function for this type trickery seems kind of janky. Can we just do `purgeFlags = {}` (no defineFlags) and `PurgeFlags = InferFlags<typeof purgeFlags>`?
-export function defineFlags<const F extends Record<string, unknown>>(
-  flags: F,
-): F {
-  return flags;
-}
 
 // The helper bodies use casts because Stricli's TypedFlagParameter is a
 // conditional type: TypeScript cannot prove that a generic object literal is
@@ -429,28 +415,6 @@ export function commandMultiTarget<
     spec.common,
   );
 }
-
-// TDC: why do we have this localization object? I don't understand its purpose.
-export const cliLocalization = {
-  text: {
-    ...text_en,
-    formatException: errorMessage,
-    exceptionWhileParsingArguments(exc: unknown) {
-      return exc instanceof ArgumentScannerError
-        ? `pictl: ${formatMessageForArgumentScannerError(exc, {})}`
-        : `pictl: ${errorMessage(exc)}`;
-    },
-    exceptionWhileRunningCommand(exc: unknown) {
-      return `pictl: ${errorMessage(exc)}`;
-    },
-    commandErrorResult(err: Error) {
-      return `pictl: ${err.message}`;
-    },
-    noCommandRegisteredForInput({ input }: { input: string }) {
-      return `pictl: unknown command: ${input}`;
-    },
-  },
-};
 
 export async function runCliApp(
   app: Application<CommandContext>,

@@ -20,7 +20,6 @@ import {
   booleanFlag,
   commandMultiTarget,
   commandNoTarget,
-  defineFlags,
   multiTargets,
   secondsFlag,
   type CommandContext,
@@ -40,7 +39,7 @@ import {
   tombstonePath,
 } from "./registry.ts";
 import { connectWithRetry, getState, type PiSocketClient } from "./rpc.ts";
-import { launchHolder } from "./spawn.ts";
+import { launchDaemon } from "./spawn.ts";
 
 const SOCKET_CONNECT_DEADLINE_MS = 5_000;
 const SIGKILL_ESCALATION_MS = 5_000;
@@ -59,10 +58,10 @@ async function setArchived(agentDir: string, archived: boolean): Promise<void> {
 }
 
 /**
- * Revive `agent` via launchHolder, serialized through an O_EXCL lock file.
+ * Revive `agent` via launchDaemon, serialized through an O_EXCL lock file.
  * Two concurrent revivals of the same agent must not both launch holders: the
  * second holder's stale-socket cleanup would delete the first's live pi.sock.
- * The loser waits for the winner instead of spawning. launchHolder returns
+ * The loser waits for the winner instead of spawning. launchDaemon returns
  * only once pi.sock is up, so holding the lock across it is the readiness
  * barrier. As with waitPidGone, there is no cross-process event channel for
  * "the lock file went away", so the loser polls.
@@ -89,7 +88,7 @@ async function reviveAgent(agent: AgentRecord): Promise<AgentRecord> {
     // Reviving an archived agent — including implicitly, by sending it a
     // command — un-archives it.
     await setArchived(agent.agentDir, false);
-    await launchHolder({
+    await launchDaemon({
       agentDir: agent.agentDir,
       agentId: agent.id,
       cwd: agent.cwd,
@@ -267,17 +266,17 @@ async function waitPidGone(pid: number, deadlineMs: number): Promise<void> {
   }
 }
 
-const timeoutFlags = defineFlags({
+const timeoutFlags = {
   timeout: secondsFlag(),
-});
+};
 
 type TimeoutFlags = InferFlags<typeof timeoutFlags>;
 
-const purgeFlags = defineFlags({
+const purgeFlags = {
   ...timeoutFlags,
   now: booleanFlag("Abort first"),
   force: booleanFlag("Kill and delete"),
-});
+};
 
 type PurgeFlags = InferFlags<typeof purgeFlags>;
 
@@ -367,10 +366,7 @@ async function purgeOne(
   write(`purged ${agent.id}\n`);
 }
 
-async function purge(
-  this: CommandContext,
-  flags: PurgeFlags,
-): Promise<void> {
+async function purge(this: CommandContext, flags: PurgeFlags): Promise<void> {
   await forEachAgent(multiTargets(this), (agent) =>
     purgeOne(
       agent,
@@ -438,7 +434,7 @@ async function resume(this: CommandContext): Promise<void> {
       this.process.stdout.write(`${agent.id} is already running\n`);
       return;
     }
-    await launchHolder({
+    await launchDaemon({
       agentDir: agent.agentDir,
       agentId: agent.id,
       cwd: agent.cwd,

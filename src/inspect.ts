@@ -9,7 +9,6 @@ import {
   booleanFlag,
   commandMultiTarget,
   commandNoTarget,
-  defineFlags,
   multiTargets,
   stringFlag,
   type CommandContext,
@@ -42,20 +41,6 @@ interface AgentProbe {
   state?: RpcSessionState;
   error?: string;
 }
-
-const listFlags = defineFlags({
-  cwd: stringFlag("Filter by cwd"),
-  all: booleanFlag("Include archived agents"),
-  json: booleanFlag("Print JSON"),
-});
-
-type ListFlags = InferFlags<typeof listFlags>;
-
-const statusFlags = defineFlags({
-  json: booleanFlag("Print JSON"),
-});
-
-type StatusFlags = InferFlags<typeof statusFlags>;
 
 async function probeAgent(agentId: string): Promise<AgentProbe> {
   const classified = await classifyAgentDir(agentId);
@@ -107,10 +92,15 @@ function formatTable(rows: string[][]): string {
     .join("\n");
 }
 
-async function list(
-  this: CommandContext,
-  flags: ListFlags,
-): Promise<void> {
+const listFlags = {
+  cwd: stringFlag("Filter by cwd"),
+  all: booleanFlag("Include archived agents"),
+  json: booleanFlag("Print JSON"),
+};
+
+type ListFlags = InferFlags<typeof listFlags>;
+
+async function list(this: CommandContext, flags: ListFlags): Promise<void> {
   const cwdFilter = flags.cwd === undefined ? undefined : resolve(flags.cwd);
   const agentIds = await listAgentIds();
   let probes = await Promise.all(agentIds.map(probeAgent));
@@ -183,10 +173,13 @@ function formatProbe(probe: AgentProbe): string {
   return lines.join("\n");
 }
 
-async function status(
-  this: CommandContext,
-  flags: StatusFlags,
-): Promise<void> {
+const statusFlags = {
+  json: booleanFlag("Print JSON"),
+};
+
+type StatusFlags = InferFlags<typeof statusFlags>;
+
+async function status(this: CommandContext, flags: StatusFlags): Promise<void> {
   const probes = await Promise.all(
     multiTargets(this).map((target) => probeAgent(target.id)),
   );

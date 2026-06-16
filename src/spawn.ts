@@ -1,6 +1,6 @@
 /**
- * `pictl spawn` — create an agent dir and daemonize a holder for it.
- * Also home of launchHolder, shared with `pictl resume`.
+ * `pictl spawn` — create an agent dir and daemonize pi for it.
+ * Also home of launchDaemon, shared with `pictl resume`.
  */
 
 import { spawn as spawnChild } from "node:child_process";
@@ -18,7 +18,6 @@ import type { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import {
   commandNoTarget,
-  defineFlags,
   restArgs,
   stringFlag,
   type CommandContext,
@@ -26,7 +25,7 @@ import {
 } from "./cli.ts";
 import { agentDirPath, holderLogPath, pictlBaseDir } from "./registry.ts";
 
-interface HolderLaunch {
+interface DaemonLaunch {
   agentDir: string;
   agentId: string;
   cwd: string;
@@ -83,16 +82,16 @@ async function readAll(stream: Readable): Promise<string> {
 }
 
 /**
- * Daemonize a holder: detached, stdio to holder.log, plus a pipe on fd 3 that
- * the holder writes a one-line ready/error message to once pi's RPC socket is
- * up (or startup failed). Awaiting that pipe is what makes spawn exit only
- * after the agent is actually reachable — no fixed sleeps.
+ * Launch the per-agent daemon: detached, stdio to holder.log, plus a pipe on
+ * fd 3 that the daemon writes a one-line ready/error message to once pi's RPC
+ * socket is up (or startup failed). Awaiting that pipe is what makes spawn exit
+ * only after the agent is actually reachable — no fixed sleeps.
  */
-export async function launchHolder(launch: HolderLaunch): Promise<void> {
+export async function launchDaemon(launch: DaemonLaunch): Promise<void> {
   const logFd = openSync(holderLogPath(launch.agentDir), "a");
-  const holdArgs = [
+  const daemonArgs = [
     mainEntryPath(),
-    "_hold",
+    "_daemon",
     "--agent-dir",
     launch.agentDir,
     "--agent-id",
@@ -102,13 +101,13 @@ export async function launchHolder(launch: HolderLaunch): Promise<void> {
     "--pi-bin",
     launch.piBin,
     "--ready-fd",
-    "3",  // TDC: what is the meaning of this literal "3"?
+    "3", // readiness pipe fd
     ...(launch.tag !== undefined ? ["--tag", launch.tag] : []),
     ...(launch.resume ? ["--resume"] : []),
     "--",
     ...launch.piArgs,
   ];
-  const child = spawnChild(process.execPath, holdArgs, {
+  const child = spawnChild(process.execPath, daemonArgs, {
     detached: true,
     stdio: ["ignore", logFd, logFd, "pipe"],
   });
@@ -117,7 +116,7 @@ export async function launchHolder(launch: HolderLaunch): Promise<void> {
 
   const spawnError = new Promise<never>((_, reject) => {
     child.once("error", (error) =>
-      reject(new Error(`failed to start holder: ${error.message}`)),
+      reject(new Error(`failed to start daemon: ${error.message}`)),
     );
   });
   const readyData = await Promise.race([
@@ -138,17 +137,17 @@ export async function launchHolder(launch: HolderLaunch): Promise<void> {
     // Holder-reported errors already carry the log path.
     throw new Error(
       ready?.error !== undefined
-        ? `holder failed to start: ${ready.error}`
-        : `holder failed to start: exited before signaling ready (log: ${holderLogPath(launch.agentDir)})`,
+        ? `daemon failed to start: ${ready.error}`
+        : `daemon failed to start: exited before signaling ready (log: ${holderLogPath(launch.agentDir)})`,
     );
   }
 }
 
-const spawnFlags = defineFlags({
+const spawnFlags = {
   cwd: stringFlag("Working directory"),
   id: stringFlag("Agent id"),
   tag: stringFlag("Agent label"),
-});
+};
 
 type SpawnFlags = InferFlags<typeof spawnFlags>;
 
@@ -174,7 +173,7 @@ export async function spawn(
 
   // On failure the dir is left in place so holder.log can be inspected;
   // `pictl gc` removes dirs that never got an agent.json.
-  await launchHolder({
+  await launchDaemon({
     agentDir,
     agentId,
     cwd,

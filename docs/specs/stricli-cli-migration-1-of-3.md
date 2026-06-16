@@ -83,7 +83,7 @@ Target resolution loads `AgentRecord`s from disk as early as practical, but it m
 `target: none`:
 
 - `spawn`
-- `_hold`
+- `_daemon`
 - `list`
 - `gc`
 
@@ -137,7 +137,7 @@ Preserve `spawn` passthrough behavior:
 pictl spawn --cwd dir -- --session abc
 ```
 
-Preserve `_hold` behavior and migrate it into the Stricli command map. It is acceptable for `_hold` to appear in `--help-all`.
+Preserve `_daemon` behavior and migrate it into the Stricli command map. It is acceptable for `_daemon` to appear in `--help-all`.
 
 ## Help and version behavior
 
@@ -161,7 +161,7 @@ Default `--help` should show common commands only. Initial common command list:
 - `archive`
 - `purge`
 
-Default `--help` visibility should be implemented with Stricli route-map `docs.hideRoute`: commands are hidden from default help unless their pictl command spec marks them as common. `--help-all` should include hidden routes, including all RPC passthrough commands. It is acceptable for `_hold` to appear in `--help-all`.
+Default `--help` visibility should be implemented with Stricli route-map `docs.hideRoute`: commands are hidden from default help unless their pictl command spec marks them as common. `--help-all` should include hidden routes, including all RPC passthrough commands. It is acceptable for `_daemon` to appear in `--help-all`.
 
 Do not introduce arbitrary help tags, category fields, or custom grouped help output in this spec. `common?: true` is only a default-help visibility filter. Help ordering should come from how command modules export ordered command groups and how the main app concatenates those groups into the Stricli route map. For example, `prompt` is an RPC passthrough command and should be ordered with the RPC commands in `--help-all`, even though it is also common and visible in default `--help`. Stricli appears to list commands in route-map order, so deliberate route-map construction is the lightweight substitute for grouped headings.
 
@@ -272,7 +272,7 @@ export const rpcCommands = {
 } as const;
 
 export const internalCommands = {
-  _hold: holdCommand,
+  _daemon: daemonCommand,
 } as const;
 
 const routes = {
@@ -365,7 +365,7 @@ A likely implementation path:
 4. Build a Stricli app from centralized command specs.
 5. Migrate first-class commands to ordered command-group exports.
 6. Migrate RPC passthrough command specs into the same command-definition framework, exporting them as an ordered RPC command group.
-7. Migrate `_hold` as a Stricli command; it is acceptable for it to appear in `--help-all`.
+7. Migrate `_daemon` as a Stricli command; it is acceptable for it to appear in `--help-all`.
 8. Add parser/dispatcher tests and a small CLI smoke test.
 9. Optionally evaluate `@stricli/auto-complete`; wire it in only if the integration is simple.
 
@@ -374,7 +374,7 @@ Project constraints and current code orientation:
 - pictl is TypeScript, ESM (`"type": "module"`), built with plain `tsc`; keep the existing style of explicit `.ts` source imports.
 - `src/main.ts` currently owns top-level dispatch and manual global usage text.
 - `src/rpc-commands.ts` currently owns the RPC passthrough command table and generated usage lines; preserve the one-module discipline for RPC surface changes while adapting it to the new command-spec/route-map structure.
-- First-class command implementations currently live in `src/spawn.ts`, `src/attach.ts`, `src/inspect.ts`, `src/lifecycle.ts`, `src/tail.ts`, `src/wait.ts`, and `src/holder.ts`.
+- First-class command implementations currently live in `src/spawn.ts`, `src/attach.ts`, `src/inspect.ts`, `src/lifecycle.ts`, `src/tail.ts`, `src/wait.ts`, and `src/daemon.ts`.
 - Existing commands commonly accept `argv: string[]` and parse internally. During migration, prefer moving parsing into Stricli specs and leaving command logic as functions over parsed values plus `CommandContext`.
 
 Notes:
@@ -403,7 +403,7 @@ Notes:
 - [x] Migrate first-class commands.
 - [x] Migrate RPC passthrough commands.
 - [x] Preserve `spawn -- ...` passthrough behavior.
-- [x] Preserve `_hold` behavior.
+- [x] Preserve `_daemon` behavior.
 - [x] Add key-line help/version tests.
 - [x] Add representative CLI smoke tests.
 - [x] Evaluate optional autocomplete support and either implement or document deferral.
@@ -418,6 +418,6 @@ Notes:
 - Existing command implementations are still mostly preserved by adapting parsed Stricli flags/positionals back into the old command argv shape. This keeps the migration focused on centralized parsing/target semantics without a broad rewrite of command internals.
 - Target-taking command wrappers resolve targets with `loadAgent` before calling existing logic. Commands that need live sockets still decide revival through their existing `ensureAgentRunning` calls; status/wait continue to avoid revival.
 - RPC passthrough specs remain owned by `src/rpc-commands.ts`; that module now exports `RPC_CLI_SPECS` directly and also exports the generated `rpcCommands` route group.
-- `_hold` and `spawn` use Stricli's `allowArgumentEscapeSequence` plus rest positionals to preserve `--` passthrough behavior.
+- `_daemon` and `spawn` use Stricli's `allowArgumentEscapeSequence` plus rest positionals to preserve `--` passthrough behavior.
 - Current `CommandSpec` typing still contains broad casts in the shared adapter around Stricli's generic parameter typing. This is intentionally deferred for a follow-up cleanup; the structure refactor takes priority.
 - Autocomplete was deferred. `@stricli/auto-complete` is optional in this spec, and wiring it in would add another generated/runtime surface beyond the parser migration.

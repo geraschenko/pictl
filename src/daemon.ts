@@ -1,5 +1,5 @@
 /**
- * `pictl _hold` — the holder daemon. One per agent. It owns the PTY that pi
+ * `pictl _daemon` — the per-agent daemon. One per agent. It owns the PTY that pi
  * runs in, maintains detached screen state via @xterm/headless, and is the
  * sole writer of agent.json. It connects to its own pi.sock as a client to
  * track session replacements (never polling get_state per event).
@@ -21,7 +21,6 @@ import { cursorTo, cursorToRow, HIDE_CURSOR, SHOW_CURSOR } from "./ansi.ts";
 import {
   booleanFlag,
   commandNoTarget,
-  defineFlags,
   parsedFlag,
   requiredStringFlag,
   restArgs,
@@ -50,7 +49,7 @@ const PTY_COLS = 80;
 const PTY_ROWS = 24;
 const RPC_CONNECT_DEADLINE_MS = 30_000;
 
-const holdFlags = defineFlags({
+const daemonFlags = {
   agentDir: requiredStringFlag("Agent directory"),
   agentId: requiredStringFlag("Agent id"),
   cwd: requiredStringFlag("Working directory"),
@@ -58,9 +57,9 @@ const holdFlags = defineFlags({
   resume: booleanFlag("Resume"),
   tag: stringFlag("Tag"),
   readyFd: parsedFlag("Ready fd", numberParser),
-});
+};
 
-type HoldFlags = InferFlags<typeof holdFlags>;
+type DaemonFlags = InferFlags<typeof daemonFlags>;
 
 function signalReady(
   readyFd: number | undefined,
@@ -183,14 +182,14 @@ export function projectTrustWouldBlock(cwd: string, piArgs: string[]): boolean {
   );
 }
 
-export async function hold(
+async function daemon(
   this: CommandContext,
-  flags: HoldFlags,
+  flags: DaemonFlags,
   ...piArgs: string[]
 ): Promise<void> {
   const args = { ...flags, piArgs };
   const { agentDir, agentId } = args;
-  // _hold is a Node daemon and needs pid/signals/exit; Stricli's process type
+  // _daemon is a Node daemon and needs pid/signals/exit; Stricli's process type
   // intentionally only models portable stdio, so use Node's process here.
   const proc = this.process as NodeJS.Process;
 
@@ -374,16 +373,15 @@ export async function hold(
   }
 }
 
-// TDC: Would daemon/"_daemon" be a better name for this subcommand?
-const holdCommand = commandNoTarget<HoldFlags, string[]>({
+const daemonCommand = commandNoTarget<DaemonFlags, string[]>({
   docs: { brief: "Internal command to launch a single-agent pi daemon" },
   parameters: {
-    flags: holdFlags,
+    flags: daemonFlags,
     positional: restArgs("Arguments forwarded to pi", "pi-args"),
   },
-  func: hold,
+  func: daemon,
 });
 
 export const internalRoutes = {
-  _hold: holdCommand,
+  _daemon: daemonCommand,
 } as const;

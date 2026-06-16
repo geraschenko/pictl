@@ -23,7 +23,6 @@
 
 import {
   commandOneTarget,
-  defineFlags,
   oneTarget,
   requiredParsedFlag,
   secondsFlag,
@@ -46,16 +45,6 @@ export type WaitCondition =
   | { kind: "no-activity"; idleMs: number };
 
 export const WAIT_UNTIL_USAGE = "turn-end|idle|no-activity:<secs>";
-
-const waitFlags = defineFlags({
-  until: requiredParsedFlag(
-    `Wait condition (${WAIT_UNTIL_USAGE})`,
-    parseWaitCondition,
-  ),
-  timeout: secondsFlag(),
-});
-
-type WaitFlags = InferFlags<typeof waitFlags>;
 
 export function parseWaitCondition(value: string): WaitCondition {
   if (value === "turn-end") {
@@ -158,6 +147,16 @@ export async function applyWaitCondition(
       return;
   }
 }
+
+const waitFlags = {
+  until: requiredParsedFlag(
+    `Wait condition (${WAIT_UNTIL_USAGE})`,
+    parseWaitCondition,
+  ),
+  timeout: secondsFlag(),
+};
+
+type WaitFlags = InferFlags<typeof waitFlags>;
 
 export async function wait(
   this: CommandContext,

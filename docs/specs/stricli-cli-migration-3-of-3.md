@@ -64,9 +64,9 @@ pictl prompt --raw "hello"
 Desired TypeScript shape:
 
 ```ts
-const rawFlags = defineFlags({
+const rawFlags = {
   raw: booleanFlag("Print raw RPC response"),
-});
+};
 
 type RawFlags = InferFlags<typeof rawFlags>;
 // Equivalent intended shape: { readonly raw: boolean }
@@ -75,9 +75,9 @@ type RawFlags = InferFlags<typeof rawFlags>;
 ### Optional scalar flag
 
 ```ts
-const outputFlags = defineFlags({
+const outputFlags = {
   outputPath: stringFlag("Output path"),
-});
+};
 
 type OutputFlags = InferFlags<typeof outputFlags>;
 // Equivalent intended shape: { readonly outputPath?: string }
@@ -86,9 +86,9 @@ type OutputFlags = InferFlags<typeof outputFlags>;
 ### Variadic image flag
 
 ```ts
-const imageFlags = defineFlags({
+const imageFlags = {
   image: variadicStringFlag("Attach image path"),
-});
+};
 
 type ImageFlags = InferFlags<typeof imageFlags>;
 // Equivalent intended shape: { readonly image: readonly string[] }
@@ -99,7 +99,7 @@ Command implementations should not need to normalize `flags.image ?? []`; absenc
 ### Prompt command shape
 
 ```ts
-const promptFlags = defineFlags({
+const promptFlags = {
   raw: booleanFlag("Print raw RPC response"),
   image: variadicStringFlag("Attach image path"),
   andWait: booleanFlag("Wait for turn end after prompting"),
@@ -111,7 +111,7 @@ const promptFlags = defineFlags({
     "Behavior while the agent is streaming",
     ["steer", "follow-up"] as const,
   ),
-});
+};
 
 type PromptFlags = InferFlags<typeof promptFlags>;
 
@@ -183,10 +183,6 @@ export type InferFlags<F extends Record<string, unknown>> = {
   >;
 };
 
-export function defineFlags<const F extends Record<string, unknown>>(
-  flags: F,
-): F;
-
 export function booleanFlag(
   brief: string,
 ): CliFlag<boolean, TypedFlagParameter<boolean, CommandContext>>;
@@ -233,7 +229,7 @@ Notes:
 - `booleanFlag` should use Stricli's native boolean flag support.
 - `variadicStringFlag` returns a required readonly array type. Its runtime flag parameter should ensure absence is represented as an empty array.
 - `stringFlag`, `enumFlag`, and `parsedFlag` represent optional flags by default.
-- `requiredParsedFlag` and `requiredStringFlag` are included because existing commands such as `_hold` and `wait` have required command flags.
+- `requiredParsedFlag` and `requiredStringFlag` are included because existing commands such as `_daemon` and `wait` have required command flags.
 - Additional helper overloads or internal helper types are acceptable only if needed to make these approved public signatures type-check.
 
 ## Edge cases
@@ -244,14 +240,14 @@ Notes:
 - Shared flag fragments should compose by object spread:
 
 ```ts
-const rawFlags = defineFlags({ raw: booleanFlag("Print raw RPC response") });
-const imageFlags = defineFlags({ image: variadicStringFlag("Attach image path") });
+const rawFlags = { raw: booleanFlag("Print raw RPC response") };
+const imageFlags = { image: variadicStringFlag("Attach image path") };
 
-const promptFlags = defineFlags({
+const promptFlags = {
   ...rawFlags,
   ...imageFlags,
   andWait: booleanFlag("Wait for turn end after prompting"),
-});
+};
 ```
 
 ## Non-goals
@@ -278,9 +274,11 @@ const promptFlags = defineFlags({
 
 - [x] Created spec file and renamed earlier migration specs from `of-2` to `of-3`.
 - [x] Implemented typed flag helpers in `src/cli.ts`, including comments explaining the phantom-type based `InferFlags` machinery.
-- [x] Added required parsed/string flag helpers after discovering `_hold` and `wait` need required command flags.
-- [x] Migrated command modules to infer implementation flag types from `defineFlags(...)` values.
+- [x] Added required parsed/string flag helpers after discovering `_daemon` and `wait` need required command flags.
+- [x] Migrated command modules to infer implementation flag types from flag-spec values.
+- [x] Removed `defineFlags` after review; plain object literals are easier to understand and still work with `InferFlags<typeof flags>`.
 - [x] Verified boolean presence flags now infer required `boolean` values, and variadic image flags infer required `readonly string[]` values.
 - [x] Ran `npm run fmt` and `treefmt --fail-on-change` successfully.
 - [x] Ran `npm run check`, `npm run lint`, `npm run build`, and `npm test` successfully after formatting.
 - [x] Smoke-tested `node dist/main.js --version` and `./dist/main.js --version`.
+- [x] Addressed review comments from `112124a`: removed `defineFlags`, removed custom Stricli localization after comparing output, renamed `_hold`/`holder.ts`/`hold`/`launchHolder` to `_daemon`/`daemon.ts`/`daemon`/`launchDaemon`, and moved command-specific flag definitions closer to their commands.

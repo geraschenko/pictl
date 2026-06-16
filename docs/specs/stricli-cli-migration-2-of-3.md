@@ -119,7 +119,7 @@ For command-line names that are not valid TypeScript identifiers, use the natura
 - `follow-up` -> `followUp`
 - `get-state` -> `getState`
 - `set-auto-retry` -> `setAutoRetry`
-- `_hold` -> `_hold` if practical, otherwise `hold` with route key `_hold`
+- `_daemon` -> `_daemon` if practical, otherwise `hold` with route key `_daemon`
 
 Route exports should be named after the route group:
 
@@ -127,7 +127,7 @@ Route exports should be named after the route group:
 - `spawnRoute = { spawn: spawnCommand }`
 - `lifecycleRoutes = { suspend, archive, resume, purge }`
 - `rpcRoutes = { prompt, steer, follow-up, ... }`
-- `internalRoutes = { _hold: holdCommand }`
+- `internalRoutes = { _daemon: daemonCommand }`
 
 ## Command builders and targets
 
@@ -230,7 +230,7 @@ Useful internal helpers should remain, but they should operate on typed values a
 - `probeAgent(...)`
 - `waitIdle(...)`
 - `stopRunningAgent(...)`
-- `launchHolder(...)`
+- `launchDaemon(...)`
 
 Do not add an `argvFromFlags` helper. Reconstructing argv from typed Stricli flags is explicitly forbidden.
 

@@ -18,7 +18,6 @@ import type { RpcCommand, RpcResponse } from "@earendil-works/pi-coding-agent";
 import {
   booleanFlag,
   commandOneTarget,
-  defineFlags,
   enumFlag,
   oneTarget,
   parsedFlag,
@@ -92,75 +91,20 @@ const IMAGE_MIME_TYPES: Record<string, string> = {
   webp: "image/webp",
 };
 
-const rawFlag = defineFlags({
+const rawFlag = {
   raw: booleanFlag("Print raw RPC response"),
-});
+};
 type RawFlag = InferFlags<typeof rawFlag>;
 
-const imageFlag = defineFlags({
+const imageFlag = {
   image: variadicStringFlag("Attach image path"),
-});
+};
 
-const rawImageFlags = defineFlags({
+const rawImageFlags = {
   ...rawFlag,
   ...imageFlag,
-});
+};
 type RawImageFlags = InferFlags<typeof rawImageFlags>;
-
-const promptFlags = defineFlags({
-  ...rawImageFlags,
-  andWait: booleanFlag("Wait for turn end after prompting"),
-  andWaitUntil: parsedFlag(
-    `Wait until ${WAIT_UNTIL_USAGE} after prompting`,
-    parseWaitCondition,
-  ),
-  streamingBehavior: enumFlag("Behavior while the agent is streaming", [
-    "steer",
-    "follow-up",
-  ]),
-});
-type PromptFlags = InferFlags<typeof promptFlags>;
-
-// TDC: If flags are used for a specific command, ALWAYS name the flags const and type after the command, and put the const and type right next to the command in code.
-const newSessionFlags = defineFlags({
-  ...rawFlag,
-  parentSession: stringFlag("Parent session path"),
-});
-type NewSessionFlags = InferFlags<typeof newSessionFlags>;
-
-// TDC: should be compactFlags/CompactFlags. Do a thorough audit to catch all the other vioaltions of this principle.
-const customInstructionsFlags = defineFlags({
-  ...rawFlag,
-  customInstructions: stringFlag("Custom instructions"),
-});
-type CustomInstructionsFlags = InferFlags<typeof customInstructionsFlags>;
-
-const bashFlags = defineFlags({
-  ...rawFlag,
-  excludeFromContext: booleanFlag("Exclude from context"),
-});
-type BashFlags = InferFlags<typeof bashFlags>;
-
-const outputPathFlags = defineFlags({
-  ...rawFlag,
-  outputPath: stringFlag("Output path"),
-});
-type OutputPathFlags = InferFlags<typeof outputPathFlags>;
-
-const sinceFlags = defineFlags({
-  ...rawFlag,
-  since: stringFlag("Entry id"),
-});
-type SinceFlags = InferFlags<typeof sinceFlags>;
-
-const navigateTreeFlags = defineFlags({
-  ...rawFlag,
-  summarize: booleanFlag("Summarize"),
-  customInstructions: stringFlag("Custom instructions"),
-  replaceInstructions: booleanFlag("Replace instructions"),
-  label: stringFlag("Label"),
-});
-type NavigateTreeFlags = InferFlags<typeof navigateTreeFlags>;
 
 async function imagesFromFlags(
   imagePaths: readonly string[],
@@ -213,12 +157,6 @@ async function messageFrom(
   return readStdin((context.process as NodeJS.Process).stdin);
 }
 
-function promptWaitCondition(flags: PromptFlags): WaitCondition | undefined {
-  return (
-    flags.andWaitUntil ?? (flags.andWait ? { kind: "turn-end" } : undefined)
-  );
-}
-
 function printResponse(
   context: CommandContext,
   response: RpcResponse,
@@ -254,6 +192,26 @@ async function sendRpc(
   } finally {
     client.close();
   }
+}
+
+const promptFlags = {
+  ...rawImageFlags,
+  andWait: booleanFlag("Wait for turn end after prompting"),
+  andWaitUntil: parsedFlag(
+    `Wait until ${WAIT_UNTIL_USAGE} after prompting`,
+    parseWaitCondition,
+  ),
+  streamingBehavior: enumFlag("Behavior while the agent is streaming", [
+    "steer",
+    "follow-up",
+  ]),
+};
+type PromptFlags = InferFlags<typeof promptFlags>;
+
+function promptWaitCondition(flags: PromptFlags): WaitCondition | undefined {
+  return (
+    flags.andWaitUntil ?? (flags.andWait ? { kind: "turn-end" } : undefined)
+  );
 }
 
 export async function prompt(
@@ -318,7 +276,6 @@ async function sendSimple(
   await sendRpc(context, command, flags.raw);
 }
 
-// TDC: Always put the flags, function, and command definition next to each other. Ideally, a developer can see everything related to "prompt" in a single screen. Same for all the other commands.
 const promptCommand = commandOneTarget<PromptFlags, [string]>({
   common: true,
   docs: {
@@ -366,6 +323,12 @@ const abortCommand = commandOneTarget<RawFlag>({
     return sendSimple(this, flags, { type: "abort" });
   },
 });
+
+const newSessionFlags = {
+  ...rawFlag,
+  parentSession: stringFlag("Parent session path"),
+};
+type NewSessionFlags = InferFlags<typeof newSessionFlags>;
 
 const newSessionCommand = commandOneTarget<NewSessionFlags>({
   docs: { brief: "start a fresh session" },
@@ -496,9 +459,15 @@ const setFollowUpModeCommand = commandOneTarget<
   },
 });
 
-const compactCommand = commandOneTarget<CustomInstructionsFlags>({
+const compactFlags = {
+  ...rawFlag,
+  customInstructions: stringFlag("Custom instructions"),
+};
+type CompactFlags = InferFlags<typeof compactFlags>;
+
+const compactCommand = commandOneTarget<CompactFlags>({
   docs: { brief: "compact the session context" },
-  parameters: { flags: customInstructionsFlags },
+  parameters: { flags: compactFlags },
   func(flags) {
     return sendSimple(this, flags, {
       type: "compact",
@@ -555,6 +524,12 @@ const abortRetryCommand = commandOneTarget<RawFlag>({
   },
 });
 
+const bashFlags = {
+  ...rawFlag,
+  excludeFromContext: booleanFlag("Exclude from context"),
+};
+type BashFlags = InferFlags<typeof bashFlags>;
+
 const bashCommand = commandOneTarget<BashFlags, [string]>({
   docs: { brief: "run a shell command via the agent" },
   parameters: {
@@ -589,9 +564,15 @@ const getSessionStatsCommand = commandOneTarget<RawFlag>({
   },
 });
 
-const exportHtmlCommand = commandOneTarget<OutputPathFlags>({
+const exportHtmlFlags = {
+  ...rawFlag,
+  outputPath: stringFlag("Output path"),
+};
+type ExportHtmlFlags = InferFlags<typeof exportHtmlFlags>;
+
+const exportHtmlCommand = commandOneTarget<ExportHtmlFlags>({
   docs: { brief: "export the session as HTML" },
-  parameters: { flags: outputPathFlags },
+  parameters: { flags: exportHtmlFlags },
   func(flags) {
     return sendSimple(this, flags, {
       type: "export_html",
@@ -644,9 +625,15 @@ const getForkMessagesCommand = commandOneTarget<RawFlag>({
   },
 });
 
-const getEntriesCommand = commandOneTarget<SinceFlags>({
+const getEntriesFlags = {
+  ...rawFlag,
+  since: stringFlag("Entry id"),
+};
+type GetEntriesFlags = InferFlags<typeof getEntriesFlags>;
+
+const getEntriesCommand = commandOneTarget<GetEntriesFlags>({
   docs: { brief: "session entries (cursors are session-scoped)" },
-  parameters: { flags: sinceFlags },
+  parameters: { flags: getEntriesFlags },
   func(flags) {
     return sendSimple(this, flags, {
       type: "get_entries",
@@ -662,6 +649,15 @@ const getTreeCommand = commandOneTarget<RawFlag>({
     return sendSimple(this, flags, { type: "get_tree" });
   },
 });
+
+const navigateTreeFlags = {
+  ...rawFlag,
+  summarize: booleanFlag("Summarize"),
+  customInstructions: stringFlag("Custom instructions"),
+  replaceInstructions: booleanFlag("Replace instructions"),
+  label: stringFlag("Label"),
+};
+type NavigateTreeFlags = InferFlags<typeof navigateTreeFlags>;
 
 const navigateTreeCommand = commandOneTarget<NavigateTreeFlags, [string]>({
   docs: { brief: "move the session leaf to another entry" },

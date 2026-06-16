@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import xterm from "@xterm/headless";
-import { hintRoomSequence, projectTrustWouldBlock } from "./holder.ts";
+import { hintRoomSequence, projectTrustWouldBlock } from "./daemon.ts";
 
 function makeTerminal(): xterm.Terminal {
   return new xterm.Terminal({ cols: 80, rows: 10, allowProposedApi: true });
