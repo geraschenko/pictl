@@ -26,7 +26,7 @@ import { connectWithRetry, getState } from "./rpc.ts";
 
 const PROBE_CONNECT_DEADLINE_MS = 2_000;
 
-export type AgentStatus =
+type AgentStatus =
   | "idle"
   | "streaming"
   | "dormant"
@@ -35,7 +35,7 @@ export type AgentStatus =
   | "corrupt"
   | "unreachable";
 
-export interface AgentProbe {
+interface AgentProbe {
   agentId: string;
   status: AgentStatus;
   record?: AgentRecord;
@@ -44,9 +44,9 @@ export interface AgentProbe {
 }
 
 const listFlags = defineFlags({
-  json: booleanFlag("Print JSON"),
-  all: booleanFlag("Include archived agents"),
   cwd: stringFlag("Filter by cwd"),
+  all: booleanFlag("Include archived agents"),
+  json: booleanFlag("Print JSON"),
 });
 
 type ListFlags = InferFlags<typeof listFlags>;
@@ -57,7 +57,7 @@ const statusFlags = defineFlags({
 
 type StatusFlags = InferFlags<typeof statusFlags>;
 
-export async function probeAgent(agentId: string): Promise<AgentProbe> {
+async function probeAgent(agentId: string): Promise<AgentProbe> {
   const classified = await classifyAgentDir(agentId);
   if (classified.kind === "tombstoned") {
     return { agentId, status: "tombstoned" };
@@ -107,7 +107,7 @@ function formatTable(rows: string[][]): string {
     .join("\n");
 }
 
-export async function list(
+async function list(
   this: CommandContext,
   flags: ListFlags,
 ): Promise<void> {
@@ -183,7 +183,7 @@ function formatProbe(probe: AgentProbe): string {
   return lines.join("\n");
 }
 
-export async function status(
+async function status(
   this: CommandContext,
   flags: StatusFlags,
 ): Promise<void> {

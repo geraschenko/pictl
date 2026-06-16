@@ -26,7 +26,7 @@ import {
 } from "./cli.ts";
 import { agentDirPath, holderLogPath, pictlBaseDir } from "./registry.ts";
 
-export interface HolderLaunch {
+interface HolderLaunch {
   agentDir: string;
   agentId: string;
   cwd: string;
@@ -47,7 +47,7 @@ function isExecutableFile(path: string): boolean {
 }
 
 /** PICTL_PI_BIN wins; otherwise search PATH for `pi`. Returns an absolute path. */
-export function resolvePiBin(env: NodeJS.ProcessEnv = process.env): string {
+function resolvePiBin(env: NodeJS.ProcessEnv = process.env): string {
   const fromEnv = env.PICTL_PI_BIN;
   if (fromEnv) {
     const absolute = resolve(fromEnv);
@@ -102,7 +102,7 @@ export async function launchHolder(launch: HolderLaunch): Promise<void> {
     "--pi-bin",
     launch.piBin,
     "--ready-fd",
-    "3",
+    "3",  // TDC: what is the meaning of this literal "3"?
     ...(launch.tag !== undefined ? ["--tag", launch.tag] : []),
     ...(launch.resume ? ["--resume"] : []),
     "--",
@@ -196,7 +196,7 @@ const spawnCommand = commandNoTarget<SpawnFlags, string[]>({
   },
   parameters: {
     flags: spawnFlags,
-    positional: restArgs("pi arguments", "pi-arg"),
+    positional: restArgs("Arguments forwarded to pi", "pi-args"),
   },
   func: spawn,
 });

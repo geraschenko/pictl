@@ -367,7 +367,7 @@ async function purgeOne(
   write(`purged ${agent.id}\n`);
 }
 
-export async function purge(
+async function purge(
   this: CommandContext,
   flags: PurgeFlags,
 ): Promise<void> {
@@ -382,7 +382,7 @@ export async function purge(
   );
 }
 
-export async function suspend(
+async function suspend(
   this: CommandContext,
   flags: TimeoutFlags,
 ): Promise<void> {
@@ -407,7 +407,7 @@ export async function suspend(
   });
 }
 
-export async function archive(
+async function archive(
   this: CommandContext,
   flags: TimeoutFlags,
 ): Promise<void> {
@@ -431,7 +431,7 @@ export async function archive(
   });
 }
 
-export async function resume(this: CommandContext): Promise<void> {
+async function resume(this: CommandContext): Promise<void> {
   await forEachAgent(multiTargets(this), async (agent) => {
     await setArchived(agent.agentDir, false);
     if (isPidAlive(agent.holderPid)) {
@@ -450,7 +450,7 @@ export async function resume(this: CommandContext): Promise<void> {
   });
 }
 
-export async function gc(this: CommandContext): Promise<void> {
+async function gc(this: CommandContext): Promise<void> {
   const agentIds = await listAgentIds();
   let removed = 0;
   for (const agentId of agentIds) {

@@ -51,7 +51,7 @@ const PTY_ROWS = 24;
 const RPC_CONNECT_DEADLINE_MS = 30_000;
 
 const holdFlags = defineFlags({
-  agentDir: requiredStringFlag("Agent dir"),
+  agentDir: requiredStringFlag("Agent directory"),
   agentId: requiredStringFlag("Agent id"),
   cwd: requiredStringFlag("Working directory"),
   piBin: requiredStringFlag("pi binary"),
@@ -374,11 +374,12 @@ export async function hold(
   }
 }
 
+// TDC: Would daemon/"_daemon" be a better name for this subcommand?
 const holdCommand = commandNoTarget<HoldFlags, string[]>({
-  docs: { brief: "internal holder daemon" },
+  docs: { brief: "Internal command to launch a single-agent pi daemon" },
   parameters: {
     flags: holdFlags,
-    positional: restArgs("pi arguments", "pi-arg"),
+    positional: restArgs("Arguments forwarded to pi", "pi-args"),
   },
   func: hold,
 });

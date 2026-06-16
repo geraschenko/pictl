@@ -52,10 +52,9 @@ export const app = buildApplication(root, {
     caseStyle: "allow-kebab-for-camel",
     allowArgumentEscapeSequence: true,
   },
-  documentation: { onlyRequiredInUsageLine: true },
   determineExitCode: (error) =>
     error instanceof WaitTimeoutError ? 3 : error instanceof UsageError ? 2 : 1,
-  localization: cliLocalization,
+  localization: cliLocalization,  // TDC: delete this line?
 });
 
 const entryPath = process.argv[1];

@@ -92,18 +92,18 @@ const IMAGE_MIME_TYPES: Record<string, string> = {
   webp: "image/webp",
 };
 
-const rawFlags = defineFlags({
+const rawFlag = defineFlags({
   raw: booleanFlag("Print raw RPC response"),
 });
-type RawFlags = InferFlags<typeof rawFlags>;
+type RawFlag = InferFlags<typeof rawFlag>;
 
-const imageFlags = defineFlags({
+const imageFlag = defineFlags({
   image: variadicStringFlag("Attach image path"),
 });
 
 const rawImageFlags = defineFlags({
-  ...rawFlags,
-  ...imageFlags,
+  ...rawFlag,
+  ...imageFlag,
 });
 type RawImageFlags = InferFlags<typeof rawImageFlags>;
 
@@ -121,38 +121,40 @@ const promptFlags = defineFlags({
 });
 type PromptFlags = InferFlags<typeof promptFlags>;
 
-const parentSessionFlags = defineFlags({
-  ...rawFlags,
+// TDC: If flags are used for a specific command, ALWAYS name the flags const and type after the command, and put the const and type right next to the command in code.
+const newSessionFlags = defineFlags({
+  ...rawFlag,
   parentSession: stringFlag("Parent session path"),
 });
-type ParentSessionFlags = InferFlags<typeof parentSessionFlags>;
+type NewSessionFlags = InferFlags<typeof newSessionFlags>;
 
+// TDC: should be compactFlags/CompactFlags. Do a thorough audit to catch all the other vioaltions of this principle.
 const customInstructionsFlags = defineFlags({
-  ...rawFlags,
+  ...rawFlag,
   customInstructions: stringFlag("Custom instructions"),
 });
 type CustomInstructionsFlags = InferFlags<typeof customInstructionsFlags>;
 
 const bashFlags = defineFlags({
-  ...rawFlags,
+  ...rawFlag,
   excludeFromContext: booleanFlag("Exclude from context"),
 });
 type BashFlags = InferFlags<typeof bashFlags>;
 
 const outputPathFlags = defineFlags({
-  ...rawFlags,
+  ...rawFlag,
   outputPath: stringFlag("Output path"),
 });
 type OutputPathFlags = InferFlags<typeof outputPathFlags>;
 
 const sinceFlags = defineFlags({
-  ...rawFlags,
+  ...rawFlag,
   since: stringFlag("Entry id"),
 });
 type SinceFlags = InferFlags<typeof sinceFlags>;
 
 const navigateTreeFlags = defineFlags({
-  ...rawFlags,
+  ...rawFlag,
   summarize: booleanFlag("Summarize"),
   customInstructions: stringFlag("Custom instructions"),
   replaceInstructions: booleanFlag("Replace instructions"),
@@ -310,12 +312,13 @@ export async function followUp(
 
 async function sendSimple(
   context: CommandContext,
-  flags: RawFlags,
+  flags: RawFlag,
   command: RpcCommand,
 ): Promise<void> {
   await sendRpc(context, command, flags.raw);
 }
 
+// TDC: Always put the flags, function, and command definition next to each other. Ideally, a developer can see everything related to "prompt" in a single screen. Same for all the other commands.
 const promptCommand = commandOneTarget<PromptFlags, [string]>({
   common: true,
   docs: {
@@ -356,17 +359,17 @@ const followUpCommand = commandOneTarget<RawImageFlags, [string]>({
   func: followUp,
 });
 
-const abortCommand = commandOneTarget<RawFlags>({
+const abortCommand = commandOneTarget<RawFlag>({
   docs: { brief: "abort the current turn" },
-  parameters: { flags: rawFlags },
+  parameters: { flags: rawFlag },
   func(flags) {
     return sendSimple(this, flags, { type: "abort" });
   },
 });
 
-const newSessionCommand = commandOneTarget<ParentSessionFlags>({
+const newSessionCommand = commandOneTarget<NewSessionFlags>({
   docs: { brief: "start a fresh session" },
-  parameters: { flags: parentSessionFlags },
+  parameters: { flags: newSessionFlags },
   func(flags) {
     return sendSimple(this, flags, {
       type: "new_session",
@@ -377,18 +380,18 @@ const newSessionCommand = commandOneTarget<ParentSessionFlags>({
   },
 });
 
-const getStateCommand = commandOneTarget<RawFlags>({
+const getStateCommand = commandOneTarget<RawFlag>({
   docs: { brief: "session state (model, streaming, pending queue, ...)" },
-  parameters: { flags: rawFlags },
+  parameters: { flags: rawFlag },
   func(flags) {
     return sendSimple(this, flags, { type: "get_state" });
   },
 });
 
-const setModelCommand = commandOneTarget<RawFlags, [string, string]>({
+const setModelCommand = commandOneTarget<RawFlag, [string, string]>({
   docs: { brief: "switch model" },
   parameters: {
-    flags: rawFlags,
+    flags: rawFlag,
     positional: {
       kind: "tuple",
       parameters: [
@@ -402,29 +405,29 @@ const setModelCommand = commandOneTarget<RawFlags, [string, string]>({
   },
 });
 
-const cycleModelCommand = commandOneTarget<RawFlags>({
+const cycleModelCommand = commandOneTarget<RawFlag>({
   docs: { brief: "cycle to the next model" },
-  parameters: { flags: rawFlags },
+  parameters: { flags: rawFlag },
   func(flags) {
     return sendSimple(this, flags, { type: "cycle_model" });
   },
 });
 
-const getAvailableModelsCommand = commandOneTarget<RawFlags>({
+const getAvailableModelsCommand = commandOneTarget<RawFlag>({
   docs: { brief: "list models" },
-  parameters: { flags: rawFlags },
+  parameters: { flags: rawFlag },
   func(flags) {
     return sendSimple(this, flags, { type: "get_available_models" });
   },
 });
 
 const setThinkingLevelCommand = commandOneTarget<
-  RawFlags,
+  RawFlag,
   [(typeof THINKING_LEVELS)[number]]
 >({
   docs: { brief: "set thinking level" },
   parameters: {
-    flags: rawFlags,
+    flags: rawFlag,
     positional: {
       kind: "tuple",
       parameters: [
@@ -441,21 +444,21 @@ const setThinkingLevelCommand = commandOneTarget<
   },
 });
 
-const cycleThinkingLevelCommand = commandOneTarget<RawFlags>({
+const cycleThinkingLevelCommand = commandOneTarget<RawFlag>({
   docs: { brief: "cycle thinking level" },
-  parameters: { flags: rawFlags },
+  parameters: { flags: rawFlag },
   func(flags) {
     return sendSimple(this, flags, { type: "cycle_thinking_level" });
   },
 });
 
 const setSteeringModeCommand = commandOneTarget<
-  RawFlags,
+  RawFlag,
   ["all" | "one-at-a-time"]
 >({
   docs: { brief: "how queued steering messages are delivered" },
   parameters: {
-    flags: rawFlags,
+    flags: rawFlag,
     positional: {
       kind: "tuple",
       parameters: [
@@ -472,12 +475,12 @@ const setSteeringModeCommand = commandOneTarget<
 });
 
 const setFollowUpModeCommand = commandOneTarget<
-  RawFlags,
+  RawFlag,
   ["all" | "one-at-a-time"]
 >({
   docs: { brief: "how queued follow-ups are delivered" },
   parameters: {
-    flags: rawFlags,
+    flags: rawFlag,
     positional: {
       kind: "tuple",
       parameters: [
@@ -506,10 +509,10 @@ const compactCommand = commandOneTarget<CustomInstructionsFlags>({
   },
 });
 
-const setAutoCompactionCommand = commandOneTarget<RawFlags, [boolean]>({
+const setAutoCompactionCommand = commandOneTarget<RawFlag, [boolean]>({
   docs: { brief: "toggle auto-compaction" },
   parameters: {
-    flags: rawFlags,
+    flags: rawFlag,
     positional: {
       kind: "tuple",
       parameters: [
@@ -525,10 +528,10 @@ const setAutoCompactionCommand = commandOneTarget<RawFlags, [boolean]>({
   },
 });
 
-const setAutoRetryCommand = commandOneTarget<RawFlags, [boolean]>({
+const setAutoRetryCommand = commandOneTarget<RawFlag, [boolean]>({
   docs: { brief: "toggle auto-retry of failed turns" },
   parameters: {
-    flags: rawFlags,
+    flags: rawFlag,
     positional: {
       kind: "tuple",
       parameters: [
@@ -544,9 +547,9 @@ const setAutoRetryCommand = commandOneTarget<RawFlags, [boolean]>({
   },
 });
 
-const abortRetryCommand = commandOneTarget<RawFlags>({
+const abortRetryCommand = commandOneTarget<RawFlag>({
   docs: { brief: "cancel a pending auto-retry" },
-  parameters: { flags: rawFlags },
+  parameters: { flags: rawFlag },
   func(flags) {
     return sendSimple(this, flags, { type: "abort_retry" });
   },
@@ -570,17 +573,17 @@ const bashCommand = commandOneTarget<BashFlags, [string]>({
   },
 });
 
-const abortBashCommand = commandOneTarget<RawFlags>({
+const abortBashCommand = commandOneTarget<RawFlag>({
   docs: { brief: "abort a running bash command" },
-  parameters: { flags: rawFlags },
+  parameters: { flags: rawFlag },
   func(flags) {
     return sendSimple(this, flags, { type: "abort_bash" });
   },
 });
 
-const getSessionStatsCommand = commandOneTarget<RawFlags>({
+const getSessionStatsCommand = commandOneTarget<RawFlag>({
   docs: { brief: "token/cost stats" },
-  parameters: { flags: rawFlags },
+  parameters: { flags: rawFlag },
   func(flags) {
     return sendSimple(this, flags, { type: "get_session_stats" });
   },
@@ -597,10 +600,10 @@ const exportHtmlCommand = commandOneTarget<OutputPathFlags>({
   },
 });
 
-const switchSessionCommand = commandOneTarget<RawFlags, [string]>({
+const switchSessionCommand = commandOneTarget<RawFlag, [string]>({
   docs: { brief: "switch to another session file" },
   parameters: {
-    flags: rawFlags,
+    flags: rawFlag,
     positional: {
       kind: "tuple",
       parameters: [stringArg("Session path", "session-path")],
@@ -611,10 +614,10 @@ const switchSessionCommand = commandOneTarget<RawFlags, [string]>({
   },
 });
 
-const forkCommand = commandOneTarget<RawFlags, [string]>({
+const forkCommand = commandOneTarget<RawFlag, [string]>({
   docs: { brief: "fork the session from an entry" },
   parameters: {
-    flags: rawFlags,
+    flags: rawFlag,
     positional: {
       kind: "tuple",
       parameters: [stringArg("Entry id", "entry-id")],
@@ -625,17 +628,17 @@ const forkCommand = commandOneTarget<RawFlags, [string]>({
   },
 });
 
-const cloneCommand = commandOneTarget<RawFlags>({
+const cloneCommand = commandOneTarget<RawFlag>({
   docs: { brief: "clone the session" },
-  parameters: { flags: rawFlags },
+  parameters: { flags: rawFlag },
   func(flags) {
     return sendSimple(this, flags, { type: "clone" });
   },
 });
 
-const getForkMessagesCommand = commandOneTarget<RawFlags>({
+const getForkMessagesCommand = commandOneTarget<RawFlag>({
   docs: { brief: "list fork points" },
-  parameters: { flags: rawFlags },
+  parameters: { flags: rawFlag },
   func(flags) {
     return sendSimple(this, flags, { type: "get_fork_messages" });
   },
@@ -652,9 +655,9 @@ const getEntriesCommand = commandOneTarget<SinceFlags>({
   },
 });
 
-const getTreeCommand = commandOneTarget<RawFlags>({
+const getTreeCommand = commandOneTarget<RawFlag>({
   docs: { brief: "session entry tree" },
-  parameters: { flags: rawFlags },
+  parameters: { flags: rawFlag },
   func(flags) {
     return sendSimple(this, flags, { type: "get_tree" });
   },
@@ -683,18 +686,18 @@ const navigateTreeCommand = commandOneTarget<NavigateTreeFlags, [string]>({
   },
 });
 
-const getLastAssistantTextCommand = commandOneTarget<RawFlags>({
+const getLastAssistantTextCommand = commandOneTarget<RawFlag>({
   docs: { brief: "text of the last assistant message" },
-  parameters: { flags: rawFlags },
+  parameters: { flags: rawFlag },
   func(flags) {
     return sendSimple(this, flags, { type: "get_last_assistant_text" });
   },
 });
 
-const setSessionNameCommand = commandOneTarget<RawFlags, [string]>({
+const setSessionNameCommand = commandOneTarget<RawFlag, [string]>({
   docs: { brief: "name the session" },
   parameters: {
-    flags: rawFlags,
+    flags: rawFlag,
     positional: { kind: "tuple", parameters: [stringArg("Name", "name")] },
   },
   func(flags, name) {
@@ -702,17 +705,17 @@ const setSessionNameCommand = commandOneTarget<RawFlags, [string]>({
   },
 });
 
-const getMessagesCommand = commandOneTarget<RawFlags>({
+const getMessagesCommand = commandOneTarget<RawFlag>({
   docs: { brief: "full message history" },
-  parameters: { flags: rawFlags },
+  parameters: { flags: rawFlag },
   func(flags) {
     return sendSimple(this, flags, { type: "get_messages" });
   },
 });
 
-const getCommandsCommand = commandOneTarget<RawFlags>({
+const getCommandsCommand = commandOneTarget<RawFlag>({
   docs: { brief: "slash commands available via prompt" },
-  parameters: { flags: rawFlags },
+  parameters: { flags: rawFlag },
   func(flags) {
     return sendSimple(this, flags, { type: "get_commands" });
   },
