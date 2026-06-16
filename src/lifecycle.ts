@@ -379,7 +379,6 @@ async function purge(this: CommandContext, flags: PurgeFlags): Promise<void> {
 }
 
 const purgeCommand = commandMultiTarget<PurgeFlags>({
-  common: true,
   docs: { brief: "wait until idle, then delete permanently" },
   parameters: { flags: purgeFlags },
   func: purge,

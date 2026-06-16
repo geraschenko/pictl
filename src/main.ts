@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { buildApplication, buildRouteMap } from "@stricli/core";
+import { buildApplication, buildRouteMap, text_en } from "@stricli/core";
 import { runCliApp } from "./cli.ts";
 import { attachRoute } from "./attach.ts";
 import { internalRoutes } from "./daemon.ts";
@@ -51,6 +51,30 @@ export const app = buildApplication(root, {
   scanner: {
     caseStyle: "allow-kebab-for-camel",
     allowArgumentEscapeSequence: true,
+  },
+  localization: {
+    text: {
+      ...text_en,
+      exceptionWhileParsingArguments(exc, ansiColor) {
+        if (exc instanceof UsageError) {
+          return exc.message;
+        }
+        return text_en.exceptionWhileParsingArguments.call(
+          this,
+          exc,
+          ansiColor,
+        );
+      },
+      exceptionWhileRunningCommand(exc, ansiColor) {
+        if (exc instanceof Error) {
+          return exc.message;
+        }
+        return text_en.exceptionWhileRunningCommand.call(this, exc, ansiColor);
+      },
+      commandErrorResult(err) {
+        return err.message;
+      },
+    },
   },
   determineExitCode: (error) =>
     error instanceof WaitTimeoutError ? 3 : error instanceof UsageError ? 2 : 1,

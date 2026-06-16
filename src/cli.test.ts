@@ -113,6 +113,14 @@ test("representative parser behavior uses --target grammar", async () => {
     await runCliApp(app, ["status", "-t", "abc", "--json"], accepted.proc);
     assert.equal(accepted.proc.exitCode, 0);
 
+    const missingTarget = fakeProcess();
+    await runCliApp(app, ["status"], missingTarget.proc);
+    assert.equal(missingTarget.proc.exitCode, 2);
+    assert.equal(
+      missingTarget.stderr,
+      "expected at least one --target <agent> (or PICTL_TARGET)\n",
+    );
+
     const oldPositional = fakeProcess();
     await runCliApp(app, ["status", "abc", "--json"], oldPositional.proc);
     assert.equal(oldPositional.proc.exitCode, 2);
