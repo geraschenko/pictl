@@ -97,7 +97,7 @@ const rawFlag = {
 type RawFlag = InferFlags<typeof rawFlag>;
 
 const imageFlag = {
-  image: variadicStringFlag("Attach image path"),
+  image: variadicStringFlag("Attach image path", "path"),
 };
 
 const rawImageFlags = {
@@ -200,6 +200,7 @@ const promptFlags = {
   andWaitUntil: parsedFlag(
     `Wait until ${WAIT_UNTIL_USAGE} after prompting`,
     parseWaitCondition,
+    "cond",
   ),
   streamingBehavior: enumFlag("Behavior while the agent is streaming", [
     "steer",
@@ -326,7 +327,7 @@ const abortCommand = commandOneTarget<RawFlag>({
 
 const newSessionFlags = {
   ...rawFlag,
-  parentSession: stringFlag("Parent session path"),
+  parentSession: stringFlag("Parent session path", "path"),
 };
 type NewSessionFlags = InferFlags<typeof newSessionFlags>;
 
@@ -461,7 +462,7 @@ const setFollowUpModeCommand = commandOneTarget<
 
 const compactFlags = {
   ...rawFlag,
-  customInstructions: stringFlag("Custom instructions"),
+  customInstructions: stringFlag("Custom instructions", "str"),
 };
 type CompactFlags = InferFlags<typeof compactFlags>;
 
@@ -566,7 +567,7 @@ const getSessionStatsCommand = commandOneTarget<RawFlag>({
 
 const exportHtmlFlags = {
   ...rawFlag,
-  outputPath: stringFlag("Output path"),
+  outputPath: stringFlag("Output path", "path"),
 };
 type ExportHtmlFlags = InferFlags<typeof exportHtmlFlags>;
 
@@ -627,7 +628,7 @@ const getForkMessagesCommand = commandOneTarget<RawFlag>({
 
 const getEntriesFlags = {
   ...rawFlag,
-  since: stringFlag("Entry id"),
+  since: stringFlag("Entry id", "entry-id"),
 };
 type GetEntriesFlags = InferFlags<typeof getEntriesFlags>;
 
@@ -653,9 +654,9 @@ const getTreeCommand = commandOneTarget<RawFlag>({
 const navigateTreeFlags = {
   ...rawFlag,
   summarize: booleanFlag("Summarize"),
-  customInstructions: stringFlag("Custom instructions"),
+  customInstructions: stringFlag("Custom instructions", "str"),
   replaceInstructions: booleanFlag("Replace instructions"),
-  label: stringFlag("Label"),
+  label: stringFlag("Label", "str"),
 };
 type NavigateTreeFlags = InferFlags<typeof navigateTreeFlags>;
 

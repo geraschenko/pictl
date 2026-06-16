@@ -70,7 +70,7 @@ const targetFlag = {
   kind: "parsed",
   parse: String,
   brief: "Target agent id or unique prefix",
-  placeholder: "agent",
+  placeholder: "target",
   optional: true,
 } as const;
 
@@ -200,7 +200,7 @@ export function booleanFlag(
 
 export function stringFlag(
   brief: string,
-  placeholder?: string,
+  placeholder: string,
 ): CliFlag<
   string | undefined,
   TypedFlagParameter<string | undefined, CommandContext>
@@ -209,7 +209,7 @@ export function stringFlag(
     kind: "parsed",
     parse: String,
     brief,
-    ...(placeholder === undefined ? {} : { placeholder }),
+    placeholder,
     optional: true,
   } as unknown as CliFlag<
     string | undefined,
@@ -219,7 +219,7 @@ export function stringFlag(
 
 export function variadicStringFlag(
   brief: string,
-  placeholder?: string,
+  placeholder: string,
 ): CliFlag<
   readonly string[],
   TypedFlagParameter<readonly string[], CommandContext>
@@ -228,7 +228,7 @@ export function variadicStringFlag(
     kind: "parsed",
     parse: String,
     brief,
-    ...(placeholder === undefined ? {} : { placeholder }),
+    placeholder,
     variadic: true,
     default: [],
   } as unknown as CliFlag<
@@ -258,13 +258,13 @@ export function enumFlag<const VALUES extends readonly [string, ...string[]]>(
 export function parsedFlag<T>(
   brief: string,
   parse: (input: string) => T,
-  placeholder?: string,
+  placeholder: string,
 ): CliFlag<T | undefined, TypedFlagParameter<T | undefined, CommandContext>> {
   return {
     kind: "parsed",
     parse,
     brief,
-    ...(placeholder === undefined ? {} : { placeholder }),
+    placeholder,
     optional: true,
   } as unknown as CliFlag<
     T | undefined,
@@ -275,31 +275,35 @@ export function parsedFlag<T>(
 export function requiredParsedFlag<T>(
   brief: string,
   parse: (input: string) => T,
-  placeholder?: string,
+  placeholder: string,
 ): CliFlag<T, TypedFlagParameter<T, CommandContext>> {
   return {
     kind: "parsed",
     parse,
     brief,
-    ...(placeholder === undefined ? {} : { placeholder }),
+    placeholder,
   } as unknown as CliFlag<T, TypedFlagParameter<T, CommandContext>>;
 }
 
 export function requiredStringFlag(
   brief: string,
-  placeholder?: string,
+  placeholder: string,
 ): CliFlag<string, TypedFlagParameter<string, CommandContext>> {
   return requiredParsedFlag(brief, String, placeholder);
 }
 
 export function secondsFlag(brief = "Timeout in seconds") {
-  return parsedFlag(brief, (input: string): number => {
-    const seconds = Number(input);
-    if (!(Number.isFinite(seconds) && seconds >= 0)) {
-      throw new UsageError(`invalid seconds value: ${input}`);
-    }
-    return seconds;
-  });
+  return parsedFlag(
+    brief,
+    (input: string): number => {
+      const seconds = Number(input);
+      if (!(Number.isFinite(seconds) && seconds >= 0)) {
+        throw new UsageError(`invalid seconds value: ${input}`);
+      }
+      return seconds;
+    },
+    "secs",
+  );
 }
 
 export function restArgs(brief: string, placeholder: string, minimum = 0) {

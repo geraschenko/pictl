@@ -52,6 +52,9 @@ export const app = buildApplication(root, {
     caseStyle: "allow-kebab-for-camel",
     allowArgumentEscapeSequence: true,
   },
+  documentation: {
+    useAliasInUsageLine: true,
+  },
   localization: {
     text: {
       ...text_en,

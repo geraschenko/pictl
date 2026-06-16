@@ -144,9 +144,9 @@ export async function launchDaemon(launch: DaemonLaunch): Promise<void> {
 }
 
 const spawnFlags = {
-  cwd: stringFlag("Working directory"),
-  id: stringFlag("Agent id"),
-  tag: stringFlag("Agent label"),
+  cwd: stringFlag("Working directory", "path"),
+  id: stringFlag("Agent id", "uuid"),
+  tag: stringFlag("Agent label", "str"),
 };
 
 type SpawnFlags = InferFlags<typeof spawnFlags>;

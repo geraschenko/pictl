@@ -50,13 +50,13 @@ const PTY_ROWS = 24;
 const RPC_CONNECT_DEADLINE_MS = 30_000;
 
 const daemonFlags = {
-  agentDir: requiredStringFlag("Agent directory"),
-  agentId: requiredStringFlag("Agent id"),
-  cwd: requiredStringFlag("Working directory"),
-  piBin: requiredStringFlag("pi binary"),
+  agentDir: requiredStringFlag("Agent directory", "path"),
+  agentId: requiredStringFlag("Agent id", "uuid"),
+  cwd: requiredStringFlag("Working directory", "path"),
+  piBin: requiredStringFlag("pi binary", "path"),
   resume: booleanFlag("Resume"),
-  tag: stringFlag("Tag"),
-  readyFd: parsedFlag("Ready fd", numberParser),
+  tag: stringFlag("Tag", "str"),
+  readyFd: parsedFlag("Ready fd", numberParser, "int"),
 };
 
 type DaemonFlags = InferFlags<typeof daemonFlags>;

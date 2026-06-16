@@ -93,7 +93,7 @@ function formatTable(rows: string[][]): string {
 }
 
 const listFlags = {
-  cwd: stringFlag("Filter by cwd"),
+  cwd: stringFlag("Filter by cwd", "path"),
   all: booleanFlag("Include archived agents"),
   json: booleanFlag("Print JSON"),
 };
@@ -140,7 +140,10 @@ async function list(this: CommandContext, flags: ListFlags): Promise<void> {
 const listCommand = commandNoTarget<ListFlags>({
   common: true,
   docs: { brief: "list agents and their status" },
-  parameters: { flags: listFlags },
+  parameters: {
+    flags: listFlags,
+    aliases: { a: "all" },
+  },
   func: list,
 });
 
@@ -199,7 +202,6 @@ async function status(this: CommandContext, flags: StatusFlags): Promise<void> {
 }
 
 const statusCommand = commandMultiTarget<StatusFlags>({
-  common: true,
   docs: { brief: "detailed status of agents" },
   parameters: { flags: statusFlags },
   func: status,

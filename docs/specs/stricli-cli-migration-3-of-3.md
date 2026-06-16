@@ -189,12 +189,12 @@ export function booleanFlag(
 
 export function stringFlag(
   brief: string,
-  placeholder?: string,
+  placeholder: string,
 ): CliFlag<string | undefined, TypedFlagParameter<string | undefined, CommandContext>>;
 
 export function variadicStringFlag(
   brief: string,
-  placeholder?: string,
+  placeholder: string,
 ): CliFlag<
   readonly string[],
   TypedFlagParameter<readonly string[], CommandContext>
@@ -208,18 +208,18 @@ export function enumFlag<const VALUES extends readonly [string, ...string[]]>(
 export function parsedFlag<T>(
   brief: string,
   parse: (input: string) => T,
-  placeholder?: string,
+  placeholder: string,
 ): CliFlag<T | undefined, TypedFlagParameter<T | undefined, CommandContext>>;
 
 export function requiredParsedFlag<T>(
   brief: string,
   parse: (input: string) => T,
-  placeholder?: string,
+  placeholder: string,
 ): CliFlag<T, TypedFlagParameter<T, CommandContext>>;
 
 export function requiredStringFlag(
   brief: string,
-  placeholder?: string,
+  placeholder: string,
 ): CliFlag<string, TypedFlagParameter<string, CommandContext>>;
 ```
 

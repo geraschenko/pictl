@@ -214,8 +214,12 @@ async function resyncToSessionTip(
 
 const tailFlags = {
   follow: booleanFlag("Follow new entries"),
-  since: stringFlag("Start after entry id"),
-  until: parsedFlag(`Follow until ${WAIT_UNTIL_USAGE}`, parseWaitCondition),
+  since: stringFlag("Start after entry id", "entry-id"),
+  until: parsedFlag(
+    `Follow until ${WAIT_UNTIL_USAGE}`,
+    parseWaitCondition,
+    "cond",
+  ),
   // TODO: should events be renamed "raw" to be consistent with rpc command flags?
   events: booleanFlag("Stream raw events"),
 };

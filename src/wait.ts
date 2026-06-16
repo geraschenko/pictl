@@ -152,6 +152,7 @@ const waitFlags = {
   until: requiredParsedFlag(
     `Wait condition (${WAIT_UNTIL_USAGE})`,
     parseWaitCondition,
+    "cond",
   ),
   timeout: secondsFlag(),
 };
