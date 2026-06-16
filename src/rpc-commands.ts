@@ -236,6 +236,22 @@ export async function prompt(
   });
 }
 
+const promptCommand = commandOneTarget<PromptFlags, [string]>({
+  common: true,
+  docs: {
+    brief:
+      "send a prompt (errors while streaming without --streaming-behavior)",
+  },
+  parameters: {
+    flags: promptFlags,
+    positional: {
+      kind: "tuple",
+      parameters: [stringArg("Message", "message|-")],
+    },
+  },
+  func: prompt,
+});
+
 export async function steer(
   this: CommandContext,
   flags: RawImageFlags,
@@ -251,6 +267,18 @@ export async function steer(
     flags.raw,
   );
 }
+
+const steerCommand = commandOneTarget<RawImageFlags, [string]>({
+  docs: { brief: "interject into the current turn" },
+  parameters: {
+    flags: rawImageFlags,
+    positional: {
+      kind: "tuple",
+      parameters: [stringArg("Message", "message|-")],
+    },
+  },
+  func: steer,
+});
 
 export async function followUp(
   this: CommandContext,
@@ -268,42 +296,6 @@ export async function followUp(
   );
 }
 
-async function sendSimple(
-  context: CommandContext,
-  flags: RawFlag,
-  command: RpcCommand,
-): Promise<void> {
-  await sendRpc(context, command, flags.raw);
-}
-
-const promptCommand = commandOneTarget<PromptFlags, [string]>({
-  common: true,
-  docs: {
-    brief:
-      "send a prompt (errors while streaming without --streaming-behavior)",
-  },
-  parameters: {
-    flags: promptFlags,
-    positional: {
-      kind: "tuple",
-      parameters: [stringArg("Message", "message|-")],
-    },
-  },
-  func: prompt,
-});
-
-const steerCommand = commandOneTarget<RawImageFlags, [string]>({
-  docs: { brief: "interject into the current turn" },
-  parameters: {
-    flags: rawImageFlags,
-    positional: {
-      kind: "tuple",
-      parameters: [stringArg("Message", "message|-")],
-    },
-  },
-  func: steer,
-});
-
 const followUpCommand = commandOneTarget<RawImageFlags, [string]>({
   docs: { brief: "queue a message for after the current turn" },
   parameters: {
@@ -315,6 +307,14 @@ const followUpCommand = commandOneTarget<RawImageFlags, [string]>({
   },
   func: followUp,
 });
+
+async function sendSimple(
+  context: CommandContext,
+  flags: RawFlag,
+  command: RpcCommand,
+): Promise<void> {
+  await sendRpc(context, command, flags.raw);
+}
 
 const abortCommand = commandOneTarget<RawFlag>({
   docs: { brief: "abort the current turn" },

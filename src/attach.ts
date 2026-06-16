@@ -39,6 +39,26 @@ const TERMINAL_RESTORE_SEQUENCE = `${SHOW_CURSOR}${DISABLE_BRACKETED_PASTE}${RES
 /** Render the snapshot from the holder's emulator origin: home, clear. */
 const CLEAR_SCREEN_SEQUENCE = `${CURSOR_HOME}${ERASE_SCREEN}`;
 
+async function connectToTty(
+  socketPath: string,
+  agentId: string,
+): Promise<Socket> {
+  return new Promise((resolve, reject) => {
+    const socket = connect(socketPath);
+    socket.once("connect", () => {
+      socket.off("error", reject);
+      resolve(socket);
+    });
+    socket.once("error", (error) =>
+      reject(
+        new Error(
+          `cannot connect to agent ${agentId}'s tty socket: ${String(error)}`,
+        ),
+      ),
+    );
+  });
+}
+
 export async function attach(this: CommandContext): Promise<void> {
   const { id: targetId } = oneTarget(this);
   const { id: agentId, agentDir } = await ensureAgentRunning(targetId);
@@ -145,23 +165,3 @@ const attachCommand = commandOneTarget({
 export const attachRoute = {
   attach: attachCommand,
 } as const;
-
-async function connectToTty(
-  socketPath: string,
-  agentId: string,
-): Promise<Socket> {
-  return new Promise((resolve, reject) => {
-    const socket = connect(socketPath);
-    socket.once("connect", () => {
-      socket.off("error", reject);
-      resolve(socket);
-    });
-    socket.once("error", (error) =>
-      reject(
-        new Error(
-          `cannot connect to agent ${agentId}'s tty socket: ${String(error)}`,
-        ),
-      ),
-    );
-  });
-}

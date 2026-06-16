@@ -204,6 +204,24 @@ const tailFlags = {
 
 type TailFlags = InferFlags<typeof tailFlags>;
 
+/**
+ * After a session replacement the old cursor is meaningless; position at the
+ * new session's last entry without printing history (only entries created
+ * after the replacement should stream), announcing the new position.
+ */
+async function resyncToSessionTip(
+  client: PiSocketClient,
+  state: FollowState,
+  write: (text: string) => void,
+): Promise<string | undefined> {
+  const response = await client.request({ type: "get_entries" });
+  const entries = entriesFrom(response);
+  const lastEntryId =
+    entries.length === 0 ? undefined : entries[entries.length - 1]!.id;
+  printCursorRecord(write, state.sessionId, lastEntryId ?? null);
+  return lastEntryId;
+}
+
 export async function tail(
   this: CommandContext,
   flags: TailFlags,
@@ -323,21 +341,3 @@ const tailCommand = commandOneTarget<TailFlags>({
 export const tailRoute = {
   tail: tailCommand,
 } as const;
-
-/**
- * After a session replacement the old cursor is meaningless; position at the
- * new session's last entry without printing history (only entries created
- * after the replacement should stream), announcing the new position.
- */
-async function resyncToSessionTip(
-  client: PiSocketClient,
-  state: FollowState,
-  write: (text: string) => void,
-): Promise<string | undefined> {
-  const response = await client.request({ type: "get_entries" });
-  const entries = entriesFrom(response);
-  const lastEntryId =
-    entries.length === 0 ? undefined : entries[entries.length - 1]!.id;
-  printCursorRecord(write, state.sessionId, lastEntryId ?? null);
-  return lastEntryId;
-}

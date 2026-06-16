@@ -137,6 +137,13 @@ async function list(this: CommandContext, flags: ListFlags): Promise<void> {
   this.process.stdout.write(`${formatTable(rows)}\n`);
 }
 
+const listCommand = commandNoTarget<ListFlags>({
+  common: true,
+  docs: { brief: "list agents and their status" },
+  parameters: { flags: listFlags },
+  func: list,
+});
+
 function formatProbe(probe: AgentProbe): string {
   const lines = [
     `id:       ${probe.agentId}`,
@@ -190,13 +197,6 @@ async function status(this: CommandContext, flags: StatusFlags): Promise<void> {
   }
   this.process.stdout.write(`${probes.map(formatProbe).join("\n\n")}\n`);
 }
-
-const listCommand = commandNoTarget<ListFlags>({
-  common: true,
-  docs: { brief: "list agents and their status" },
-  parameters: { flags: listFlags },
-  func: list,
-});
 
 const statusCommand = commandMultiTarget<StatusFlags>({
   common: true,

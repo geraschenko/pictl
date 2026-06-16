@@ -378,6 +378,13 @@ async function purge(this: CommandContext, flags: PurgeFlags): Promise<void> {
   );
 }
 
+const purgeCommand = commandMultiTarget<PurgeFlags>({
+  common: true,
+  docs: { brief: "wait until idle, then delete permanently" },
+  parameters: { flags: purgeFlags },
+  func: purge,
+});
+
 async function suspend(
   this: CommandContext,
   flags: TimeoutFlags,
@@ -403,6 +410,17 @@ async function suspend(
   });
 }
 
+const suspendCommand = commandMultiTarget<TimeoutFlags>({
+  docs: { brief: "wait until idle, then stop" },
+  parameters: { flags: timeoutFlags },
+  func: suspend,
+});
+
+/**
+ * Stop a running agent (like suspend) and mark it archived so `list` hides it
+ * by default; the record and its sessions are kept and any resume (explicit or
+ * implicit) clears the flag. The deliberate destructive path is `purge`.
+ */
 async function archive(
   this: CommandContext,
   flags: TimeoutFlags,
@@ -427,6 +445,13 @@ async function archive(
   });
 }
 
+const archiveCommand = commandMultiTarget<TimeoutFlags>({
+  common: true,
+  docs: { brief: "suspend, then hide from list" },
+  parameters: { flags: timeoutFlags },
+  func: archive,
+});
+
 async function resume(this: CommandContext): Promise<void> {
   await forEachAgent(multiTargets(this), async (agent) => {
     await setArchived(agent.agentDir, false);
@@ -446,6 +471,11 @@ async function resume(this: CommandContext): Promise<void> {
   });
 }
 
+const resumeCommand = commandMultiTarget({
+  docs: { brief: "revive dormant agents" },
+  func: resume,
+});
+
 async function gc(this: CommandContext): Promise<void> {
   const agentIds = await listAgentIds();
   let removed = 0;
@@ -461,37 +491,6 @@ async function gc(this: CommandContext): Promise<void> {
     removed === 0 ? "nothing to remove\n" : `removed ${removed} agent dir(s)\n`,
   );
 }
-
-/**
- * Stop a running agent (like suspend) and mark it archived so `list` hides it
- * by default; the record and its sessions are kept and any resume (explicit or
- * implicit) clears the flag. The deliberate destructive path is `purge`.
- */
-
-const suspendCommand = commandMultiTarget<TimeoutFlags>({
-  docs: { brief: "wait until idle, then stop" },
-  parameters: { flags: timeoutFlags },
-  func: suspend,
-});
-
-const archiveCommand = commandMultiTarget<TimeoutFlags>({
-  common: true,
-  docs: { brief: "suspend, then hide from list" },
-  parameters: { flags: timeoutFlags },
-  func: archive,
-});
-
-const resumeCommand = commandMultiTarget({
-  docs: { brief: "revive dormant agents" },
-  func: resume,
-});
-
-const purgeCommand = commandMultiTarget<PurgeFlags>({
-  common: true,
-  docs: { brief: "wait until idle, then delete permanently" },
-  parameters: { flags: purgeFlags },
-  func: purge,
-});
 
 const gcCommand = commandNoTarget({
   docs: { brief: "remove tombstoned or corrupt agent dirs" },
