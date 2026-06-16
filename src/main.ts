@@ -54,6 +54,7 @@ export const app = buildApplication(root, {
   },
   documentation: {
     useAliasInUsageLine: true,
+    alwaysShowHelpAllFlag: true,
   },
   localization: {
     text: {

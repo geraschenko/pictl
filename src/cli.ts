@@ -369,7 +369,7 @@ export function commandOneTarget<
         await spec.func.call(this, commandFlags as FLAGS, ...args);
       },
       parameters: {
-        flags: { ...singleTargetFlags, ...(spec.parameters?.flags ?? {}) },
+        flags: { ...(spec.parameters?.flags ?? {}), ...singleTargetFlags },
         aliases: { t: "target", ...(spec.parameters?.aliases ?? {}) },
         ...(spec.parameters?.positional === undefined
           ? {}
@@ -404,7 +404,7 @@ export function commandMultiTarget<
         await spec.func.call(this, commandFlags as FLAGS, ...args);
       },
       parameters: {
-        flags: { ...multiTargetFlags, ...(spec.parameters?.flags ?? {}) },
+        flags: { ...(spec.parameters?.flags ?? {}), ...multiTargetFlags },
         aliases: { t: "target", ...(spec.parameters?.aliases ?? {}) },
         ...(spec.parameters?.positional === undefined
           ? {}
