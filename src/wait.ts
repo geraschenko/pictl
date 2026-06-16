@@ -2,7 +2,7 @@
  * `pictl wait --target <agent> --until turn-end|idle|no-activity:<secs>` —
  * block until the agent reaches a condition. Exit codes: 0 condition met,
  * 1 runtime error, 2 usage error, 3 `--timeout` expired.
- * 
+ *
  * - turn-end: the next `agent_end` with `willRetry === false` (a true value
  *   announces an auto-retry continuation, not a turn end). Returns immediately
  *   only when fully idle — a pending queued message counts as a turn that must

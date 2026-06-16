@@ -183,7 +183,9 @@ export async function hold(
 ): Promise<void> {
   const args = { ...flags, resume: flags.resume === true, piArgs };
   const { agentDir, agentId } = args;
-  const proc = this.process;
+  // _hold is a Node daemon and needs pid/signals/exit; Stricli's process type
+  // intentionally only models portable stdio, so use Node's process here.
+  const proc = this.process as NodeJS.Process;
 
   const existing = await readAgentRecord(agentDir);
   const createdAt =

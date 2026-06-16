@@ -18,37 +18,10 @@ import type { AgentRecord } from "./registry.ts";
 import { loadAgent } from "./registry.ts";
 import { UsageError } from "./util.ts";
 
-// TDC: Don't define our out stdout/stdin/process types. cast as the node types in functions that need it, with comments explaining why.
-export interface PictlStdout {
-  write(str: string | Uint8Array): void;
-  rows: number;
-  columns: number;
-  isTTY: boolean;
-  on(event: "resize", listener: () => void): this;
-}
-
-export interface PictlStdin extends AsyncIterable<Buffer | string> {
-  isTTY: boolean;
-  setRawMode(mode: boolean): this;
-  resume(): this;
-  pause(): this;
-  on(event: "data", listener: (chunk: Buffer) => void): this;
-}
-
-export interface PictlProcess extends StricliProcess {
-  stdout: PictlStdout;
-  stdin: PictlStdin;
-  stderr: NodeJS.WriteStream;
-  env: NodeJS.ProcessEnv;
-  pid: number;
-  execPath: string;
-  exit(code?: number): never;
-  kill(pid: number, signal?: NodeJS.Signals | number): true;
-  on(event: "SIGTERM" | "SIGINT", listener: () => void): this;
-}
+type RuntimeProcess = StricliProcess & { env?: NodeJS.ProcessEnv };
 
 export interface CommandContext extends StricliCommandContext {
-  process: PictlProcess;
+  process: StricliProcess;
   env: NodeJS.ProcessEnv;
   /** Empty for targetMode none; length 1 for single; length >= 1 for multiple. */
   targets: AgentRecord[];
@@ -329,10 +302,14 @@ export const cliLocalization = {
 export async function runCliApp(
   app: Application<CommandContext>,
   argv: readonly string[],
-  proc: PictlProcess = process,
+  proc: RuntimeProcess = process,
 ): Promise<void> {
   proc.exitCode = undefined;
-  await run(app, argv, { process: proc, env: proc.env, targets: [] });
+  await run(app, argv, {
+    process: proc,
+    env: proc.env ?? process.env,
+    targets: [],
+  });
   if (typeof proc.exitCode === "number" && proc.exitCode < 0) {
     proc.exitCode = 2;
   }

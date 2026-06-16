@@ -42,7 +42,10 @@ const CLEAR_SCREEN_SEQUENCE = `${CURSOR_HOME}${ERASE_SCREEN}`;
 export async function attach(this: CommandContext): Promise<void> {
   const { id: targetId } = oneTarget(this);
   const { id: agentId, agentDir } = await ensureAgentRunning(targetId);
-  const { stdin, stdout } = this.process;
+  // attach is inherently Node/TTY-specific; Stricli's process type is
+  // intentionally minimal, so use the real Node process interface here.
+  const nodeProcess = this.process as NodeJS.Process;
+  const { stdin, stdout } = nodeProcess;
 
   if (!stdin.isTTY || !stdout.isTTY) {
     throw new Error("attach requires stdin and stdout to be a terminal");
@@ -71,7 +74,8 @@ export async function attach(this: CommandContext): Promise<void> {
       `${cursorToLastRow()}${TERMINAL_RESTORE_SEQUENCE}\r\n${message}\n`,
     );
     socket.destroy();
-    this.process.exit(exitCode);
+    nodeProcess.exit(exitCode);
+    throw new Error("unreachable after process.exit");
   };
 
   const sendResize = (): void => {

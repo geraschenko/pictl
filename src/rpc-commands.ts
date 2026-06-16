@@ -179,7 +179,12 @@ async function messageFrom(
   context: CommandContext,
   positional: string,
 ): Promise<string> {
-  return positional === "-" ? readStdin(context.process.stdin) : positional;
+  if (positional !== "-") {
+    return positional;
+  }
+  // Reading prompt text from stdin is Node-specific; Stricli's process type
+  // intentionally only models portable stdio.
+  return readStdin((context.process as NodeJS.Process).stdin);
 }
 
 function promptWaitCondition(flags: PromptFlags): WaitCondition | undefined {
