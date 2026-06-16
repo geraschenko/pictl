@@ -194,16 +194,6 @@ function nextWake(state: FollowState, client: PiSocketClient): Promise<void> {
   });
 }
 
-const tailFlags = {
-  follow: booleanFlag("Follow new entries"),
-  since: stringFlag("Start after entry id"),
-  until: parsedFlag(`Follow until ${WAIT_UNTIL_USAGE}`, parseWaitCondition),
-  // TODO: should events be renamed "raw" to be consistent with rpc command flags?
-  events: booleanFlag("Stream raw events"),
-};
-
-type TailFlags = InferFlags<typeof tailFlags>;
-
 /**
  * After a session replacement the old cursor is meaningless; position at the
  * new session's last entry without printing history (only entries created
@@ -221,6 +211,16 @@ async function resyncToSessionTip(
   printCursorRecord(write, state.sessionId, lastEntryId ?? null);
   return lastEntryId;
 }
+
+const tailFlags = {
+  follow: booleanFlag("Follow new entries"),
+  since: stringFlag("Start after entry id"),
+  until: parsedFlag(`Follow until ${WAIT_UNTIL_USAGE}`, parseWaitCondition),
+  // TODO: should events be renamed "raw" to be consistent with rpc command flags?
+  events: booleanFlag("Stream raw events"),
+};
+
+type TailFlags = InferFlags<typeof tailFlags>;
 
 export async function tail(
   this: CommandContext,
