@@ -119,7 +119,7 @@ For command-line names that are not valid TypeScript identifiers, use the natura
 - `follow-up` -> `followUp`
 - `get-state` -> `getState`
 - `set-auto-retry` -> `setAutoRetry`
-- `_daemon` -> `_daemon` if practical, otherwise `hold` with route key `_daemon`
+- `_daemon` -> `daemon` with route key `_daemon`
 
 Route exports should be named after the route group:
 

@@ -24,7 +24,7 @@ It builds on pi's "tee" mode (`pi --rpc-socket <path>`, branch `anton/rpc-tree` 
 
 ## Toolchain: node + npm + plain tsc
 
-pictl runs on Node (not bun) and builds with plain `tsc` (not tsup or a bundler). Rationale: node-pty is a native C++ addon built against Node's ABI, and the holder depends on exactly the areas where bun's Node compatibility is weakest (PTY handling, signals, detached child processes) — pi can ship as a bun-compiled binary because it doesn't allocate PTYs; pictl holds PTYs for a living. tsup/bundling is a contained, non-breaking optimization later if CLI startup latency ever matters in tight shell loops; it skips type-checking and can't inline native addons anyway. Package shape: ESM (`"type": "module"`), `tsc` emits `src/` → `dist/`, a `bin` entry exposes `pictl`, `npm link` for development. The holder re-invokes itself via `process.execPath` + entry script, so `_hold` works regardless of how the CLI was invoked.
+pictl runs on Node (not bun) and builds with plain `tsc` (not tsup or a bundler). Rationale: node-pty is a native C++ addon built against Node's ABI, and the holder depends on exactly the areas where bun's Node compatibility is weakest (PTY handling, signals, detached child processes) — pi can ship as a bun-compiled binary because it doesn't allocate PTYs; pictl holds PTYs for a living. tsup/bundling is a contained, non-breaking optimization later if CLI startup latency ever matters in tight shell loops; it skips type-checking and can't inline native addons anyway. Package shape: ESM (`"type": "module"`), `tsc` emits `src/` → `dist/`, a `bin` entry exposes `pictl`, `npm link` for development. The holder re-invokes itself via `process.execPath` + entry script, so `_daemon` works regardless of how the CLI was invoked.
 
 ## Language: TypeScript
 
@@ -32,9 +32,9 @@ pictl is TypeScript. Reasons: pi is TypeScript, so RPC types can be **imported f
 
 Caveat: until tee mode is upstreamed, pictl depends on the pi _fork_ (geraschenko/pi, branch `anton/rpc-tree`) both at runtime (the installed pi binary must support `--rpc-socket`) and for type imports. See open questions in the implementation plan.
 
-## Process model: one holder daemon per agent
+## Process model: one per-agent daemon per agent
 
-Each spawned agent is held by a small **holder daemon** — a hidden entrypoint of the pictl binary itself (`pictl _hold`), daemonized by `pictl spawn`. One holder per pi instance; there is no central daemon. The holder:
+Each spawned agent is held by a small **per-agent daemon** — a hidden entrypoint of the pictl binary itself (`pictl _daemon`), daemonized by `pictl spawn`. One daemon per pi instance; there is no central daemon. The daemon is still the agent's "holder" in the architectural sense: it holds the PTY master and lifecycle state. It:
 
 - allocates a PTY via node-pty and runs `pi --rpc-socket <agent-dir>/pi.sock` inside it (the PTY satisfies pi's interactive-TTY requirement — **no pi modifications needed** for background operation);
 - feeds PTY output into a headless terminal emulator (@xterm/headless) to maintain screen state while detached;
@@ -43,7 +43,7 @@ Each spawned agent is held by a small **holder daemon** — a hidden entrypoint 
 
 Why this design: a TUI needs someone to hold the PTY master and remember the screen at all times; tmux is exactly that service, and this replaces the tmux dependency with a few hundred lines following the architecture VS Code uses for terminal persistence/reconnect (node-pty + xterm-headless + screen serialization on reattach).
 
-Holder/CLI version skew is acceptable: the sockets carry stable protocols, so a newer pictl can manage agents held by an older holder. A holder restart implies an agent restart, so skew is short-lived anyway.
+Daemon/CLI version skew is acceptable: the sockets carry stable protocols, so a newer pictl can manage agents held by an older daemon. A daemon restart implies an agent restart, so skew is short-lived anyway.
 
 ## Attach semantics
 

@@ -281,4 +281,4 @@ const promptFlags = {
 - [x] Ran `npm run fmt` and `treefmt --fail-on-change` successfully.
 - [x] Ran `npm run check`, `npm run lint`, `npm run build`, and `npm test` successfully after formatting.
 - [x] Smoke-tested `node dist/main.js --version` and `./dist/main.js --version`.
-- [x] Addressed review comments from `112124a`: removed `defineFlags`, removed custom Stricli localization after comparing output, renamed `_hold`/`holder.ts`/`hold`/`launchHolder` to `_daemon`/`daemon.ts`/`daemon`/`launchDaemon`, and moved command-specific flag definitions closer to their commands.
+- [x] Addressed review comments from `112124a`: removed `defineFlags`, removed custom Stricli localization after comparing output, renamed the hidden holder entrypoint/file/function/API to `_daemon`/`daemon.ts`/`daemon`/`launchDaemon`, and moved command-specific flag definitions closer to their commands.
