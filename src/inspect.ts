@@ -6,11 +6,14 @@
 import { resolve } from "node:path";
 import type { RpcSessionState } from "@earendil-works/pi-coding-agent";
 import {
+  booleanFlag,
   commandMultiTarget,
   commandNoTarget,
+  defineFlags,
   multiTargets,
-  trueFlag,
+  stringFlag,
   type CommandContext,
+  type InferFlags,
 } from "./cli.ts";
 import {
   type AgentRecord,
@@ -40,15 +43,19 @@ export interface AgentProbe {
   error?: string;
 }
 
-interface ListFlags {
-  json?: true;
-  all?: true;
-  cwd?: string;
-}
+const listFlags = defineFlags({
+  json: booleanFlag("Print JSON"),
+  all: booleanFlag("Include archived agents"),
+  cwd: stringFlag("Filter by cwd"),
+});
 
-interface StatusFlags {
-  json?: true;
-}
+type ListFlags = InferFlags<typeof listFlags>;
+
+const statusFlags = defineFlags({
+  json: booleanFlag("Print JSON"),
+});
+
+type StatusFlags = InferFlags<typeof statusFlags>;
 
 export async function probeAgent(agentId: string): Promise<AgentProbe> {
   const classified = await classifyAgentDir(agentId);
@@ -109,7 +116,7 @@ export async function list(
   let probes = await Promise.all(agentIds.map(probeAgent));
   // Archived agents are kept but hidden unless asked for; --cwd matches the
   // agent's recorded working directory exactly (resolved).
-  if (flags.all !== true) {
+  if (!flags.all) {
     probes = probes.filter((probe) => probe.status !== "archived");
   }
   if (cwdFilter !== undefined) {
@@ -119,7 +126,7 @@ export async function list(
     (a.record?.createdAt ?? "").localeCompare(b.record?.createdAt ?? ""),
   );
 
-  if (flags.json === true) {
+  if (flags.json) {
     this.process.stdout.write(`${JSON.stringify(probes, null, 2)}\n`);
     return;
   }
@@ -184,7 +191,7 @@ export async function status(
     multiTargets(this).map((target) => probeAgent(target.id)),
   );
 
-  if (flags.json === true) {
+  if (flags.json) {
     this.process.stdout.write(`${JSON.stringify(probes, null, 2)}\n`);
     return;
   }
@@ -194,27 +201,14 @@ export async function status(
 const listCommand = commandNoTarget<ListFlags>({
   common: true,
   docs: { brief: "list agents and their status" },
-  parameters: {
-    flags: {
-      json: trueFlag("Print JSON"),
-      all: trueFlag("Include archived agents"),
-      cwd: {
-        kind: "parsed",
-        parse: String,
-        brief: "Filter by cwd",
-        optional: true,
-      },
-    },
-  },
+  parameters: { flags: listFlags },
   func: list,
 });
 
 const statusCommand = commandMultiTarget<StatusFlags>({
   common: true,
   docs: { brief: "detailed status of agents" },
-  parameters: {
-    flags: { json: trueFlag("Print JSON") },
-  },
+  parameters: { flags: statusFlags },
   func: status,
 });
 

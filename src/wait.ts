@@ -23,9 +23,12 @@
 
 import {
   commandOneTarget,
+  defineFlags,
   oneTarget,
+  requiredParsedFlag,
   secondsFlag,
   type CommandContext,
+  type InferFlags,
 } from "./cli.ts";
 import { IdleTimeoutError, waitIdle } from "./lifecycle.ts";
 import { isPidAlive, piSocketPath } from "./registry.ts";
@@ -44,10 +47,15 @@ export type WaitCondition =
 
 export const WAIT_UNTIL_USAGE = "turn-end|idle|no-activity:<secs>";
 
-interface WaitFlags {
-  until: WaitCondition;
-  timeout?: number;
-}
+const waitFlags = defineFlags({
+  until: requiredParsedFlag(
+    `Wait condition (${WAIT_UNTIL_USAGE})`,
+    parseWaitCondition,
+  ),
+  timeout: secondsFlag(),
+});
+
+type WaitFlags = InferFlags<typeof waitFlags>;
 
 export function parseWaitCondition(value: string): WaitCondition {
   if (value === "turn-end") {
@@ -178,16 +186,7 @@ export async function wait(
 
 const waitCommand = commandOneTarget<WaitFlags>({
   docs: { brief: "block until the agent meets a condition" },
-  parameters: {
-    flags: {
-      until: {
-        kind: "parsed",
-        parse: parseWaitCondition,
-        brief: `Wait condition (${WAIT_UNTIL_USAGE})`,
-      },
-      timeout: secondsFlag(),
-    },
-  },
+  parameters: { flags: waitFlags },
   func: wait,
 });
 

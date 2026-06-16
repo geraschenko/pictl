@@ -11,6 +11,7 @@ import {
   type FlagParametersForType,
   type StricliProcess,
   type TypedCommandParameters,
+  type TypedFlagParameter,
   type TypedPositionalParameters,
 } from "@stricli/core";
 import type { Application } from "@stricli/core";
@@ -134,34 +135,170 @@ export function multiTargets(context: CommandContext): readonly AgentRecord[] {
   return context.targets;
 }
 
-export function trueFlag(brief: string) {
+// This symbol is never created at runtime. It is a "phantom" property used
+// only by TypeScript so a Stricli flag parameter can remember the value type
+// it will produce after parsing.
+declare const flagValue: unique symbol;
+
+export type CliFlag<T, PARAMETER> = PARAMETER & {
+  readonly [flagValue]: T;
+};
+
+export type InferFlagValue<F> = F extends {
+  readonly [flagValue]: infer T;
+}
+  ? T
+  : never;
+
+// Optional object properties are different from required properties whose value
+// can be undefined. This helper finds the flags whose phantom value includes
+// undefined so InferFlags can turn `string | undefined` into `name?: string`.
+export type OptionalFlagKeys<F extends Record<string, unknown>> = {
+  readonly [K in keyof F]: undefined extends InferFlagValue<F[K]> ? K : never;
+}[keyof F];
+
+export type RequiredFlagKeys<F extends Record<string, unknown>> = Exclude<
+  keyof F,
+  OptionalFlagKeys<F>
+>;
+
+// Derive the implementation-facing flags object from a flag-spec object:
+// - booleanFlag(...) becomes `name: boolean`
+// - variadicStringFlag(...) becomes `name: readonly string[]`
+// - stringFlag(...) becomes `name?: string`
+// The runtime flag specs remain ordinary Stricli parameters; the phantom type
+// information only exists to make this mapped type possible.
+export type InferFlags<F extends Record<string, unknown>> = {
+  readonly [K in RequiredFlagKeys<F>]: InferFlagValue<F[K]>;
+} & {
+  readonly [K in OptionalFlagKeys<F>]?: Exclude<
+    InferFlagValue<F[K]>,
+    undefined
+  >;
+};
+
+export function defineFlags<const F extends Record<string, unknown>>(
+  flags: F,
+): F {
+  return flags;
+}
+
+// The helper bodies use casts because Stricli's TypedFlagParameter is a
+// conditional type: TypeScript cannot prove that a generic object literal is
+// the right branch for every T. Keeping the casts here centralizes that
+// unsafety; command modules still receive checked, inferred flag types.
+export function booleanFlag(
+  brief: string,
+): CliFlag<boolean, TypedFlagParameter<boolean, CommandContext>> {
+  return {
+    kind: "boolean",
+    brief,
+    default: false,
+  } as unknown as CliFlag<boolean, TypedFlagParameter<boolean, CommandContext>>;
+}
+
+export function stringFlag(
+  brief: string,
+  placeholder?: string,
+): CliFlag<
+  string | undefined,
+  TypedFlagParameter<string | undefined, CommandContext>
+> {
   return {
     kind: "parsed",
-    parse(input: string): true {
-      if (input === "" || input === "true") {
-        return true;
-      }
-      throw new UsageError("flag does not accept a value");
-    },
-    inferEmpty: true,
+    parse: String,
+    brief,
+    ...(placeholder === undefined ? {} : { placeholder }),
+    optional: true,
+  } as unknown as CliFlag<
+    string | undefined,
+    TypedFlagParameter<string | undefined, CommandContext>
+  >;
+}
+
+export function variadicStringFlag(
+  brief: string,
+  placeholder?: string,
+): CliFlag<
+  readonly string[],
+  TypedFlagParameter<readonly string[], CommandContext>
+> {
+  return {
+    kind: "parsed",
+    parse: String,
+    brief,
+    ...(placeholder === undefined ? {} : { placeholder }),
+    variadic: true,
+    default: [],
+  } as unknown as CliFlag<
+    readonly string[],
+    TypedFlagParameter<readonly string[], CommandContext>
+  >;
+}
+
+export function enumFlag<const VALUES extends readonly [string, ...string[]]>(
+  brief: string,
+  values: VALUES,
+): CliFlag<
+  VALUES[number] | undefined,
+  TypedFlagParameter<VALUES[number] | undefined, CommandContext>
+> {
+  return {
+    kind: "enum",
+    values,
     brief,
     optional: true,
-  } as const;
+  } as unknown as CliFlag<
+    VALUES[number] | undefined,
+    TypedFlagParameter<VALUES[number] | undefined, CommandContext>
+  >;
+}
+
+export function parsedFlag<T>(
+  brief: string,
+  parse: (input: string) => T,
+  placeholder?: string,
+): CliFlag<T | undefined, TypedFlagParameter<T | undefined, CommandContext>> {
+  return {
+    kind: "parsed",
+    parse,
+    brief,
+    ...(placeholder === undefined ? {} : { placeholder }),
+    optional: true,
+  } as unknown as CliFlag<
+    T | undefined,
+    TypedFlagParameter<T | undefined, CommandContext>
+  >;
+}
+
+export function requiredParsedFlag<T>(
+  brief: string,
+  parse: (input: string) => T,
+  placeholder?: string,
+): CliFlag<T, TypedFlagParameter<T, CommandContext>> {
+  return {
+    kind: "parsed",
+    parse,
+    brief,
+    ...(placeholder === undefined ? {} : { placeholder }),
+  } as unknown as CliFlag<T, TypedFlagParameter<T, CommandContext>>;
+}
+
+export function requiredStringFlag(
+  brief: string,
+  placeholder?: string,
+): CliFlag<string, TypedFlagParameter<string, CommandContext>> {
+  return requiredParsedFlag(brief, String, placeholder);
 }
 
 export function secondsFlag(brief = "Timeout in seconds") {
-  return {
-    kind: "parsed",
-    parse(input: string): number {
-      const seconds = Number(input);
-      if (!(Number.isFinite(seconds) && seconds >= 0)) {
-        throw new UsageError(`invalid seconds value: ${input}`);
-      }
-      return seconds;
-    },
-    brief,
-    optional: true,
-  } as const;
+  return parsedFlag(brief, (input: string): number => {
+    const seconds = Number(input);
+    if (!(Number.isFinite(seconds) && seconds >= 0)) {
+      throw new UsageError(`invalid seconds value: ${input}`);
+    }
+    return seconds;
+  });
 }
 
 export function restArgs(brief: string, placeholder: string, minimum = 0) {

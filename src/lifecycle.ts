@@ -17,12 +17,14 @@
 
 import { readFile, rm, writeFile } from "node:fs/promises";
 import {
+  booleanFlag,
   commandMultiTarget,
   commandNoTarget,
+  defineFlags,
   multiTargets,
   secondsFlag,
-  trueFlag,
   type CommandContext,
+  type InferFlags,
 } from "./cli.ts";
 import {
   type AgentRecord,
@@ -265,14 +267,19 @@ async function waitPidGone(pid: number, deadlineMs: number): Promise<void> {
   }
 }
 
-interface TimeoutFlags {
-  timeout?: number;
-}
+const timeoutFlags = defineFlags({
+  timeout: secondsFlag(),
+});
 
-interface PurgeFlags extends TimeoutFlags {
-  now?: true;
-  force?: true;
-}
+type TimeoutFlags = InferFlags<typeof timeoutFlags>;
+
+const purgeFlags = defineFlags({
+  ...timeoutFlags,
+  now: booleanFlag("Abort first"),
+  force: booleanFlag("Kill and delete"),
+});
+
+type PurgeFlags = InferFlags<typeof purgeFlags>;
 
 /**
  * Resolve all prefixes before acting (so a typo aborts before anything is
@@ -368,8 +375,8 @@ export async function purge(
     purgeOne(
       agent,
       flags.timeout === undefined ? undefined : flags.timeout * 1000,
-      flags.now === true,
-      flags.force === true,
+      flags.now,
+      flags.force,
       (message) => this.process.stdout.write(message),
     ),
   );
@@ -465,10 +472,6 @@ export async function gc(this: CommandContext): Promise<void> {
  * implicit) clears the flag. The deliberate destructive path is `purge`.
  */
 
-const timeoutFlags = {
-  timeout: secondsFlag(),
-} as const;
-
 const suspendCommand = commandMultiTarget<TimeoutFlags>({
   docs: { brief: "wait until idle, then stop" },
   parameters: { flags: timeoutFlags },
@@ -490,13 +493,7 @@ const resumeCommand = commandMultiTarget({
 const purgeCommand = commandMultiTarget<PurgeFlags>({
   common: true,
   docs: { brief: "wait until idle, then delete permanently" },
-  parameters: {
-    flags: {
-      timeout: secondsFlag(),
-      now: trueFlag("Abort first"),
-      force: trueFlag("Kill and delete"),
-    },
-  },
+  parameters: { flags: purgeFlags },
   func: purge,
 });
 

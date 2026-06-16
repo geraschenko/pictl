@@ -19,10 +19,15 @@ import xterm from "@xterm/headless";
 import pty from "node-pty";
 import { cursorTo, cursorToRow, HIDE_CURSOR, SHOW_CURSOR } from "./ansi.ts";
 import {
+  booleanFlag,
   commandNoTarget,
+  defineFlags,
+  parsedFlag,
+  requiredStringFlag,
   restArgs,
-  trueFlag,
+  stringFlag,
   type CommandContext,
+  type InferFlags,
 } from "./cli.ts";
 import {
   type AgentRecord,
@@ -45,15 +50,17 @@ const PTY_COLS = 80;
 const PTY_ROWS = 24;
 const RPC_CONNECT_DEADLINE_MS = 30_000;
 
-interface HoldFlags {
-  agentDir: string;
-  agentId: string;
-  cwd: string;
-  piBin: string;
-  resume?: true;
-  tag?: string;
-  readyFd?: number;
-}
+const holdFlags = defineFlags({
+  agentDir: requiredStringFlag("Agent dir"),
+  agentId: requiredStringFlag("Agent id"),
+  cwd: requiredStringFlag("Working directory"),
+  piBin: requiredStringFlag("pi binary"),
+  resume: booleanFlag("Resume"),
+  tag: stringFlag("Tag"),
+  readyFd: parsedFlag("Ready fd", numberParser),
+});
+
+type HoldFlags = InferFlags<typeof holdFlags>;
 
 function signalReady(
   readyFd: number | undefined,
@@ -181,7 +188,7 @@ export async function hold(
   flags: HoldFlags,
   ...piArgs: string[]
 ): Promise<void> {
-  const args = { ...flags, resume: flags.resume === true, piArgs };
+  const args = { ...flags, piArgs };
   const { agentDir, agentId } = args;
   // _hold is a Node daemon and needs pid/signals/exit; Stricli's process type
   // intentionally only models portable stdio, so use Node's process here.
@@ -370,20 +377,7 @@ export async function hold(
 const holdCommand = commandNoTarget<HoldFlags, string[]>({
   docs: { brief: "internal holder daemon" },
   parameters: {
-    flags: {
-      agentDir: { kind: "parsed", parse: String, brief: "Agent dir" },
-      agentId: { kind: "parsed", parse: String, brief: "Agent id" },
-      cwd: { kind: "parsed", parse: String, brief: "Working directory" },
-      piBin: { kind: "parsed", parse: String, brief: "pi binary" },
-      resume: trueFlag("Resume"),
-      tag: { kind: "parsed", parse: String, brief: "Tag", optional: true },
-      readyFd: {
-        kind: "parsed",
-        parse: numberParser,
-        brief: "Ready fd",
-        optional: true,
-      },
-    },
+    flags: holdFlags,
     positional: restArgs("pi arguments", "pi-arg"),
   },
   func: hold,

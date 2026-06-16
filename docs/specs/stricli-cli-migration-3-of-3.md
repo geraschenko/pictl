@@ -214,6 +214,17 @@ export function parsedFlag<T>(
   parse: (input: string) => T,
   placeholder?: string,
 ): CliFlag<T | undefined, TypedFlagParameter<T | undefined, CommandContext>>;
+
+export function requiredParsedFlag<T>(
+  brief: string,
+  parse: (input: string) => T,
+  placeholder?: string,
+): CliFlag<T, TypedFlagParameter<T, CommandContext>>;
+
+export function requiredStringFlag(
+  brief: string,
+  placeholder?: string,
+): CliFlag<string, TypedFlagParameter<string, CommandContext>>;
 ```
 
 Notes:
@@ -222,6 +233,7 @@ Notes:
 - `booleanFlag` should use Stricli's native boolean flag support.
 - `variadicStringFlag` returns a required readonly array type. Its runtime flag parameter should ensure absence is represented as an empty array.
 - `stringFlag`, `enumFlag`, and `parsedFlag` represent optional flags by default.
+- `requiredParsedFlag` and `requiredStringFlag` are included because existing commands such as `_hold` and `wait` have required command flags.
 - Additional helper overloads or internal helper types are acceptable only if needed to make these approved public signatures type-check.
 
 ## Edge cases
@@ -265,7 +277,10 @@ const promptFlags = defineFlags({
 **Instructions**: Update this section during each work session. Add new tasks, mark completed ones with [x], document decisions and problems encountered.
 
 - [x] Created spec file and renamed earlier migration specs from `of-2` to `of-3`.
-- [ ] Implement type skeleton and verify it builds before migrating command modules.
-- [ ] Migrate one representative command and assess ergonomics.
-- [ ] Migrate remaining command flags if the representative command is successful.
-- [ ] Run formatting, type checking, linting, build, and tests.
+- [x] Implemented typed flag helpers in `src/cli.ts`, including comments explaining the phantom-type based `InferFlags` machinery.
+- [x] Added required parsed/string flag helpers after discovering `_hold` and `wait` need required command flags.
+- [x] Migrated command modules to infer implementation flag types from `defineFlags(...)` values.
+- [x] Verified boolean presence flags now infer required `boolean` values, and variadic image flags infer required `readonly string[]` values.
+- [x] Ran `npm run fmt` and `treefmt --fail-on-change` successfully.
+- [x] Ran `npm run check`, `npm run lint`, `npm run build`, and `npm test` successfully after formatting.
+- [x] Smoke-tested `node dist/main.js --version` and `./dist/main.js --version`.

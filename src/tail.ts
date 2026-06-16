@@ -24,10 +24,14 @@
 
 import type { RpcResponse } from "@earendil-works/pi-coding-agent";
 import {
+  booleanFlag,
   commandOneTarget,
+  defineFlags,
   oneTarget,
-  trueFlag,
+  parsedFlag,
+  stringFlag,
   type CommandContext,
+  type InferFlags,
 } from "./cli.ts";
 import { ensureAgentRunning } from "./lifecycle.ts";
 import { piSocketPath } from "./registry.ts";
@@ -62,13 +66,15 @@ type GetEntriesData = Extract<
   { command: "get_entries"; success: true }
 >["data"];
 
-interface TailFlags {
-  follow?: true;
-  since?: string;
-  until?: WaitCondition;
+const tailFlags = defineFlags({
+  follow: booleanFlag("Follow new entries"),
+  since: stringFlag("Start after entry id"),
+  until: parsedFlag(`Follow until ${WAIT_UNTIL_USAGE}`, parseWaitCondition),
   // TODO: should events be renamed "raw" to be consistent with rpc command flags?
-  events?: true;
-}
+  events: booleanFlag("Stream raw events"),
+});
+
+type TailFlags = InferFlags<typeof tailFlags>;
 
 function entriesFrom(response: RpcResponse): GetEntriesData["entries"] {
   // client.request throws on success: false, so the cast is safe here.
@@ -203,18 +209,18 @@ export async function tail(
   this: CommandContext,
   flags: TailFlags,
 ): Promise<void> {
-  if (flags.events === true && flags.since !== undefined) {
+  if (flags.events && flags.since !== undefined) {
     throw new UsageError("--events streams raw events; --since does not apply");
   }
   const stopCondition = flags.until;
-  const follow = flags.follow === true || stopCondition !== undefined;
+  const follow = flags.follow || stopCondition !== undefined;
   const agent = await ensureAgentRunning(oneTarget(this).id);
   const socketPath = piSocketPath(agent.agentDir);
   const write = (text: string): void => {
     this.process.stdout.write(text);
   };
 
-  if (flags.events === true) {
+  if (flags.events) {
     await streamEvents(socketPath, stopCondition, write);
     return;
   }
@@ -311,24 +317,7 @@ export async function tail(
 const tailCommand = commandOneTarget<TailFlags>({
   common: true,
   docs: { brief: "session entries as JSONL, then a cursor record" },
-  parameters: {
-    flags: {
-      follow: trueFlag("Follow new entries"),
-      since: {
-        kind: "parsed",
-        parse: String,
-        brief: "Start after entry id",
-        optional: true,
-      },
-      until: {
-        kind: "parsed",
-        parse: parseWaitCondition,
-        brief: `Follow until ${WAIT_UNTIL_USAGE}`,
-        optional: true,
-      },
-      events: trueFlag("Stream raw events"),
-    },
-  },
+  parameters: { flags: tailFlags },
   func: tail,
 });
 

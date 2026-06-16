@@ -16,7 +16,14 @@ import { mkdir } from "node:fs/promises";
 import { delimiter, isAbsolute, join, resolve } from "node:path";
 import type { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
-import { commandNoTarget, restArgs, type CommandContext } from "./cli.ts";
+import {
+  commandNoTarget,
+  defineFlags,
+  restArgs,
+  stringFlag,
+  type CommandContext,
+  type InferFlags,
+} from "./cli.ts";
 import { agentDirPath, holderLogPath, pictlBaseDir } from "./registry.ts";
 
 export interface HolderLaunch {
@@ -137,11 +144,13 @@ export async function launchHolder(launch: HolderLaunch): Promise<void> {
   }
 }
 
-interface SpawnFlags {
-  cwd?: string;
-  id?: string;
-  tag?: string;
-}
+const spawnFlags = defineFlags({
+  cwd: stringFlag("Working directory"),
+  id: stringFlag("Agent id"),
+  tag: stringFlag("Agent label"),
+});
+
+type SpawnFlags = InferFlags<typeof spawnFlags>;
 
 export async function spawn(
   this: CommandContext,
@@ -186,21 +195,7 @@ const spawnCommand = commandNoTarget<SpawnFlags, string[]>({
     ],
   },
   parameters: {
-    flags: {
-      cwd: {
-        kind: "parsed",
-        parse: String,
-        brief: "Working directory",
-        optional: true,
-      },
-      id: { kind: "parsed", parse: String, brief: "Agent id", optional: true },
-      tag: {
-        kind: "parsed",
-        parse: String,
-        brief: "Agent label",
-        optional: true,
-      },
-    },
+    flags: spawnFlags,
     positional: restArgs("pi arguments", "pi-arg"),
   },
   func: spawn,
