@@ -1,6 +1,15 @@
 /*
  * CLI ↔ RPC passthrough: one subcommand per command in pi's `RpcCommand`
- * union. This module owns the RPC command-line surface.
+ * union (full mirror — omissions need a very good reason). This is the only
+ * module that should need editing when pi's RPC surface changes; the
+ * subcommand table and usage text in main.ts are generated from it.
+ *
+ * Every subcommand takes the agent as --target, builds the typed RPC command
+ * from the rest, sends it over the agent's pi.sock, and prints the response's
+ * data as JSON (`--raw` for the raw response record).
+ *
+ * Flag names mirror pi's RpcCommand field names (kebab-cased) so users who
+ * know the RPC surface can map them without guessing.
  */
 
 import { readFile } from "node:fs/promises";

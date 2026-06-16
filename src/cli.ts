@@ -18,6 +18,7 @@ import type { AgentRecord } from "./registry.ts";
 import { loadAgent } from "./registry.ts";
 import { UsageError } from "./util.ts";
 
+// TDC: Don't define our out stdout/stdin/process types. cast as the node types in functions that need it, with comments explaining why.
 export interface PictlStdout {
   write(str: string | Uint8Array): void;
   rows: number;

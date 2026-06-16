@@ -2,7 +2,24 @@
  * `pictl tail --target <agent> [--follow] [--since <entry-id>]
  * [--until <cond>] [--events]` — session entries as JSONL on stdout, one
  * entry per line, followed by a cursor record so callers can persist their
- * place.
+ * place (cursors are session-scoped: persist the sessionId alongside, and
+ * expect "entry not found" after `/new`, `/resume`, fork, or clone — pictl does
+ * not interweave session files).
+ *
+ * --follow keeps the connection open and streams subsequent entries. Events
+ * are only wakeups: every drain re-issues `get_entries --since <cursor>`, so
+ * the session file remains the single source of truth. A session replacement
+ * mid-follow quietly resyncs the cursor to the new session's tip (announced
+ * by a fresh cursor record) and only entries created after the replacement
+ * stream out.
+ *
+ * --until <cond> stops following once a wait condition holds (turn-end|idle|
+ * no-activity:<secs>) and exits 0; in entry mode it drains any trailing entries
+ * first. It implies --follow.
+ *
+ * --events instead streams the raw broadcast events as JSONL (implies
+ * following; entry draining and --since do not apply). --until still applies —
+ * events stream until the condition holds.
  */
 
 import type { RpcResponse } from "@earendil-works/pi-coding-agent";
@@ -29,6 +46,12 @@ import {
 
 const SOCKET_CONNECT_DEADLINE_MS = 5_000;
 
+/**
+ * Event types that fire per streamed token; waking on them would hammer
+ * get_entries during a turn. Everything else (including event types this
+ * code does not know about) is a wakeup — entries only materialize at
+ * message/turn boundaries, so the next non-noisy event drains them.
+ */
 const STREAMING_NOISE_EVENTS = new Set([
   "message_update",
   "tool_execution_update",
@@ -43,6 +66,7 @@ interface TailFlags {
   follow?: true;
   since?: string;
   until?: WaitCondition;
+  // TODO: should events be renamed "raw" to be consistent with rpc command flags?
   events?: true;
 }
 
@@ -79,6 +103,17 @@ interface FollowState {
   stopError: Error | undefined;
 }
 
+/**
+ * Fetch entries after `cursor`, write them, and return the advanced cursor
+ * (unchanged when nothing new). The cursor is the last printed entry's id —
+ * file order — not the response's leafId, which tree navigation can move
+ * backwards onto an already-printed entry.
+ *
+ * Takes the state rather than a sessionId snapshot: the per-connection
+ * session_changed event may still be in flight when the drain starts, but pi
+ * sends it before any response, so by the time the response resolves the
+ * state carries the session id.
+ */
 async function drainEntries(
   client: PiSocketClient,
   state: FollowState,
@@ -127,6 +162,8 @@ async function streamEvents(
       await client.waitClosed();
       throw new Error("pi socket closed");
     }
+    // Events keep printing via the connect callback; this watches the same
+    // connection for the stop condition and returns 0 when it holds.
     await applyWaitCondition(client, stopCondition, undefined);
   } finally {
     client.close();
@@ -136,6 +173,8 @@ async function streamEvents(
 function handleFollowEvent(state: FollowState, event: SocketEvent): void {
   if (event.type === "session_changed") {
     const announcedSessionId = (event as { sessionId?: string }).sessionId;
+    // The first session_changed (right after hello) announces the current
+    // session — identity, not replacement.
     if (state.sessionId === undefined) {
       state.sessionId = announcedSessionId;
     } else if (announcedSessionId !== state.sessionId) {
@@ -196,12 +235,15 @@ export async function tail(
   try {
     let cursor = await drainEntries(client, state, flags.since, write);
     if (cursor === undefined || cursor === flags.since) {
+      // Nothing printed yet; emit the cursor record the caller persists.
       printCursorRecord(write, state.sessionId, cursor ?? null);
     }
     if (!follow) {
       return;
     }
     if (stopCondition !== undefined) {
+      // Run the stop condition alongside the drain loop. When it resolves we
+      // wake the loop, which breaks after a final drain of trailing entries.
       void applyWaitCondition(client, stopCondition, undefined).then(
         () => {
           state.stopRequested = true;
@@ -233,6 +275,9 @@ export async function tail(
       try {
         cursor = await drainEntries(client, state, cursor, write);
       } catch (error) {
+        // A drain can race the session_changed broadcast: the cursor belongs
+        // to the replaced session and pi reports it unknown. Resync instead
+        // of dying; the next iteration handles it.
         if (
           error instanceof Error &&
           error.message.includes("Entry not found")
@@ -246,6 +291,9 @@ export async function tail(
     if (state.stopError !== undefined) {
       throw state.stopError;
     }
+    // The agent_end that satisfied the condition may have produced entries the
+    // loop has not drained yet. Best-effort final drain; a session swap racing
+    // the stop leaves nothing for us to print, so ignore a stale cursor.
     try {
       await drainEntries(client, state, cursor, write);
     } catch (error) {
@@ -288,6 +336,11 @@ export const tailRoute = {
   tail: tailCommand,
 } as const;
 
+/**
+ * After a session replacement the old cursor is meaningless; position at the
+ * new session's last entry without printing history (only entries created
+ * after the replacement should stream), announcing the new position.
+ */
 async function resyncToSessionTip(
   client: PiSocketClient,
   state: FollowState,

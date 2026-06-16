@@ -2,6 +2,23 @@
  * `pictl wait --target <agent> --until turn-end|idle|no-activity:<secs>` —
  * block until the agent reaches a condition. Exit codes: 0 condition met,
  * 1 runtime error, 2 usage error, 3 `--timeout` expired.
+ * 
+ * - turn-end: the next `agent_end` with `willRetry === false` (a true value
+ *   announces an auto-retry continuation, not a turn end). Returns immediately
+ *   only when fully idle — a pending queued message counts as a turn that must
+ *   end, which is what makes sequential `prompt; wait` race-free.
+ * - idle: not streaming AND pending queue empty (the common condition, so it
+ *   gets the short name).
+ * - no-activity:<secs>: no socket events for N seconds, regardless of streaming
+ *   state; catches turns stalled on human-facing UI, which `idle` never reports.
+ *   N may be fractional (e.g. `no-activity:0.5`).
+ *
+ * The shared condition parser/applier (`parseWaitCondition`/`applyWaitCondition`)
+ * is reused by `tail --until` and `prompt --and-wait-until`.
+ *
+ * A dormant or archived agent is reported as having met any of these conditions
+ * immediately — its process is doing nothing — and is never revived: revival
+ * would only produce a guaranteed-idle agent (pi never resumes mid-turn work).
  */
 
 import {
