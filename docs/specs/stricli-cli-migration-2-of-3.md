@@ -1,10 +1,10 @@
-# Stricli CLI migration, 2 of 2: typed command definitions
+# Stricli CLI migration, 2 of 3: typed command definitions
 
 # SPEC
 
 ## Status
 
-This document supersedes implementation-shape decisions from `docs/specs/stricli-cli-migration-1-of-2.md` where they conflict. The user-facing grammar and behavior from part 1 still apply.
+This document supersedes implementation-shape decisions from `docs/specs/stricli-cli-migration-1-of-3.md` where they conflict. The user-facing grammar and behavior from part 1 still apply.
 
 ## Problem statement
 
