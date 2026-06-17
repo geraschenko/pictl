@@ -247,18 +247,28 @@ function startStopWatcher(
   );
 }
 
-function deferredVoid(): {
-  promise: Promise<void>;
-  resolve: () => void;
-  reject: (error: unknown) => void;
+/**
+ * Prompt streaming deliberately splits listener startup from stop-condition
+ * startup. Stream listeners must be installed before sending the prompt, or
+ * fast message events can be missed. Stop-condition watchers must start after
+ * prompt acceptance, because the default turn-end wait treats an already-idle
+ * agent as complete.
+ *
+ * This gate lets stream pipelines start listening immediately while delaying
+ * their stop-condition watcher until the prompt RPC has been accepted.
+ */
+function createGate(): {
+  wait: Promise<void>;
+  open: () => void;
+  fail: (error: unknown) => void;
 } {
-  let resolve!: () => void;
-  let reject!: (error: unknown) => void;
-  const promise = new Promise<void>((promiseResolve, promiseReject) => {
-    resolve = promiseResolve;
-    reject = promiseReject;
+  let open!: () => void;
+  let fail!: (error: unknown) => void;
+  const wait = new Promise<void>((resolve, reject) => {
+    open = resolve;
+    fail = reject;
   });
-  return { promise, resolve, reject };
+  return { wait, open, fail };
 }
 
 function messageRecordFromEvent(event: SocketEvent): MessageStreamRecord | undefined {
@@ -291,7 +301,7 @@ async function streamMessages(
   writer: JsonlWriter,
   until: StreamUntil | undefined,
   timeoutMs: number | undefined,
-  startStopAfter: Promise<void> = Promise.resolve(),
+  stopConditionGate: Promise<void> = Promise.resolve(),
 ): Promise<void> {
   const state = newStreamState();
   client.onEvent((event) => {
@@ -305,7 +315,7 @@ async function streamMessages(
   if (until === undefined) {
     return;
   }
-  await startStopAfter;
+  await stopConditionGate;
   startStopWatcher(client, state, until, timeoutMs);
   if (until.kind === "killed") {
     await waitForUntil(client, until, timeoutMs);
@@ -385,7 +395,7 @@ async function streamEntries(
   limit: number | undefined,
   until: StreamUntil | undefined,
   timeoutMs: number | undefined,
-  startStopAfter: Promise<void> = Promise.resolve(),
+  stopConditionGate: Promise<void> = Promise.resolve(),
 ): Promise<void> {
   const state = newStreamState();
   client.onEvent((event) => handleSessionEvent(state, event));
@@ -393,7 +403,7 @@ async function streamEntries(
   if (until === undefined) {
     return;
   }
-  await startStopAfter;
+  await stopConditionGate;
   startStopWatcher(client, state, until, timeoutMs);
   if (until.kind === "killed") {
     while (true) {
@@ -434,10 +444,10 @@ async function streamRaw(
   writer: JsonlWriter,
   until: StreamUntil | undefined,
   timeoutMs: number | undefined,
-  startStopAfter: Promise<void> = Promise.resolve(),
+  stopConditionGate: Promise<void> = Promise.resolve(),
 ): Promise<void> {
   client.onEvent((event) => writer.writeRecord(event));
-  await startStopAfter;
+  await stopConditionGate;
   if (until === undefined || until.kind === "killed") {
     await waitForUntil(client, { kind: "killed" }, timeoutMs);
     return;
@@ -476,7 +486,7 @@ export async function streamPrompt(
       options.type === "entries"
         ? (await getEntries(client, undefined)).entries.at(-1)?.id
         : undefined;
-    const stopStart = deferredVoid();
+    const stopConditionGate = createGate();
     const streamPromise =
       options.type === "messages"
         ? streamMessages(
@@ -484,7 +494,7 @@ export async function streamPrompt(
             writer,
             options.until,
             options.timeoutMs,
-            stopStart.promise,
+            stopConditionGate.wait,
           )
         : options.type === "entries"
           ? streamEntries(
@@ -494,20 +504,20 @@ export async function streamPrompt(
               undefined,
               options.until,
               options.timeoutMs,
-              stopStart.promise,
+              stopConditionGate.wait,
             )
           : streamRaw(
               client,
               writer,
               options.until,
               options.timeoutMs,
-              stopStart.promise,
+              stopConditionGate.wait,
             );
     try {
       await client.request(command);
-      stopStart.resolve();
+      stopConditionGate.open();
     } catch (error) {
-      stopStart.reject(error);
+      stopConditionGate.fail(error);
       throw error;
     }
     await streamPromise;
