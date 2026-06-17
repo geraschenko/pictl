@@ -1,5 +1,5 @@
 /**
- * Framing for the holder's tty.sock attach protocol, shared by the holder
+ * Framing for the daemon's tty.sock attach protocol, shared by the daemon
  * (server) and `pictl attach` (client). Binary frames — raw PTY output is
  * high-volume, so no JSONL/base64:
  *

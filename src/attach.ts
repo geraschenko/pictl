@@ -1,6 +1,6 @@
 /*
  * `pictl attach --target <agent>` — connect the local terminal to an agent's
- * PTY via the holder's tty.sock: raw-mode stdin, snapshot render, then
+ * PTY via the daemon's tty.sock: raw-mode stdin, snapshot render, then
  * bidirectional byte proxying until the detach keybinding.
  */
 
@@ -36,7 +36,7 @@ export const DETACH_KEY_NAME = "ctrl+]";
  */
 const TERMINAL_RESTORE_SEQUENCE = `${SHOW_CURSOR}${DISABLE_BRACKETED_PASTE}${RESET_SGR}`;
 
-/** Render the snapshot from the holder's emulator origin: home, clear. */
+/** Render the snapshot from the daemon's emulator origin: home, clear. */
 const CLEAR_SCREEN_SEQUENCE = `${CURSOR_HOME}${ERASE_SCREEN}`;
 
 async function connectToTty(
@@ -135,7 +135,7 @@ export async function attach(this: CommandContext): Promise<void> {
       finish(1, `attach protocol error: ${String(error)}`);
     }
   });
-  socket.on("close", () => finish(1, "connection to agent holder lost"));
+  socket.on("close", () => finish(1, "connection to agent daemon lost"));
   socket.on("error", () => socket.destroy());
 
   stdin.on("data", (chunk: Buffer) => {

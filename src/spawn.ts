@@ -23,7 +23,7 @@ import {
   type CommandContext,
   type InferFlags,
 } from "./cli.ts";
-import { agentDirPath, holderLogPath, pictlBaseDir } from "./registry.ts";
+import { agentDirPath, daemonLogPath, pictlBaseDir } from "./registry.ts";
 
 interface DaemonLaunch {
   agentDir: string;
@@ -82,13 +82,13 @@ async function readAll(stream: Readable): Promise<string> {
 }
 
 /**
- * Launch the per-agent daemon: detached, stdio to holder.log, plus a pipe on
+ * Launch the per-agent daemon: detached, stdio to daemon.log, plus a pipe on
  * fd 3 that the daemon writes a one-line ready/error message to once pi's RPC
  * socket is up (or startup failed). Awaiting that pipe is what makes spawn exit
  * only after the agent is actually reachable — no fixed sleeps.
  */
 export async function launchDaemon(launch: DaemonLaunch): Promise<void> {
-  const logFd = openSync(holderLogPath(launch.agentDir), "a");
+  const logFd = openSync(daemonLogPath(launch.agentDir), "a");
   const daemonArgs = [
     mainEntryPath(),
     "_daemon",
@@ -134,11 +134,11 @@ export async function launchDaemon(launch: DaemonLaunch): Promise<void> {
     ready = undefined;
   }
   if (!ready?.ok) {
-    // Holder-reported errors already carry the log path.
+    // Daemon-reported errors already carry the log path.
     throw new Error(
       ready?.error !== undefined
         ? `daemon failed to start: ${ready.error}`
-        : `daemon failed to start: exited before signaling ready (log: ${holderLogPath(launch.agentDir)})`,
+        : `daemon failed to start: exited before signaling ready (log: ${daemonLogPath(launch.agentDir)})`,
     );
   }
 }
@@ -171,7 +171,7 @@ export async function spawn(
     throw error;
   }
 
-  // On failure the dir is left in place so holder.log can be inspected;
+  // On failure the dir is left in place so daemon.log can be inspected;
   // `pictl gc` removes dirs that never got an agent.json.
   await launchDaemon({
     agentDir,

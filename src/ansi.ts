@@ -1,5 +1,5 @@
 /**
- * ANSI escape sequences shared by the holder and the attach client. Keep this
+ * ANSI escape sequences shared by the daemon and the attach client. Keep this
  * file free of pictl-specific imports.
  */
 

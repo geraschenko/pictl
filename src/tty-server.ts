@@ -1,7 +1,7 @@
 /**
- * The holder's tty.sock server: speaks the framed attach protocol from
+ * The daemon's tty.sock server: speaks the framed attach protocol from
  * tty-protocol.ts to any number of simultaneous clients. PTY/xterm specifics
- * stay in the holder and arrive here as hooks, so this module is pure
+ * stay in the daemon and arrive here as hooks, so this module is pure
  * connection management.
  */
 
@@ -106,8 +106,8 @@ export class TtyServer {
   /**
    * Tell every client the agent is going away, then close. The exit frame is
    * best-effort: flushing is bounded because a client that has stopped
-   * reading (with a full kernel buffer) must not block holder shutdown — its
-   * socket dying when the holder exits carries the same information.
+   * reading (with a full kernel buffer) must not block daemon shutdown — its
+   * socket dying when the daemon exits carries the same information.
    */
   async shutdown(reason: string): Promise<void> {
     this.shuttingDown = true;

@@ -24,7 +24,7 @@ It builds on pi's "tee" mode (`pi --rpc-socket <path>`, branch `anton/rpc-tree` 
 
 ## Toolchain: node + npm + plain tsc
 
-pictl runs on Node (not bun) and builds with plain `tsc` (not tsup or a bundler). Rationale: node-pty is a native C++ addon built against Node's ABI, and the holder depends on exactly the areas where bun's Node compatibility is weakest (PTY handling, signals, detached child processes) — pi can ship as a bun-compiled binary because it doesn't allocate PTYs; pictl holds PTYs for a living. tsup/bundling is a contained, non-breaking optimization later if CLI startup latency ever matters in tight shell loops; it skips type-checking and can't inline native addons anyway. Package shape: ESM (`"type": "module"`), `tsc` emits `src/` → `dist/`, a `bin` entry exposes `pictl`, `npm link` for development. The holder re-invokes itself via `process.execPath` + entry script, so `_daemon` works regardless of how the CLI was invoked.
+pictl runs on Node (not bun) and builds with plain `tsc` (not tsup or a bundler). Rationale: node-pty is a native C++ addon built against Node's ABI, and the daemon depends on exactly the areas where bun's Node compatibility is weakest (PTY handling, signals, detached child processes) — pi can ship as a bun-compiled binary because it doesn't allocate PTYs; pictl holds PTYs for a living. tsup/bundling is a contained, non-breaking optimization later if CLI startup latency ever matters in tight shell loops; it skips type-checking and can't inline native addons anyway. Package shape: ESM (`"type": "module"`), `tsc` emits `src/` → `dist/`, a `bin` entry exposes `pictl`, `npm link` for development. The daemon re-invokes itself via `process.execPath` + entry script, so `_daemon` works regardless of how the CLI was invoked.
 
 ## Language: TypeScript
 
@@ -34,7 +34,7 @@ Caveat: until tee mode is upstreamed, pictl depends on the pi _fork_ (geraschenk
 
 ## Process model: one per-agent daemon per agent
 
-Each spawned agent is held by a small **per-agent daemon** — a hidden entrypoint of the pictl binary itself (`pictl _daemon`), daemonized by `pictl spawn`. One daemon per pi instance; there is no central daemon. The daemon is still the agent's "holder" in the architectural sense: it holds the PTY master and lifecycle state. It:
+Each spawned agent is managed by a small **per-agent daemon** — a hidden entrypoint of the pictl binary itself (`pictl _daemon`), daemonized by `pictl spawn`. One daemon per pi instance; there is no central daemon. It holds the PTY master and lifecycle state, and it:
 
 - allocates a PTY via node-pty and runs `pi --rpc-socket <agent-dir>/pi.sock` inside it (the PTY satisfies pi's interactive-TTY requirement — **no pi modifications needed** for background operation);
 - feeds PTY output into a headless terminal emulator (@xterm/headless) to maintain screen state while detached;
@@ -59,24 +59,24 @@ No central index file or registry daemon (lock-contention and staleness magnets)
 - Per agent: `$PICTL_DIR/<agent-id>/` containing:
   - `agent.json` — see authority split below;
   - `pi.sock` — pi's RPC socket;
-  - `tty.sock` — the holder's attach socket.
+  - `tty.sock` — the daemon's attach socket.
 - `agent.json` authority split:
-  - Authoritative for holder-owned facts the socket cannot provide: holder pid, pi pid, cwd, the pi binary path and spawn args used (needed for revival), created-at.
-  - Session facts (current session file, model, streaming state) are queried live over `pi.sock` whenever the agent is running. `agent.json` additionally records `sessions` — the history of session files this agent has hosted, most recent last. The holder maintains it by connecting to its own `pi.sock` as a client and appending on the `session_changed` event, which every connection receives once immediately after `hello` (describing the current session) and thereafter whenever the session is replaced (`/new`, `/resume`, `switch_session`) — one code path covers startup and replacement. This event was added to pi's tee mode specifically for this: responses to `new_session`/`switch_session` go only to the issuing connection, TUI-initiated switches are otherwise invisible to socket clients, and polling `get_state` per broadcast event is a non-starter (events fire per streamed token). This history enables dormant-agent revival and agent↔session mapping.
+  - Authoritative for daemon-owned facts the socket cannot provide: daemon pid, pi pid, cwd, the pi binary path and spawn args used (needed for revival), created-at.
+  - Session facts (current session file, model, streaming state) are queried live over `pi.sock` whenever the agent is running. `agent.json` additionally records `sessions` — the history of session files this agent has hosted, most recent last. The daemon maintains it by connecting to its own `pi.sock` as a client and appending on the `session_changed` event, which every connection receives once immediately after `hello` (describing the current session) and thereafter whenever the session is replaced (`/new`, `/resume`, `switch_session`) — one code path covers startup and replacement. This event was added to pi's tee mode specifically for this: responses to `new_session`/`switch_session` go only to the issuing connection, TUI-initiated switches are otherwise invisible to socket clients, and polling `get_state` per broadcast event is a non-starter (events fire per streamed token). This history enables dormant-agent revival and agent↔session mapping.
   - `sessions` entry semantics: each entry is `{sessionFile, sessionId}`. pi defers writing a new session file until the first assistant message, so a `session_changed` event may announce a path that does not exist on disk yet; entries are recorded regardless, and consumers that need the file check existence themselves. (An earlier design tracked a `confirmed` flag predicting file existence; the disk is ground truth, so checking it directly where it matters made the flag dead weight, and it was removed.) The history is duplicate-free: re-announcing a known session id moves its entry to the end (most recent). The event's `sessionFile` is also optional (pi can run without session persistence); in-memory sessions never enter the history. Revival resumes the most recent entry whose file exists on disk and starts fresh if no entry's file exists.
-  - Single-writer rule: only the holder writes `agent.json`; CLI commands treat it as read-only.
+  - Single-writer rule: only the daemon writes `agent.json`; CLI commands treat it as read-only.
 - Agent ids are random uuids, deliberately independent of pi session ids. They cannot _be_ session ids because agent ≠ session: one agent hosts many sessions over its lifetime (`/new`, `/resume`, `switch_session` replace the session while the sockets survive), and the agent directory must exist before pi starts — i.e. before any session id exists.
 - Name resolution: any unique prefix of an agent id addresses it (tmux/docker style). Session ids work as a secondary resolver: pictl can map a session id or prefix to the agent that hosts (or last hosted) it, and list an agent's session history, via the `sessions` histories in `agent.json`.
-- `pictl list` = readdir + per-agent probe (holder pid alive, then `get_state` over `pi.sock`). Statuses: running (idle/streaming), dormant, tombstoned — see "Agents outlive processes" below.
+- `pictl list` = readdir + per-agent probe (daemon pid alive, then `get_state` over `pi.sock`). Statuses: running (idle/streaming), dormant, tombstoned — see "Agents outlive processes" below.
 - Working directories are tracked in `agent.json`: agents default to the spawner's cwd, but workflows may spawn agents into worktrees, so cwd is per-agent data, not an assumption.
 
 ## Agents outlive processes
 
-An agent is its directory plus its session lineage; the holder/pi process is ephemeral. There is no reason to keep an idle agent's process running.
+An agent is its directory plus its session lineage; the daemon/pi process is ephemeral. There is no reason to keep an idle agent's process running.
 
-- **Dormant**: directory present, no holder process. Not an error state. Any pictl command that needs the socket (prompt, attach, wait, ...) transparently revives the agent first: a new holder is started from the pi binary, spawn args, and cwd recorded in `agent.json`, resuming the most recent session in the `sessions` history. `pictl resume <agent>` revives explicitly; `list`/`status` report dormancy without reviving.
-- **Suspended on purpose**: `pictl suspend <agent>` gracefully stops the process (same quiescence rules as `kill`) but keeps the directory — the agent goes dormant. Holders may additionally auto-suspend after a configurable idle period (optional; not required for v1).
-- **Killed**: `pictl kill` is the only way an agent ceases to exist — graceful shutdown, tombstone marker written, directory removed. Consequently `pictl gc` does NOT reap crashed agents (a dead holder just means dormant); it only removes tombstoned directories left by interrupted kills and unreadably corrupt ones.
+- **Dormant**: directory present, no daemon process. Not an error state. Any pictl command that needs the socket (prompt, attach, wait, ...) transparently revives the agent first: a new daemon is started from the pi binary, spawn args, and cwd recorded in `agent.json`, resuming the most recent session in the `sessions` history. `pictl resume <agent>` revives explicitly; `list`/`status` report dormancy without reviving.
+- **Suspended on purpose**: `pictl suspend <agent>` gracefully stops the process (same quiescence rules as `kill`) but keeps the directory — the agent goes dormant. Daemons may additionally auto-suspend after a configurable idle period (optional; not required for v1).
+- **Killed**: `pictl kill` is the only way an agent ceases to exist — graceful shutdown, tombstone marker written, directory removed. Consequently `pictl gc` does NOT reap crashed agents (a dead daemon just means dormant); it only removes tombstoned directories left by interrupted kills and unreadably corrupt ones.
 
 ## Workflows hold references; agents are global
 

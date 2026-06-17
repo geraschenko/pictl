@@ -1,6 +1,6 @@
 /*
  * `pictl list | status` — read-only inspection of the registry. Neither
- * revives dormant agents: a dead holder is not garbage.
+ * revives dormant agents: a dead daemon is not garbage.
  */
 
 import { resolve } from "node:path";
@@ -161,7 +161,7 @@ function formatProbe(probe: AgentProbe): string {
     lines.push(`pi bin:   ${probe.record.piBin}`);
     lines.push(`args:     ${probe.record.spawnArgs.join(" ") || "-"}`);
     lines.push(
-      `holder:   pid ${probe.record.holderPid}${isPidAlive(probe.record.holderPid) ? "" : " (dead)"}`,
+      `daemon:   pid ${probe.record.daemonPid}${isPidAlive(probe.record.daemonPid) ? "" : " (dead)"}`,
     );
     lines.push(
       `pi:       pid ${probe.record.piPid}${isPidAlive(probe.record.piPid) ? "" : " (dead)"}`,

@@ -1,6 +1,6 @@
 /**
  * The agent registry is a directory of agent dirs: $PICTL_DIR/<agentId>/ with
- * agent.json (written only by the holder), pi.sock, tty.sock, holder.log,
+ * agent.json (written only by the daemon), pi.sock, tty.sock, daemon.log,
  * and optionally a tombstone file marking the dir for gc.
  */
 
@@ -27,7 +27,7 @@ export interface AgentRecord {
   tag?: string;
   piBin: string;
   spawnArgs: string[];
-  holderPid: number;
+  daemonPid: number;
   piPid: number;
   sessions: SessionHistoryEntry[];
   /**
@@ -65,7 +65,7 @@ export function tombstonePath(agentDir: string): string {
 /**
  * Marks an agent as archived: a dormant agent the user is done with, hidden
  * from `list` by default but kept and revivable. A marker file (not a field in
- * holder-owned agent.json) so the CLI can set it without racing the holder.
+ * daemon-owned agent.json) so the CLI can set it without racing the daemon.
  */
 export function archivedPath(agentDir: string): string {
   return join(agentDir, "archived");
@@ -76,9 +76,8 @@ export function reviveLockPath(agentDir: string): string {
   return join(agentDir, "revive.lock");
 }
 
-// TODO: rename to daemonLogPath and make it daemon.log
-export function holderLogPath(agentDir: string): string {
-  return join(agentDir, "holder.log");
+export function daemonLogPath(agentDir: string): string {
+  return join(agentDir, "daemon.log");
 }
 
 export type AgentRecordReadResult =
@@ -100,7 +99,12 @@ export async function readAgentRecord(
   }
   try {
     const record = JSON.parse(raw) as AgentRecord;
-    if (typeof record.id !== "string" || !Array.isArray(record.sessions)) {
+    if (
+      typeof record.id !== "string" ||
+      typeof record.daemonPid !== "number" ||
+      typeof record.piPid !== "number" ||
+      !Array.isArray(record.sessions)
+    ) {
       return { kind: "corrupt", error: "agent.json missing required fields" };
     }
     record.agentDir = agentDir;
@@ -194,8 +198,8 @@ export function isPidAlive(pid: number): boolean {
 }
 
 /**
- * The agent's status as far as on-disk markers and the holder pid can tell —
- * no socket involved. A live holder is reported as `running`; distinguishing
+ * The agent's status as far as on-disk markers and the daemon pid can tell —
+ * no socket involved. A live daemon is reported as `running`; distinguishing
  * idle/streaming/unreachable needs an RPC probe (inspect.probeAgent builds on
  * this). gc only needs the socket-free verdict, so it uses this directly.
  */
@@ -221,7 +225,7 @@ export async function classifyAgentDir(
     };
   }
   const record = read.record;
-  if (!isPidAlive(record.holderPid)) {
+  if (!isPidAlive(record.daemonPid)) {
     return (await fileExists(archivedPath(agentDir)))
       ? { kind: "archived", record }
       : { kind: "dormant", record };

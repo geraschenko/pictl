@@ -21,7 +21,7 @@ async function writeAgent(agentId: string): Promise<void> {
     cwd: "/tmp",
     piBin: "pi",
     spawnArgs: [],
-    holderPid: 1,
+    daemonPid: 1,
     piPid: 1,
     sessions: [],
     agentDir,

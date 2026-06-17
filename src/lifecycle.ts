@@ -30,7 +30,7 @@ import {
   agentDirPath,
   archivedPath,
   classifyAgentDir,
-  holderLogPath,
+  daemonLogPath,
   isPidAlive,
   listAgentIds,
   loadAgent,
@@ -59,8 +59,8 @@ async function setArchived(agentDir: string, archived: boolean): Promise<void> {
 
 /**
  * Revive `agent` via launchDaemon, serialized through an O_EXCL lock file.
- * Two concurrent revivals of the same agent must not both launch holders: the
- * second holder's stale-socket cleanup would delete the first's live pi.sock.
+ * Two concurrent revivals of the same agent must not both launch daemons: the
+ * second daemon's stale-socket cleanup would delete the first's live pi.sock.
  * The loser waits for the winner instead of spawning. launchDaemon returns
  * only once pi.sock is up, so holding the lock across it is the readiness
  * barrier. As with waitPidGone, there is no cross-process event channel for
@@ -81,7 +81,7 @@ async function reviveAgent(agent: AgentRecord): Promise<AgentRecord> {
     // Re-read under the lock: another process may have completed a revival
     // between our dormancy check and the lock acquisition.
     agent = await loadAgent(agent.id);
-    if (isPidAlive(agent.holderPid)) {
+    if (isPidAlive(agent.daemonPid)) {
       return agent;
     }
     process.stderr.write(`pictl: reviving dormant agent ${agent.id}\n`);
@@ -117,10 +117,10 @@ async function awaitConcurrentRevival(
       }
       throw error;
     }
-    const lockHolderPid = Number(lockContent.trim());
-    if (lockHolderPid > 0 && !isPidAlive(lockHolderPid)) {
+    const lockProcessPid = Number(lockContent.trim());
+    if (lockProcessPid > 0 && !isPidAlive(lockProcessPid)) {
       throw new Error(
-        `stale revival lock for '${agent.id}' (process ${lockHolderPid} is gone); remove ${lockPath} and retry`,
+        `stale revival lock for '${agent.id}' (process ${lockProcessPid} is gone); remove ${lockPath} and retry`,
       );
     }
     if (Date.now() > deadline) {
@@ -131,9 +131,9 @@ async function awaitConcurrentRevival(
     await new Promise((resolve) => setTimeout(resolve, REVIVAL_LOCK_POLL_MS));
   }
   agent = await loadAgent(agent.id);
-  if (!isPidAlive(agent.holderPid)) {
+  if (!isPidAlive(agent.daemonPid)) {
     throw new Error(
-      `concurrent revival of '${agent.id}' failed; see ${holderLogPath(agent.agentDir)}`,
+      `concurrent revival of '${agent.id}' failed; see ${daemonLogPath(agent.agentDir)}`,
     );
   }
   return agent;
@@ -147,7 +147,7 @@ export async function ensureAgentRunning(
   agentIdPrefix: string,
 ): Promise<AgentRecord> {
   const agent = await loadAgent(agentIdPrefix);
-  if (isPidAlive(agent.holderPid)) {
+  if (isPidAlive(agent.daemonPid)) {
     return agent;
   }
   return await reviveAgent(agent);
@@ -305,7 +305,7 @@ async function forEachAgent(
   }
 }
 
-/** The idle-wait → SIGTERM → escalate → holder-gone sequence shared by purge and suspend. */
+/** The idle-wait → SIGTERM → escalate → daemon-gone sequence shared by purge and suspend. */
 async function stopRunningAgent(
   agent: AgentRecord,
   timeoutMs: number | undefined,
@@ -324,7 +324,7 @@ async function stopRunningAgent(
   } finally {
     client.close();
   }
-  await waitPidGone(agent.holderPid, PROCESS_EXIT_DEADLINE_MS);
+  await waitPidGone(agent.daemonPid, PROCESS_EXIT_DEADLINE_MS);
 }
 
 async function purgeOne(
@@ -336,17 +336,17 @@ async function purgeOne(
 ): Promise<void> {
   if (force) {
     killSilently(agent.piPid, "SIGKILL");
-    killSilently(agent.holderPid, "SIGKILL");
+    killSilently(agent.daemonPid, "SIGKILL");
     await Promise.all([
       waitPidGone(agent.piPid, PROCESS_EXIT_DEADLINE_MS),
-      waitPidGone(agent.holderPid, PROCESS_EXIT_DEADLINE_MS),
+      waitPidGone(agent.daemonPid, PROCESS_EXIT_DEADLINE_MS),
     ]);
     await rm(agent.agentDir, { recursive: true, force: true });
     write(`purged ${agent.id} (forced)\n`);
     return;
   }
 
-  if (isPidAlive(agent.holderPid)) {
+  if (isPidAlive(agent.daemonPid)) {
     try {
       await stopRunningAgent(agent, timeoutMs, now);
     } catch (error) {
@@ -391,7 +391,7 @@ async function suspend(
   const timeoutMs =
     flags.timeout === undefined ? undefined : flags.timeout * 1000;
   await forEachAgent(multiTargets(this), async (agent) => {
-    if (!isPidAlive(agent.holderPid)) {
+    if (!isPidAlive(agent.daemonPid)) {
       this.process.stdout.write(`${agent.id} is already dormant\n`);
       return;
     }
@@ -427,7 +427,7 @@ async function archive(
   const timeoutMs =
     flags.timeout === undefined ? undefined : flags.timeout * 1000;
   await forEachAgent(multiTargets(this), async (agent) => {
-    if (isPidAlive(agent.holderPid)) {
+    if (isPidAlive(agent.daemonPid)) {
       try {
         await stopRunningAgent(agent, timeoutMs, false);
       } catch (error) {
@@ -454,7 +454,7 @@ const archiveCommand = commandMultiTarget<TimeoutFlags>({
 async function resume(this: CommandContext): Promise<void> {
   await forEachAgent(multiTargets(this), async (agent) => {
     await setArchived(agent.agentDir, false);
-    if (isPidAlive(agent.holderPid)) {
+    if (isPidAlive(agent.daemonPid)) {
       this.process.stdout.write(`${agent.id} is already running\n`);
       return;
     }

@@ -70,7 +70,7 @@ async function withRegistry<T>(fn: (dir: string) => Promise<T>): Promise<T> {
         cwd: "/tmp",
         piBin: "/bin/true",
         spawnArgs: [],
-        holderPid: 99999999,
+        daemonPid: 99999999,
         piPid: 99999998,
         sessions: [],
       }),

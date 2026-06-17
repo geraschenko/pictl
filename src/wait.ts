@@ -164,7 +164,7 @@ export async function wait(
   flags: WaitFlags,
 ): Promise<void> {
   const agent = oneTarget(this);
-  if (!isPidAlive(agent.holderPid)) {
+  if (!isPidAlive(agent.daemonPid)) {
     // Dormant/archived: the process is doing nothing, so the condition is
     // already met. Don't revive — a revived agent is guaranteed idle anyway.
     return;

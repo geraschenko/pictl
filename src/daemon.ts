@@ -30,7 +30,7 @@ import {
 } from "./cli.ts";
 import {
   type AgentRecord,
-  holderLogPath,
+  daemonLogPath,
   piSocketPath,
   readAgentRecord,
   type SessionHistoryEntry,
@@ -72,7 +72,7 @@ function signalReady(
     writeSync(readyFd, `${JSON.stringify(message)}\n`);
     closeSync(readyFd);
   } catch {
-    // Spawner already gone; the holder runs on regardless.
+    // Spawner already gone; the daemon runs on regardless.
   }
 }
 
@@ -209,13 +209,13 @@ async function daemon(
       `pi would block on the project-trust prompt in ${args.cwd}; ` +
       `pass --[no-]approve (pictl spawn -- --approve) or trust/distrust ` +
       `the directory once interactively by running pi there.`;
-    proc.stderr.write(`[holder] ${message}\n`);
+    proc.stderr.write(`[daemon] ${message}\n`);
     signalReady(args.readyFd, { ok: false, error: message });
     return;
   }
 
   // A SIGKILLed predecessor leaves stale socket files behind, and pi refuses
-  // to bind an existing path. Launchers guarantee no live holder for this dir.
+  // to bind an existing path. Launchers guarantee no live daemon for this dir.
   await Promise.all([
     rm(piSocketPath(agentDir), { force: true }),
     rm(ttySocketPath(agentDir), { force: true }),
@@ -284,7 +284,7 @@ async function daemon(
     ...(tag !== undefined && { tag }),
     piBin: args.piBin,
     spawnArgs: args.piArgs,
-    holderPid: proc.pid,
+    daemonPid: proc.pid,
     piPid: piProcess.pid,
     sessions,
     agentDir,
@@ -322,13 +322,13 @@ async function daemon(
   };
 
   piProcess.onExit(({ exitCode }) => {
-    proc.stdout.write(`[holder] pi exited with code ${exitCode}\n`);
+    proc.stdout.write(`[daemon] pi exited with code ${exitCode}\n`);
     cleanupAndExit(exitCode);
   });
-  // Any termination request to the holder means "shut the agent down":
+  // Any termination request to the daemon means "shut the agent down":
   // forward as SIGTERM so pi exits cleanly. Forwarding SIGINT verbatim would
   // be wrong — interactive pi treats it as "abort the current turn" and
-  // keeps running, leaving a holder that was asked to die still alive.
+  // keeps running, leaving a daemon that was asked to die still alive.
   proc.on("SIGTERM", () => piProcess.kill("SIGTERM"));
   proc.on("SIGINT", () => piProcess.kill("SIGTERM"));
 
@@ -365,8 +365,8 @@ async function daemon(
   } catch (error) {
     const message =
       `could not connect to pi socket: ${String(error)} ` +
-      `(log: ${holderLogPath(agentDir)})`;
-    proc.stderr.write(`[holder] ${message}\n`);
+      `(log: ${daemonLogPath(agentDir)})`;
+    proc.stderr.write(`[daemon] ${message}\n`);
     signalReady(args.readyFd, { ok: false, error: message });
     piProcess.kill("SIGKILL");
     cleanupAndExit(1);
