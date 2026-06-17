@@ -11,7 +11,7 @@ This spec replaces the completion-only prompt behavior with a shared append-only
 ## Goals
 
 - `pictl prompt` streams by default after the prompt is accepted.
-- `pictl prompt --detach` sends the prompt and returns as soon as the prompt is accepted.
+- `pictl prompt --type detach` sends the prompt and returns as soon as the prompt is accepted.
 - `pictl tail` streams messages by default, matching `prompt`.
 - `pictl tail` and `pictl prompt` use the same append-only message/raw-event filter-map in message mode.
 - Entry-level output remains exact and uses `get_entries` because raw RPC events do not contain entry ids.
@@ -21,12 +21,18 @@ This spec replaces the completion-only prompt behavior with a shared append-only
 
 ## Output type
 
-Streaming commands support a shared output selector:
+`prompt` and `tail` support a shared `--type` selector for streaming output:
 
 ```bash
 --type messages
 --type entries
 --type raw
+```
+
+`prompt` additionally supports:
+
+```bash
+--type detach
 ```
 
 `--type messages` is the default. There is no separate `--messages` flag.
@@ -53,7 +59,7 @@ Semantics:
 Detached prompt behavior:
 
 ```bash
-pictl prompt --target worker "Investigate the failing test" --detach
+pictl prompt --target worker "Investigate the failing test" --type detach
 ```
 
 Semantics:
@@ -121,11 +127,11 @@ Raw output streams current RPC socket records directly.
 
 `-n` is not supported with `--type raw` because past socket records cannot be accessed.
 
-`tail --type raw` has no historical backlog. If no stop condition is supplied, it behaves like `--until never` and streams future socket records until interrupted.
+`tail --type raw` has no historical backlog. If no stop condition is supplied, it behaves like `--until killed` and streams future socket records until interrupted.
 
 ## Cursor semantics
 
-Streaming commands emit a single final cursor after the stop condition is met, except detached prompt mode and never-ending streams interrupted externally.
+Streaming commands emit a single final cursor after the stop condition is met, except `prompt --type detach` and indefinitely-following streams interrupted externally.
 
 The final cursor is based on a final `get_entries` call and must be suitable for later use with:
 
@@ -148,14 +154,14 @@ Supported stop controls include:
 ```bash
 pictl prompt --target worker "..." --until no-activity:10 --timeout 120
 pictl tail --target worker --until no-activity:10 --timeout 120
-pictl tail --target worker --until never
+pictl tail --target worker --until killed
 pictl tail --target worker --follow
 pictl tail --target worker -f
 ```
 
-`--until never` means stream indefinitely until interrupted or until the target/socket fails.
+`--until killed` means stream indefinitely until interrupted or until the target/socket fails.
 
-`--follow` and `-f` are equivalent syntactic sugar for `--until never`. Stricli flag aliases cannot directly mean “this other flag with this fixed value”; Stricli aliases are alternate single-character names for an existing flag. Implement follow mode as its own boolean flag exposed as `--follow` with alias `-f`, then normalize it to `until: "never"` in command logic. Supplying both `--follow`/`-f` and `--until` is a usage error.
+`--follow` and `-f` are equivalent syntactic sugar for `--until killed`. Stricli flag aliases cannot directly mean “this other flag with this fixed value”; Stricli aliases are alternate single-character names for an existing flag. Implement follow mode as its own boolean flag exposed as `--follow` with alias `-f`, then normalize it to `until: "killed"` in command logic. Supplying both `--follow`/`-f` and `--until` is a usage error.
 
 Default `prompt` stop condition is normal prompt/run completion.
 
@@ -163,7 +169,7 @@ Default `tail` behavior depends on output type:
 
 - `messages`: emit available bounded output, then exit;
 - `entries`: emit available bounded entries, then exit;
-- `raw`: stream future records indefinitely, equivalent to `--until never`, because raw historical records are unavailable.
+- `raw`: stream future records indefinitely, equivalent to `--until killed`, because raw historical records are unavailable.
 
 No-activity timers and timeouts are driven by the selected stream pipeline:
 
@@ -186,7 +192,7 @@ pictl tail --target worker --type entries -n 100
 - entry mode: entries;
 - raw mode: unsupported.
 
-With `--until never`, `--follow`, or `-f`, `-n` uses conventional `tail -f` behavior: emit the last `n` available output units, then continue following.
+With `--until killed`, `--follow`, or `-f`, `-n` uses conventional `tail -f` behavior: emit the last `n` available output units, then continue following.
 
 ## JSONL output
 
@@ -213,7 +219,7 @@ pictl prompt --target worker "Investigate the failing test"
 Prompt and return immediately after acceptance:
 
 ```bash
-pictl prompt --target worker "Investigate the failing test" --detach
+pictl prompt --target worker "Investigate the failing test" --type detach
 ```
 
 Prompt and stream entries until no activity for 10 seconds or 120 seconds pass, whichever comes first:
@@ -263,9 +269,210 @@ pictl tail --target worker --type raw -n 20 # usage error
 
 ## Type Design
 
-Not yet specified.
+Implementation should add a new streaming module and update `wait.ts`, `tail.ts`, and `rpc-commands.ts` to use these types. The first implementation step must be making this type structure compile with stubs before filling in behavior.
 
-Implementation must not begin until the Type Design is added and approved. The implementation is expected to add or modify command options, stream pipeline types, formatter records, stop-condition handling, and cursor records; those symbols require an explicit type-design pass before code changes.
+```ts
+// src/streaming.ts
+
+import type { AgentMessage, RpcCommand, RpcResponse } from "@geraschenko/pi-coding-agent";
+import type { CommandContext } from "./cli.ts";
+import type { PiSocketClient, SocketEvent } from "./rpc.ts";
+import type { WaitCondition } from "./wait.ts";
+
+export const STREAM_OUTPUT_TYPES = ["messages", "entries", "raw"] as const;
+export type StreamOutputType = (typeof STREAM_OUTPUT_TYPES)[number];
+
+export const PROMPT_TYPES = ["messages", "entries", "raw", "detach"] as const;
+export type PromptType = (typeof PROMPT_TYPES)[number];
+
+export type StreamUntil =
+  | WaitCondition
+  | { kind: "killed" }
+  | { kind: "prompt-complete" };
+
+export interface StreamCursorRecord {
+  type: "pictl_cursor";
+  sessionId: string | null;
+  entryId: string | null;
+}
+
+export interface StreamMessageRecord {
+  type: "message";
+  message: AgentMessage;
+}
+
+export type StreamControlKind =
+  | "compaction"
+  | "tree_navigated"
+  | "session_changed"
+  | "queue_update";
+
+export interface StreamControlRecord {
+  type: "control";
+  control: {
+    kind: StreamControlKind;
+    event: SocketEvent;
+  };
+}
+
+export type MessageStreamRecord =
+  | StreamMessageRecord
+  | StreamControlRecord
+  | StreamCursorRecord;
+
+export type EntryStreamRecord =
+  | Extract<
+      RpcResponse,
+      { command: "get_entries"; success: true }
+    >["data"]["entries"][number]
+  | StreamCursorRecord;
+
+export type RawStreamRecord = SocketEvent;
+
+export interface StreamOptions {
+  outputType: StreamOutputType;
+  since: string | undefined;
+  limit: number | undefined;
+  until: StreamUntil | undefined;
+  timeoutMs: number | undefined;
+}
+
+export interface PromptStreamOptions {
+  type: PromptType;
+  until: StreamUntil;
+  timeoutMs: number | undefined;
+  message: string;
+  images: Extract<RpcCommand, { type: "prompt" }>["images"] | undefined;
+  streamingBehavior: "steer" | "followUp" | undefined;
+}
+
+export interface TailStreamOptions extends StreamOptions {}
+
+export interface JsonlWriter {
+  writeRecord(record: unknown): void;
+}
+
+export function parseStreamOutputType(input: string): StreamOutputType;
+
+export function parsePromptType(input: string): PromptType;
+
+export function parseStreamUntil(input: string): StreamUntil;
+
+export function normalizeFollowUntil(input: {
+  follow: boolean;
+  until: StreamUntil | undefined;
+}): StreamUntil | undefined;
+
+export async function writeFinalCursor(
+  client: PiSocketClient,
+  writer: JsonlWriter,
+): Promise<StreamCursorRecord>;
+
+export async function streamPrompt(
+  context: CommandContext,
+  options: PromptStreamOptions,
+): Promise<void>;
+
+export async function streamTail(
+  context: CommandContext,
+  options: TailStreamOptions,
+): Promise<void>;
+```
+
+`wait.ts` keeps `WaitCondition` focused on finite wait conditions used by `pictl wait`:
+
+```ts
+export type WaitCondition =
+  | { kind: "turn-end" }
+  | { kind: "idle" }
+  | { kind: "no-activity"; idleMs: number };
+
+export function parseWaitCondition(value: string): WaitCondition;
+
+export async function applyWaitCondition(
+  client: PiSocketClient,
+  condition: WaitCondition,
+  timeoutMs: number | undefined,
+): Promise<void>;
+```
+
+`parseStreamUntil` accepts the finite `WaitCondition` vocabulary plus `killed`:
+
+```ts
+parseStreamUntil("turn-end");       // { kind: "turn-end" }
+parseStreamUntil("idle");           // { kind: "idle" }
+parseStreamUntil("no-activity:10"); // { kind: "no-activity", idleMs: 10000 }
+parseStreamUntil("killed");         // { kind: "killed" }
+```
+
+Prompt flags have a prompt-specific type because `detach` is valid only for prompt:
+
+```ts
+interface PromptFlags {
+  readonly type: PromptType; // default "messages"
+  readonly until?: StreamUntil;
+  readonly timeout?: number;
+  readonly streamingBehavior?: "steer" | "follow-up";
+  readonly image: readonly string[];
+}
+```
+
+Tail flags use only streaming output types:
+
+```ts
+interface TailFlags {
+  readonly type: StreamOutputType; // default "messages"
+  readonly since?: string;
+  readonly n?: number;
+  readonly follow: boolean; // --follow / -f
+  readonly until?: StreamUntil;
+  readonly timeout?: number;
+}
+```
+
+Validation rules:
+
+```ts
+// shared
+if (flags.follow && flags.until !== undefined) usageError;
+if (flags.type === "raw" && flags.n !== undefined) usageError;
+
+// prompt
+if (flags.type === "detach" && flags.until !== undefined) usageError;
+if (flags.type === "detach" && flags.timeout !== undefined) usageError;
+if (flags.type === "detach") send prompt and return, no cursor;
+
+// tail
+normalizeFollowUntil({ follow: true, until: undefined });
+// => { kind: "killed" }
+
+normalizeFollowUntil({ follow: false, until: undefined });
+// => undefined for bounded messages/entries;
+// => { kind: "killed" } for raw tail default
+```
+
+Implementation dependency graph:
+
+```text
+prompt command
+  -> messageFrom/imagesFromFlags
+  -> streamPrompt
+     -> send prompt RPC
+     -> selected stream pipeline unless type is detach
+     -> writeFinalCursor for finite streaming modes
+
+tail command
+  -> streamTail
+     -> selected stream pipeline
+     -> writeFinalCursor when finite stop condition completes
+
+streamPrompt/streamTail
+  -> streamMessages | streamEntries | streamRaw
+  -> parseStreamUntil / normalizeFollowUntil
+  -> applyWaitCondition for finite WaitCondition cases
+```
+
+`prompt --type raw` replaces the previous RPC passthrough-style `prompt --raw` behavior. No compatibility shim is required.
 
 # IMPLEMENTATION IDEAS
 
@@ -304,7 +511,7 @@ Because historical events are unavailable, `tail -n` in message mode cannot be i
 1. call `get_messages` for the current snapshot and emit the last `n` messages, then follow append-only events;
 2. call `get_entries`, map entries to append-only-ish message/control records as best as possible, then follow events.
 
-This is an implementation trade-off to resolve during type design. The spec requirement is user-facing: `-n` counts selected output units and then `--until never` / `--follow` / `-f` continues.
+This is an implementation trade-off to resolve during type design. The spec requirement is user-facing: `-n` counts selected output units and then `--until killed` / `--follow` / `-f` continues.
 
 ## Cursor finalization
 
@@ -312,7 +519,7 @@ Final cursor lookup can call `get_entries` without `--since` and use `leafId`, o
 
 ## Stricli handling for `--follow` / `-f`
 
-Stricli supports single-character aliases for flags, but not aliases that expand to a different flag plus a fixed value. Model follow mode as a boolean flag named `follow` with alias `f`, then normalize `{ follow: true, until: undefined }` to `{ until: "never" }`. Reject `{ follow: true, until: ... }` as ambiguous.
+Stricli supports single-character aliases for flags, but not aliases that expand to a different flag plus a fixed value. Model follow mode as a boolean flag named `follow` with alias `f`, then normalize `{ follow: true, until: undefined }` to `{ until: "killed" }`. Reject `{ follow: true, until: ... }` as ambiguous.
 
 ## Compatibility
 
@@ -324,9 +531,9 @@ Removing `--and-wait` and changing default `prompt` behavior is intentionally br
 
 - [x] Archived prior thought document to `docs/thoughts/old/prompt-and-tail.md`.
 - [x] Drafted behavioral spec for prompt/tail streaming.
-- [x] Addressed review comments from `a75df0d`: default message output for `tail`, `--type messages|entries|raw`, no `--events`, `-f` as sugar for `--until never`, and JSONL-only output for this spec.
-- [x] Updated follow semantics so `--follow` and `-f` are equivalent sugar for `--until never`, and either conflicts with explicit `--until`.
-- [ ] Add and approve Type Design before implementation.
+- [x] Addressed review comments from `a75df0d`: default message output for `tail`, `--type messages|entries|raw`, no `--events`, `-f` as sugar for an indefinite stream, and JSONL-only output for this spec.
+- [x] Updated follow semantics so `--follow` and `-f` are equivalent sugar for `--until killed`, and either conflicts with explicit `--until`.
+- [x] Added and approved Type Design before implementation.
 - [ ] Implement shared streaming pipeline.
 - [ ] Update CLI help and docs.
-- [ ] Add tests for prompt default streaming, `--detach`, message/entry/raw modes, final cursor, and `-n` behavior.
+- [ ] Add tests for prompt default streaming, `--type detach`, message/entry/raw modes, final cursor, and `-n` behavior.
