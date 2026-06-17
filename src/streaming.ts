@@ -240,7 +240,8 @@ function startStopWatcher(
       state.notifyWake?.();
     },
     (error: unknown) => {
-      state.stopError = error instanceof Error ? error : new Error(String(error));
+      state.stopError =
+        error instanceof Error ? error : new Error(String(error));
       state.stopRequested = true;
       state.notifyWake?.();
     },
@@ -271,17 +272,16 @@ function createGate(): {
   return { wait, open, fail };
 }
 
-function messageRecordFromEvent(event: SocketEvent): MessageStreamRecord | undefined {
+function messageRecordFromEvent(
+  event: SocketEvent,
+): MessageStreamRecord | undefined {
   if (event.type === "message_end") {
     return {
       type: "message",
       message: (event as unknown as { message: AgentMessage }).message,
     };
   }
-  if (
-    event.type === "compaction_start" ||
-    event.type === "compaction_end"
-  ) {
+  if (event.type === "compaction_start" || event.type === "compaction_end") {
     return { type: "control", control: { kind: "compaction", event } };
   }
   if (event.type === "tree_navigated") {
@@ -334,7 +334,10 @@ async function streamMessages(
   }
 }
 
-function limitedTail<T>(items: readonly T[], limit: number | undefined): readonly T[] {
+function limitedTail<T>(
+  items: readonly T[],
+  limit: number | undefined,
+): readonly T[] {
   return limit === undefined ? items : items.slice(-limit);
 }
 
@@ -455,7 +458,9 @@ async function streamRaw(
   await waitForUntil(client, until, timeoutMs);
 }
 
-async function connectForContext(context: CommandContext): Promise<PiSocketClient> {
+async function connectForContext(
+  context: CommandContext,
+): Promise<PiSocketClient> {
   const agent = await ensureAgentRunning(oneTarget(context).id);
   return await connectWithRetry(
     piSocketPath(agent.agentDir),
@@ -547,7 +552,12 @@ export async function streamTail(
         ? { kind: "killed" as const }
         : options.until;
     if (options.outputType === "messages") {
-      await emitHistoricalMessages(client, writer, options.since, options.limit);
+      await emitHistoricalMessages(
+        client,
+        writer,
+        options.since,
+        options.limit,
+      );
       await streamMessages(client, writer, until, options.timeoutMs);
     } else if (options.outputType === "entries") {
       await streamEntries(
