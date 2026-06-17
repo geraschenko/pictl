@@ -13,6 +13,7 @@ This spec replaces the completion-only prompt behavior with a shared append-only
 - `pictl prompt` streams by default after the prompt is accepted.
 - `pictl prompt --detach` sends the prompt and returns as soon as the prompt is accepted.
 - `pictl tail --messages` and `pictl prompt` use the same append-only message/event filter-map.
+TDC: let's make `tail` stream messages by default, and require --events or --entries for different outputs, so that we match `prompt`.
 - Entry-level output remains exact and uses `get_entries` because raw RPC events do not contain entry ids.
 - Message-level output is shaped exactly like `get_messages` records; message records do not include backing entry ids.
 - Streaming commands emit a single final cursor after the stop condition is met, so callers can resume with `tail --since` even when other actors may also interact with the same agent.
@@ -21,12 +22,13 @@ This spec replaces the completion-only prompt behavior with a shared append-only
 
 Streaming commands support these output levels:
 
-- `--messages` / default: append-only message-shaped activity stream.
+- `--messages` / default: append-only message-shaped activity stream.  TDC: since this is the default, we don't need this flag, right?
 - `--entries`: session entries with real entry ids.
 - `--events`: raw RPC socket events.
-- `--raw`: raw passthrough of the underlying wire records, if distinct from `--events` in the implementation.
+- `--raw`: raw passthrough of the underlying wire records, if distinct from `--events` in the implementation. TDC: actually, let's use --raw instead of --events. It's more consistent with the use of --raw in all the rpc passthrough commands. I'm pretty sure --events and --raw are *not* distinct, but please double check.
 
 Names are final for the spec except that `--messages` may be implicit and need not be shown in common examples.
+TDC: since implicit, the flag need not exist, or if we do keep it, it should be `--type [messages|entries|raw]`. Come to think of it, that's probably better for both prompt and tail.
 
 ## Prompt behavior
 
@@ -140,6 +142,7 @@ Supported stop controls include:
 pictl prompt --target worker "..." --until no-activity:10 --timeout 120
 pictl tail --target worker --follow --until no-activity:10 --timeout 120
 ```
+TDC: it occurs to me that --follow and --until are redundant and should not be used together. We should remove --follow or consider it to be syntactic sugar for `--until never`. Let's add a `never` option to --until. Does stricli allow us to make `-f` an alias for `--until never`?
 
 Default `prompt` stop condition is normal prompt/run completion. `tail` without `--follow` is bounded by available backlog and exits after emitting the requested historical output.
 
@@ -171,6 +174,7 @@ With `--follow`, `-n` uses conventional `tail -f` behavior: emit the last `n` av
 Default output is human-readable.
 
 `--json` produces JSONL records.
+TDC: it occurs to me that the human-readable form is going to be a can of worms (e.g. do you display full tool responses? if not, how do you truncate them? How exactly do you indicate tree changes?), so let's _only_ support jsonl output for now. We can come back to human-readable output in a follow-up spec.
 
 For message mode, JSONL records should distinguish at least:
 
@@ -196,7 +200,7 @@ Prompt and return immediately after acceptance:
 pictl prompt --target worker "Investigate the failing test" --detach
 ```
 
-Prompt and stream entries until no activity:
+Prompt and stream entries until no activity for 10 seconds or 120 seconds pass (whichever comes first):
 
 ```bash
 pictl prompt --target worker "Investigate the failing test" \
