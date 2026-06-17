@@ -16,7 +16,7 @@ The prior parts define the command grammar, typed command modules, inferred flag
 
 `pictl` now has a Stricli route map that knows the command tree, flags, aliases, enum-like values, hidden route metadata, and typed parsed parameters. Users should be able to use shell tab completion backed by that same Stricli command definition rather than maintaining a separate completion table.
 
-The implementation should first add out-of-the-box Stricli completion for command names, nested routes, flags, aliases, enum values, and ordinary parsed/positional structure. After that basic path is proven, implementation must stop for review and planning before adding pictl-specific completion callbacks. Later phases should add `--target` / `-t` agent-id completion and path completion only after agreeing on the helper/API design.
+The implementation should first add out-of-the-box Stricli completion for command names, nested routes, flags, aliases, enum values, and ordinary parsed/positional structure. After that basic path is proven, implementation must stop for review and planning before adding pictl-specific completion callbacks. Later phases should add `--target` / `-t` agent-id completion and explicit choice completions for parsed arguments that have a small known value set.
 
 ## Desired user behavior
 
@@ -77,7 +77,7 @@ This should provide completions for Stricli-owned syntax without a pictl-specifi
 
 Completion must be generated from the real `app` route map. Do not duplicate the command list or flag list in a separate completion registry.
 
-After phase 1, stop implementation and review the observed completion behavior, route visibility, import structure, and command invocation shape. Do not start target-id or path completion until the next-phase type/API design is explicitly discussed and approved.
+After phase 1, stop implementation and review the observed completion behavior, route visibility, import structure, and command invocation shape. Do not start target-id or argument-value completion until the next-phase type/API design is explicitly discussed and approved.
 
 ### Phase 2: target agent-id completion
 
@@ -88,19 +88,29 @@ When the current completion position is a value for `--target` or `-t`, completi
 Filtering behavior:
 
 ```ts
-completeAgentIds("abc") // returns ids where id.startsWith("abc")
-completeAgentIds("")    // returns all known ids
+listAgentIds("abc") // returns ids where id.startsWith("abc")
+listAgentIds("")    // returns all known ids
 ```
 
 The completion callback should only list agent ids. It must not load full `AgentRecord`s, resolve prefixes, revive agents, connect to sockets, or validate whether a completed id is currently running.
 
 The registry API should own prefix filtering rather than forcing completion code to fetch all ids and filter locally. The exact filesystem implementation may still need to scan directory entries, but callers should express the desired prefix through the API.
 
-### Phase 3: path completion for path-like inputs
+Stricli already delegates value completion to the active flag. When completing the value after `--target` or `-t`, Stricli calls the shared target flag's `proposeCompletions(partial)`. Because `listAgentIds(prefix?: string)` is compatible with that callback shape, the shared `targetFlag` can pass `listAgentIds` directly; no wrapper such as `completeAgentIds` is needed.
 
-After target completion, add path completion for flags and positionals whose values are filesystem paths.
+### Phase 3: explicit argument value completion
 
-Use Stricli's per-parameter `proposeCompletions` hook if it is sufficient. If Stricli has no built-in path completer, add a small pictl helper that completes filesystem entries relative to the current working directory.
+After target completion, add explicit completions for positional arguments whose accepted values are a small known set but are not represented as Stricli enum flags.
+
+Known example:
+
+- `set-follow-up-mode <mode>` should complete `all` and `one-at-a-time`.
+
+These are argument completions, not flag completions. Stricli supports the same `proposeCompletions(partial)` hook on positional parameters, so local argument helpers should be able to pass such callbacks through.
+
+### Path completion behavior
+
+Do not add pictl path completion handlers in this spec unless shell-native fallback proves insufficient. With the bash completion installed by `@stricli/auto-complete`, path-like flag values such as `pictl spawn --cwd <tab>` use native shell path completion when Stricli returns no value candidates.
 
 Path-like inputs include at least:
 
@@ -108,9 +118,9 @@ Path-like inputs include at least:
 - `_daemon --agent-dir`, `--cwd`, and `--pi-bin`;
 - RPC path flags such as `prompt --image`, `steer --image`, `follow-up --image`, `new-session --parent-session`, and `export-html --output-path`.
 
-Path completion should not validate command semantics. It only proposes filesystem path strings.
+These path-like parameters should normally have no Stricli `proposeCompletions` callback, preserving shell-native filename fallback.
 
-Before starting phase 2 or phase 3, discuss whether helpers such as `stringFlag`, `parsedFlag`, `variadicStringFlag`, and `stringArg` should accept completion callbacks. Do not retrofit completion callbacks into these helpers without an approved type design.
+Before starting phase 2 or phase 3, helper callback design must be approved. The approved shape is a trailing optional completion callback for helpers such as `stringFlag`, `parsedFlag`, `variadicStringFlag`, `requiredParsedFlag`, and `stringArg`.
 
 ## Stricli completion contract
 
@@ -200,49 +210,64 @@ A temporary circular dependency is acceptable in the first implementation if it 
 
 Do not add an `app` property to `CommandContext` for this spec.
 
-### Target completion callback
+### Parameter completion callbacks
 
-Add a target completion helper in `src/cli.ts` or another shared CLI-adjacent location:
+Add a shared callback type in `src/cli.ts`:
 
 ```ts
-async function completeAgentIds(partial: string): Promise<readonly string[]>;
+type CompletionFn = (
+  partial: string,
+) => readonly string[] | Promise<readonly string[]>;
 ```
 
-It depends on a prefix-aware registry helper:
+The following helper functions should accept a trailing optional completion callback and pass it through as Stricli `proposeCompletions` when provided:
+
+```ts
+stringFlag(brief, placeholder, complete?)
+variadicStringFlag(brief, placeholder, complete?)
+parsedFlag(brief, parse, placeholder, complete?)
+requiredParsedFlag(brief, parse, placeholder, complete?)
+stringArg(brief, placeholder, complete?)
+```
+
+Completion callbacks must not affect the inferred implementation-facing flag types.
+
+### Target completion callback
+
+Make the registry helper prefix-aware:
+
+```ts
+export async function listAgentIds(prefix?: string): Promise<string[]>;
+```
+
+The shared `targetFlag` should include this callback directly:
 
 ```ts
 import { listAgentIds } from "./registry.ts";
 
-export async function listAgentIds(prefix?: string): Promise<string[]>;
-```
-
-The shared `targetFlag` should include this callback:
-
-```ts
 const targetFlag = {
   kind: "parsed",
   parse: String,
   brief: "Target agent id or unique prefix",
-  placeholder: "agent",
+  placeholder: "target",
   optional: true,
-  proposeCompletions: completeAgentIds,
+  proposeCompletions: listAgentIds,
 } as const;
 ```
 
 Do not change command-specific flag types to include target. Target remains shared CLI plumbing.
 
-### Path completion helper
+### Choice argument completion
 
-Add a path completion helper if Stricli does not already provide one:
+For small known positional value sets, use `stringArg`'s optional completion callback. The callback should return already-filtered candidates:
 
 ```ts
-export async function completePath(
-  this: CommandContext,
-  partial: string,
-): Promise<readonly string[]>;
+stringArg("Follow-up mode", "mode", (partial) =>
+  ["all", "one-at-a-time"].filter((value) => value.startsWith(partial)),
+);
 ```
 
-This helper may live in `src/cli.ts` or another shared CLI utility module. It should be attached only to path-like flag and positional parameter definitions.
+Add a shared choices helper only if repeated use justifies it. It is not required for phase 2.
 
 ## Success criteria
 
@@ -256,7 +281,8 @@ This helper may live in `src/cli.ts` or another shared CLI utility module. It sh
 - No separate command/flag completion table is introduced.
 - Out-of-the-box completion works for commands, nested completion routes, hidden routes, flags, aliases, and enum values.
 - Target value completion suggests ids returned by `listAgentIds(prefix)`.
-- Path-like flags and arguments offer filesystem path completions where practical.
+- Small known positional value sets can opt into argument completion through `stringArg(..., complete)`.
+- Path-like flag values continue to use shell-native filesystem completion where practical by not registering Stricli value callbacks.
 - Completion does not execute command implementations, resolve/load targets, revive agents, or connect to sockets.
 - Type checking, linting, build, and tests pass.
 
@@ -290,6 +316,15 @@ pictl completion complete -- pictl status --target ab
 # includes matching agent ids such as abcdef
 # excludes non-matching ids
 ```
+
+Argument value completion tests should cover representative known-value positionals:
+
+```bash
+pictl completion complete -- pictl set-follow-up-mode 
+# includes all and one-at-a-time
+```
+
+Path completion should be smoke-tested manually in bash rather than unit-tested against Stricli, because path fallback is provided by the shell when Stricli returns no candidates.
 
 Trailing-space behavior should be tested because bash completion treats:
 
@@ -341,9 +376,14 @@ Help tests should assert key lines rather than snapshotting full help text.
 - [x] Stop after phase 1 for review and next-phase type/API planning.
   - Phase 1 uses `pictl completion complete -- ...`; the argument escape marker is needed so command-line words beginning with `-` are passed through as completion inputs.
   - Added `src/app.ts` so normal execution and completion import the same app object. `src/completion.ts` imports `app`, so there is a small app/completion cycle; it is limited to the completion function reading `app` only when invoked.
+- [x] Discuss phase-2 helper callback design.
+  - Stricli delegates value completion to the active flag/argument and passes only the current partial value, so `listAgentIds(prefix?: string)` can be attached directly to `targetFlag`.
+  - Use trailing optional completion callback arguments on helpers rather than options objects.
+  - Do not add pictl path completion handlers now; bash native path fallback works for path-like flag values when Stricli returns no value candidates.
+  - `set-follow-up-mode <mode>` is an argument completion case and should use `stringArg(..., complete)`.
 - [ ] Add target-id completion via prefix-aware `listAgentIds(prefix)` after review.
 - [ ] Add tests for target-id completion with isolated registry fixtures after review.
-- [ ] Add path completion for path-like flags and positionals after review.
-- [ ] Add tests for representative path completion behavior after review.
+- [ ] Add argument completion for known-value positionals after review.
+- [ ] Add tests for representative argument value completion after review.
 - [ ] Validate help visibility for completion routes.
 - [ ] Run format, typecheck, lint, build, tests, and CLI smoke checks.
