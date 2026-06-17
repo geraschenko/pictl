@@ -1,10 +1,10 @@
-# Stricli CLI migration, 3 of 3: inferred flag types and boolean presence flags
+# Stricli CLI migration, 3 of 4: inferred flag types and boolean presence flags
 
 # SPEC
 
 ## Status
 
-This document refines the typed command-definition architecture from `docs/specs/stricli-cli-migration-2-of-3.md`. The user-facing grammar and route ownership rules from parts 1 and 2 still apply unless this document explicitly says otherwise.
+This document refines the typed command-definition architecture from `docs/specs/stricli-cli-migration-2-of-4.md`. The user-facing grammar and route ownership rules from parts 1 and 2 still apply unless this document explicitly says otherwise.
 
 This pass is intentionally small. It does not redesign route metadata, `common` handling, target resolution, or command-builder inference.
 
@@ -272,7 +272,7 @@ const promptFlags = {
 
 **Instructions**: Update this section during each work session. Add new tasks, mark completed ones with [x], document decisions and problems encountered.
 
-- [x] Created spec file and renamed earlier migration specs from `of-2` to `of-3`.
+- [x] Created the part-3 spec file and later renamed the series to `of-4` for the completion spec.
 - [x] Implemented typed flag helpers in `src/cli.ts`, including comments explaining the phantom-type based `InferFlags` machinery.
 - [x] Added required parsed/string flag helpers after discovering `_daemon` and `wait` need required command flags.
 - [x] Migrated command modules to infer implementation flag types from flag-spec values.
