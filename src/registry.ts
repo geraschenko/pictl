@@ -76,6 +76,7 @@ export function reviveLockPath(agentDir: string): string {
   return join(agentDir, "revive.lock");
 }
 
+// TODO: rename to daemonLogPath and make it daemon.log
 export function holderLogPath(agentDir: string): string {
   return join(agentDir, "holder.log");
 }
