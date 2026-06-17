@@ -61,25 +61,11 @@ The core protocol boundary is the split between `pi.sock` and `tty.sock`.
 
 ### `pi.sock`: semantic pi RPC
 
-`pi.sock` is created and owned by pi. It is enabled by the pi-side `--rpc-socket` modification.
-TDC: link to other document here
+`pi.sock` is created and owned by pi. It is enabled by the pi-side `--rpc-socket` modification; see [`pi-modifications.md`](pi-modifications.md) for the pi-side changes.
 
-It is essentially pi's normal RPC protocol over a Unix domain socket, with an initial hello record describing the socket protocol. After that, clients send JSONL RPC commands and receive responses. Broadcast events let connected clients observe activity.
-TDC: "hello record describing the socket protocol" ... that's an odd phrase. I guess the hello record specifies a version number, but doesn't really describe the protocol. The protocol is meant to be exactly pi's rpc protocol, aside from the hello record.
+The protocol is intended to be pi's normal RPC protocol over a Unix domain socket, with one socket-specific prelude: a hello record with protocol/version information. After that, clients send the usual pi RPC commands as JSONL.
 
-TDC: I think the rest of this subsection should be removed, since this is just describing pi's rpc protocol. In the pi-modifications document, we should describe how rpc responses are only sent to the client that sent the request, and other events are broadcast to all clients connected to the socket. I think that's the only behavior that requires elaboration over what pi already provides.
-This socket is for semantic operations:
-
-- prompt;
-- steer;
-- follow up;
-- abort;
-- inspect state;
-- change model/settings;
-- inspect session entries or trees;
-- switch/fork/clone sessions.
-
-pictl's RPC subcommands are CLI wrappers around this socket. Other clients may also talk to it directly.
+This document does not re-document the pi RPC command surface. The working source reference is [`rpc-types.ts`](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/src/modes/rpc/rpc-types.ts). The pictl-specific architectural point is that `pi.sock` is for semantic operations, not terminal rendering.
 
 ### `tty.sock`: terminal attach
 
@@ -94,7 +80,8 @@ The daemon therefore exposes a separate framed protocol on `tty.sock` for:
 - user input;
 - terminal resize messages;
 - daemon-exit notification.
-TDC: point to src/tty-protocol.ts as the working definition of the tty protocol.
+
+The working definition of this protocol is [`src/tty-protocol.ts`](../src/tty-protocol.ts).
 
 This separation is intentional. `pi.sock` is for meaning; `tty.sock` is for terminal bytes. Keeping them separate avoids forcing pi to know about remote terminal attach, and avoids overloading the RPC protocol with high-volume TTY data.
 
@@ -102,12 +89,14 @@ This separation is intentional. `pi.sock` is for meaning; `tty.sock` is for term
 
 The intention is that `pi.sock` and `tty.sock` are the stable integration points.
 
-The project is still early, so details may change, but the architectural direction is that clients should be able to build on these sockets directly. Examples:
+The project is still early, so details may change, but the architectural direction is:
 
-- Rust terminal applications may need native `tty.sock` support to attach to a pictl agent.
-- TypeScript, Python, Bash, or Rust workflows may choose either to shell out to pictl or speak `pi.sock` directly. TDC: I'm guessing they'll shell out to pictl for this. Is there any benefit to speaking to the socket directly? pictl is meant to expose the full interface of the socket through its commands, with the benefit of centralizing the logic for spawning the daemon, managing the registry, and doing the dance of converting event streams to message streams and implementing various stop conditions. It's possible that pictl itself might be reimplemented for performance or portability or something, but it's probably best for other languages to build on it. As far as pi.sock is concerned, I expect SDKs for other languages will simply be convenience wrappers of pictl to get the native feel of the language. For tty.sock, it seems more plausible that the SDKs will want to speak directly to the socket. Is there some way they could faithfully interact with a bidirectional stream of terminal bytes by shelling out to `pictl attach`?
-- Scripts that do not need terminal rendering can use pictl as a shell SDK over `pi.sock`.
-- Clients that need terminal rendering must speak `tty.sock` or use `pictl attach`.
+- for semantic control over agents, prefer `pictl` as the shell SDK over `pi.sock`;
+- for terminal attach, clients that need native terminal integration should speak `tty.sock` directly.
+
+The distinction matters. pictl is meant to expose the full useful interface of `pi.sock` while centralizing registry lookup, daemon spawning, dormant-agent revival, conversion from events to durable session-entry streams, and wait/stop-condition logic. Other language SDKs for semantic agent control may simply wrap pictl to get a native feel in that language.
+
+By contrast, a rich terminal client cannot faithfully treat `pictl attach` as a reusable bidirectional byte-stream API. `pictl attach` assumes it owns a real local TTY: it switches raw mode, renders to stdout, handles resize signals, implements a detach key, restores terminal state, and exits the process on completion. A client could spawn it inside a PTY, but that is controlling another terminal frontend, not speaking the attach protocol. Native terminal clients should use `tty.sock`.
 
 ## `PICTL_DIR` as the registry
 
@@ -127,14 +116,16 @@ $PICTL_DIR/
 
 There is no central registry daemon and no central index file. Commands discover agents by reading directories and probing processes or sockets.
 
-`agent.json` is daemon-owned metadata. Its exact schema is not important for this document and is expected to evolve. The important invariants are:
+`agent.json` is daemon-owned metadata. Its exact schema is not important for this document and is expected to evolve; the working source reference is [`src/registry.ts`](../src/registry.ts). The important invariants are:
 
 - the daemon is the only writer;
-- CLI commands treat it as metadata, not as a coordination database;
-TDC: what's a "coordination database"?
+- CLI commands do not use `agent.json` for locking or multi-process coordination;
 - it records enough information to inspect, suspend, revive, and otherwise interact with the agent, including the pids of the daemon and pi processes;
-- it records session history observed from pi so a dormant agent can resume a useful session. TDC: note that the actuall recording of sessions is pi's job, not ours. agent.json records what pi session is associated to a given agent, but not the actual session messages.
-TDC: note that a single run of the pi binary can be associated with multiple pi sessions (e.g. with /new or /fork), so agent ids are different from session ids.
+- it records which pi sessions have been associated with this pictl agent, so a dormant agent can resume a useful session.
+
+The actual session contents are pi's responsibility, not pictl's. `agent.json` records the association between a pictl agent and pi session files/ids; it does not record session messages.
+
+Agent ids are also distinct from pi session ids. A single run of the pi binary can be associated with multiple pi sessions, for example after `/new`, `/resume`, `/fork`, or `/clone`. The pictl agent id names the long-lived controllable agent slot; pi session ids name conversation/session state within pi.
 
 Marker files such as archive or tombstone markers represent CLI-owned lifecycle state that should not race with daemon ownership of `agent.json`.
 
@@ -163,7 +154,7 @@ That means:
 - scripts can shell out to it;
 - agents can learn it as a tool;
 - richer SDKs can be layered on top later;
-- direct socket clients can bypass it when they need lower-level access.
+- direct `tty.sock` clients can bypass it when they need native terminal integration.
 
 The design goal is that anything a human can do by hand should have a corresponding scriptable operation, without making the underlying agent less interactive or less attachable.
 
@@ -171,9 +162,9 @@ The design goal is that anything a human can do by hand should have a correspond
 
 This document should eventually link to more specific references rather than contain every detail itself:
 
-- exact `tty.sock` frame protocol; TDC: reference src/tty-protocol.ts
-- exact `agent.json` schema; TDC: reference src/registry.ts
-- pi RPC command reference; TDC: reference https://github.com/earendil-works/pi/blob/main/packages/coding-agent/src/modes/rpc/rpc-types.ts
-- session-entry cursor semantics; TDC: nothing to reference here. This is just relying on the fact that session files are append-only, so entry-id in a session file is a suitable cursor.
-- examples of direct clients in Rust/TypeScript/Python;
+- exact `tty.sock` frame protocol: [`src/tty-protocol.ts`](../src/tty-protocol.ts);
+- exact `agent.json` schema: [`src/registry.ts`](../src/registry.ts);
+- pi RPC command reference: [`rpc-types.ts`](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/src/modes/rpc/rpc-types.ts);
+- session-entry cursor semantics: entry ids within append-only pi session files are suitable durable cursors;
+- examples of direct `tty.sock` clients;
 - how version compatibility is negotiated or checked.
