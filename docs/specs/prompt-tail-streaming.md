@@ -534,6 +534,6 @@ Removing `--and-wait` and changing default `prompt` behavior is intentionally br
 - [x] Addressed review comments from `a75df0d`: default message output for `tail`, `--type messages|entries|raw`, no `--events`, `-f` as sugar for an indefinite stream, and JSONL-only output for this spec.
 - [x] Updated follow semantics so `--follow` and `-f` are equivalent sugar for `--until killed`, and either conflicts with explicit `--until`.
 - [x] Added and approved Type Design before implementation.
-- [ ] Implement shared streaming pipeline.
-- [ ] Update CLI help and docs.
+- [x] Implement shared streaming pipeline.
+- [x] Update CLI help for prompt/tail streaming flags.
 - [ ] Add tests for prompt default streaming, `--type detach`, message/entry/raw modes, final cursor, and `-n` behavior.

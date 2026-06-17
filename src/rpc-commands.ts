@@ -33,11 +33,11 @@ import { piSocketPath } from "./registry.ts";
 import { connectWithRetry, type PiSocketClient } from "./rpc.ts";
 import { UsageError } from "./util.ts";
 import {
-  applyWaitCondition,
-  parseWaitCondition,
-  WAIT_UNTIL_USAGE,
-  type WaitCondition,
-} from "./wait.ts";
+  parsePromptType,
+  parseStreamUntil,
+  streamPrompt,
+  STREAM_UNTIL_USAGE,
+} from "./streaming.ts";
 
 const SOCKET_CONNECT_DEADLINE_MS = 5_000;
 
@@ -196,12 +196,27 @@ async function sendRpc(
 }
 
 const promptFlags = {
-  ...rawImageFlags,
-  andWait: booleanFlag("Wait for turn end after prompting"),
-  andWaitUntil: parsedFlag(
-    `Wait until ${WAIT_UNTIL_USAGE} after prompting`,
-    parseWaitCondition,
+  ...imageFlag,
+  type: parsedFlag(
+    "Output type (messages|entries|raw|detach)",
+    parsePromptType,
+    "type",
+  ),
+  until: parsedFlag(
+    `Stream until ${STREAM_UNTIL_USAGE}`,
+    parseStreamUntil,
     "cond",
+  ),
+  timeout: parsedFlag(
+    "Timeout in seconds",
+    (input: string): number => {
+      const seconds = Number(input);
+      if (!(Number.isFinite(seconds) && seconds >= 0)) {
+        throw new UsageError(`invalid seconds value: ${input}`);
+      }
+      return seconds;
+    },
+    "secs",
   ),
   streamingBehavior: enumFlag("Behavior while the agent is streaming", [
     "steer",
@@ -210,40 +225,37 @@ const promptFlags = {
 };
 type PromptFlags = InferFlags<typeof promptFlags>;
 
-function promptWaitCondition(flags: PromptFlags): WaitCondition | undefined {
-  return (
-    flags.andWaitUntil ?? (flags.andWait ? { kind: "turn-end" } : undefined)
-  );
-}
-
 export async function prompt(
   this: CommandContext,
   flags: PromptFlags,
   message: string,
 ): Promise<void> {
-  const command: RpcCommand = {
-    type: "prompt",
+  const type = flags.type ?? "messages";
+  if (type === "detach" && flags.until !== undefined) {
+    throw new UsageError("--type detach cannot be combined with --until");
+  }
+  if (type === "detach" && flags.timeout !== undefined) {
+    throw new UsageError("--type detach cannot be combined with --timeout");
+  }
+  const { images } = await imagesFromFlags(flags.image);
+  await streamPrompt(this, {
+    type,
+    until: flags.until ?? { kind: "prompt-complete" },
+    timeoutMs: flags.timeout === undefined ? undefined : flags.timeout * 1000,
     message: await messageFrom(this, message),
-    ...(await imagesFromFlags(flags.image)),
-    ...(flags.streamingBehavior !== undefined && {
-      streamingBehavior:
-        flags.streamingBehavior === "steer" ? "steer" : "followUp",
-    }),
-  };
-  await sendRpc(this, command, flags.raw, async (client) => {
-    const condition = promptWaitCondition(flags);
-    if (condition !== undefined) {
-      await applyWaitCondition(client, condition, undefined);
-    }
+    images,
+    streamingBehavior:
+      flags.streamingBehavior === undefined
+        ? undefined
+        : flags.streamingBehavior === "steer"
+          ? "steer"
+          : "followUp",
   });
 }
 
 const promptCommand = commandOneTarget<PromptFlags, [string]>({
   common: true,
-  docs: {
-    brief:
-      "send a prompt (errors while streaming without --streaming-behavior)",
-  },
+  docs: { brief: "send a prompt and stream activity as JSONL" },
   parameters: {
     flags: promptFlags,
     positional: {
