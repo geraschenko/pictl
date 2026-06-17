@@ -11,10 +11,10 @@ import { numberParser } from "@stricli/core";
 import { SerializeAddon } from "@xterm/addon-serialize";
 import {
   getAgentDir,
-  hasProjectTrustInputs,
+  hasTrustRequiringProjectResources,
   ProjectTrustStore,
   SettingsManager,
-} from "@earendil-works/pi-coding-agent";
+} from "@geraschenko/pi-coding-agent";
 import xterm from "@xterm/headless";
 import pty from "node-pty";
 import { cursorTo, cursorToRow, HIDE_CURSOR, SHOW_CURSOR } from "./ansi.ts";
@@ -170,7 +170,7 @@ export function projectTrustWouldBlock(cwd: string, piArgs: string[]): boolean {
   if (piArgs.some((arg) => TRUST_OVERRIDE_FLAGS.has(arg))) {
     return false;
   }
-  if (!hasProjectTrustInputs(cwd)) {
+  if (!hasTrustRequiringProjectResources(cwd)) {
     return false;
   }
   const agentDir = getAgentDir();

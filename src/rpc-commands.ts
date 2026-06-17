@@ -14,7 +14,7 @@
 
 import { readFile } from "node:fs/promises";
 import { extname } from "node:path";
-import type { RpcCommand, RpcResponse } from "@earendil-works/pi-coding-agent";
+import type { RpcCommand, RpcResponse } from "@geraschenko/pi-coding-agent";
 import {
   booleanFlag,
   commandOneTarget,

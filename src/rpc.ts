@@ -14,7 +14,7 @@ import type {
   RpcCommand,
   RpcResponse,
   RpcSessionState,
-} from "@earendil-works/pi-coding-agent";
+} from "@geraschenko/pi-coding-agent";
 
 export interface SessionChangedEvent {
   type: "session_changed";

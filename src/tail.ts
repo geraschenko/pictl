@@ -22,7 +22,7 @@
  * events stream until the condition holds.
  */
 
-import type { RpcResponse } from "@earendil-works/pi-coding-agent";
+import type { RpcResponse } from "@geraschenko/pi-coding-agent";
 import {
   booleanFlag,
   commandOneTarget,

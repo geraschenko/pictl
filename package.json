@@ -15,7 +15,7 @@
     "presubmit": "npm run check && npm run lint && treefmt --fail-on-change && npm test"
   },
   "dependencies": {
-    "@earendil-works/pi-coding-agent": "file:../../earendil-works/pi/packages/coding-agent",
+    "@geraschenko/pi-coding-agent": "0.79.6-fork.1",
     "@stricli/core": "1.2.7",
     "@xterm/addon-serialize": "^0.14.0",
     "@xterm/headless": "^5.5.0",

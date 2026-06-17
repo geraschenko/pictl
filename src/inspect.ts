@@ -4,7 +4,7 @@
  */
 
 import { resolve } from "node:path";
-import type { RpcSessionState } from "@earendil-works/pi-coding-agent";
+import type { RpcSessionState } from "@geraschenko/pi-coding-agent";
 import {
   booleanFlag,
   commandMultiTarget,
