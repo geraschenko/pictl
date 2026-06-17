@@ -10,7 +10,7 @@ Topics to cover:
   - `npm install`;
   - `npm run build`;
   - `npm link` for local development.
-- Install/build the pi fork pictl currently requires.
+- Install/build the pi fork pictl currently requires, @geraschenko/pi-coding-agent.
 - Running alongside regular pi:
   - keep normal `pi` on `PATH` if desired;
   - set `PICTL_PI_BIN=/path/to/forked/pi` for pictl.

@@ -7,8 +7,8 @@ Question answered: **how does pictl work?**
 Topics to cover:
 
 - No central daemon:
-  - one holder process per agent;
-  - holder is launched as `pictl _daemon`.
+  - one daemon process per agent;
+  - daemon is launched as `pictl _daemon`.
 - `PICTL_DIR` as the registry:
   - default location;
   - one directory per agent;
@@ -21,7 +21,7 @@ Topics to cover:
 - The two real protocols:
   - `pi.sock`: pi RPC JSONL protocol;
   - `tty.sock`: terminal attach protocol.
-- Holder responsibilities:
+- Daemon responsibilities:
   - allocate PTY;
   - run pi with `--rpc-socket`;
   - maintain screen state with a headless terminal;
