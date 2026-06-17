@@ -29,13 +29,8 @@ import type { AgentRecord } from "./registry.ts";
 import { loadAgent } from "./registry.ts";
 import { UsageError } from "./util.ts";
 
-// TDC: what's the point of having both RuntimeProcess and RuntimeProcessWithEnv? If we're requiring env to be defined, why not just make it required in RuntimeProcess?
-type RuntimeProcess = StricliProcess & { env?: NodeJS.ProcessEnv };
-
-type RuntimeProcessWithEnv = StricliProcess & { env: NodeJS.ProcessEnv };
-
 export interface CommandContext extends StricliCommandContext {
-  process: RuntimeProcessWithEnv;
+  process: StricliProcess & { env: NodeJS.ProcessEnv };
   env: NodeJS.ProcessEnv;
   /** Empty for targetMode none; length 1 for single; length >= 1 for multiple. */
   targets: AgentRecord[];
@@ -426,14 +421,13 @@ export function commandMultiTarget<
 export async function runCliApp(
   app: Application<CommandContext>,
   argv: readonly string[],
-  proc: RuntimeProcess = process,
+  proc: StricliProcess & { env?: NodeJS.ProcessEnv } = process,
 ): Promise<void> {
   proc.exitCode = undefined;
-  const contextProcess = proc as RuntimeProcessWithEnv;
-  contextProcess.env ??= process.env;
+  const env = proc.env ?? process.env;
   await run(app, argv, {
-    process: contextProcess,
-    env: contextProcess.env,
+    process: Object.assign(proc, { env }),
+    env,
     targets: [],
   });
   if (typeof proc.exitCode === "number" && proc.exitCode < 0) {
