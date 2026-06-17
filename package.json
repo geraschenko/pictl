@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@geraschenko/pi-coding-agent": "0.79.6-fork.1",
+    "@stricli/auto-complete": "1.2.7",
     "@stricli/core": "1.2.7",
     "@xterm/addon-serialize": "^0.14.0",
     "@xterm/headless": "^5.5.0",

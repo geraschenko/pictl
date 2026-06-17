@@ -3,8 +3,8 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { app } from "./app.ts";
 import { determineTargets, runCliApp } from "./cli.ts";
-import { app } from "./main.ts";
 import { UsageError } from "./util.ts";
 
 test("determineTargets implements target precedence and cardinality", () => {
@@ -96,7 +96,15 @@ test("help and version print key lines", async () => {
   await runCliApp(app, ["--help"], help.proc);
   assert.match(help.stdout, /COMMANDS/);
   assert.match(help.stdout, /^\s{2}prompt\s+send a prompt/m);
+  assert.match(help.stdout, /^\s{2}completion\s+Manage shell completion/m);
   assert.doesNotMatch(help.stdout, /^\s{2}steer\s+interject/m);
+
+  const completionHelp = fakeProcess();
+  await runCliApp(app, ["completion", "--help"], completionHelp.proc);
+  assert.equal(completionHelp.proc.exitCode, 0);
+  assert.match(completionHelp.stdout, /^\s{2}install\s+Installs bash/m);
+  assert.match(completionHelp.stdout, /^\s{2}uninstall\s+Uninstalls bash/m);
+  assert.doesNotMatch(completionHelp.stdout, /^\s{2}complete\s+print/m);
 
   const helpAll = fakeProcess();
   await runCliApp(app, ["--help-all"], helpAll.proc);
@@ -105,6 +113,11 @@ test("help and version print key lines", async () => {
     helpAll.stdout,
     /^\s{2}_daemon\s+Internal command to launch a single-agent pi daemon/m,
   );
+
+  const completionHelpAll = fakeProcess();
+  await runCliApp(app, ["completion", "--help-all"], completionHelpAll.proc);
+  assert.equal(completionHelpAll.proc.exitCode, 0);
+  assert.match(completionHelpAll.stdout, /^\s{2}complete\s+print/m);
 });
 
 test("representative parser behavior uses --target grammar", async () => {
@@ -135,4 +148,40 @@ test("representative parser behavior uses --target grammar", async () => {
     assert.equal(globalTarget.proc.exitCode, 2);
     assert.match(globalTarget.stderr, /No command registered for `-t`/);
   });
+});
+
+async function completeWords(
+  words: readonly string[],
+  env: NodeJS.ProcessEnv = {},
+): Promise<string[]> {
+  const completion = fakeProcess(env);
+  await runCliApp(
+    app,
+    ["completion", "complete", "--", ...words],
+    completion.proc,
+  );
+  assert.equal(completion.proc.exitCode, 0);
+  return completion.stdout.trim().split("\n").filter(Boolean);
+}
+
+test("completion command proposes routes, flags, aliases, and hidden routes", async () => {
+  assert.ok((await completeWords(["pictl", "sta"])).includes("status"));
+  assert.ok(
+    (await completeWords(["pictl", "completion", "in"])).includes("install"),
+  );
+
+  const statusFlags = await completeWords(["pictl", "status", "-"]);
+  assert.ok(statusFlags.includes("-t"));
+  assert.ok(statusFlags.includes("--target"));
+  assert.ok(statusFlags.includes("--json"));
+
+  assert.ok((await completeWords(["pictl", "_d"])).includes("_daemon"));
+});
+
+test("completion command honors trailing-space completion", async () => {
+  const completions = await completeWords(["pictl", "status"], {
+    COMP_LINE: "pictl status ",
+  });
+  assert.ok(completions.includes("-t"));
+  assert.ok(completions.includes("--target"));
 });

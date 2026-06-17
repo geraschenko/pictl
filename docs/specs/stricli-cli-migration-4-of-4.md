@@ -16,7 +16,7 @@ The prior parts define the command grammar, typed command modules, inferred flag
 
 `pictl` now has a Stricli route map that knows the command tree, flags, aliases, enum-like values, hidden route metadata, and typed parsed parameters. Users should be able to use shell tab completion backed by that same Stricli command definition rather than maintaining a separate completion table.
 
-The implementation should first add out-of-the-box Stricli completion for command names, nested routes, flags, aliases, enum values, and ordinary parsed/positional structure. After that basic path is proven, it should add pictl-specific completion for `--target` / `-t` values by suggesting known agent ids from the registry.
+The implementation should first add out-of-the-box Stricli completion for command names, nested routes, flags, aliases, enum values, and ordinary parsed/positional structure. After that basic path is proven, implementation must stop for review and planning before adding pictl-specific completion callbacks. Later phases should add `--target` / `-t` agent-id completion and path completion only after agreeing on the helper/API design.
 
 ## Desired user behavior
 
@@ -35,7 +35,7 @@ pictl completion uninstall
 The shell-installed completion hook calls an internal command:
 
 ```bash
-pictl completion complete <current command line words...>
+pictl completion complete -- <current command line words...>
 ```
 
 The `complete` command prints one completion candidate per line on stdout. It is intended for shell integration, not direct interactive use.
@@ -77,6 +77,8 @@ This should provide completions for Stricli-owned syntax without a pictl-specifi
 
 Completion must be generated from the real `app` route map. Do not duplicate the command list or flag list in a separate completion registry.
 
+After phase 1, stop implementation and review the observed completion behavior, route visibility, import structure, and command invocation shape. Do not start target-id or path completion until the next-phase type/API design is explicitly discussed and approved.
+
 ### Phase 2: target agent-id completion
 
 After phase 1 works, add dynamic completions for the shared target flag.
@@ -108,7 +110,7 @@ Path-like inputs include at least:
 
 Path completion should not validate command semantics. It only proposes filesystem path strings.
 
-TDC: I suspect that we'll want to modify our various helpers like stringFlag in src/cli.ts to accept not only a placeholder but a completion function. We should stop and discuss details about how to do this immediately after phase 1, *before* starting on phase 2.
+Before starting phase 2 or phase 3, discuss whether helpers such as `stringFlag`, `parsedFlag`, `variadicStringFlag`, and `stringArg` should accept completion callbacks. Do not retrofit completion callbacks into these helpers without an approved type design.
 
 ## Stricli completion contract
 
@@ -135,10 +137,10 @@ Use `@stricli/auto-complete`, pinned to the same Stricli version family as `@str
 The installed bash hook should invoke:
 
 ```bash
-pictl completion complete
+pictl completion complete --
 ```
 
-as the completion proposal command for the user-facing `pictl` command.
+as the completion proposal command for the user-facing `pictl` command. The argument escape marker is required so the completion command can receive command-line words such as `--target` as positionals rather than parsing them as flags to `completion complete`.
 
 ## Type Design
 
@@ -246,7 +248,7 @@ This helper may live in `src/cli.ts` or another shared CLI utility module. It sh
 
 - `@stricli/auto-complete` is added as a pinned dependency.
 - `pictl completion install` and `pictl completion uninstall` exist.
-- `pictl completion complete ...` exists, is hidden from normal help, and prints one candidate per line.
+- `pictl completion complete -- ...` exists, is hidden from normal help, and prints one candidate per line.
 - Default root help shows at most one completion-related route: `completion`.
 - `pictl completion --help` shows `install` and `uninstall` but not `complete`.
 - `pictl --help-all` or `pictl completion --help-all` exposes completion internals sufficiently for debugging.
@@ -265,26 +267,26 @@ Add tests that exercise completion without requiring a real interactive shell.
 Representative completion tests:
 
 ```bash
-pictl completion complete pictl sta
+pictl completion complete -- pictl sta
 # includes status
 
-pictl completion complete pictl completion in
+pictl completion complete -- pictl completion in
 # includes install
 
-pictl completion complete pictl status --
+pictl completion complete -- pictl status --
 # includes --target and other valid flags for status
 
-pictl completion complete pictl status -
+pictl completion complete -- pictl status -
 # includes -t when alias completion is enabled
 
-pictl completion complete pictl _d
+pictl completion complete -- pictl _d
 # includes _daemon even though it is hidden from default help
 ```
 
 Target completion tests should use an isolated `PICTL_DIR` registry fixture:
 
 ```bash
-pictl completion complete pictl status --target ab
+pictl completion complete -- pictl status --target ab
 # includes matching agent ids such as abcdef
 # excludes non-matching ids
 ```
@@ -332,13 +334,16 @@ Help tests should assert key lines rather than snapshotting full help text.
 
 - [x] Created part-4 spec for shell completion after parts 1-3 completed the core Stricli migration.
 - [x] Renamed existing migration specs into the four-part series and updated cross-references.
-- [ ] Add pinned `@stricli/auto-complete` dependency.
-- [ ] Add completion route map with `completion install`, `completion uninstall`, and hidden `completion complete`.
-- [ ] Implement out-of-the-box Stricli completion via `proposeCompletions(app, inputs, context)`.
-- [ ] Add tests for command/route/flag/alias completion.
-- [ ] Add target-id completion via prefix-aware `listAgentIds(prefix)`.
-- [ ] Add tests for target-id completion with isolated registry fixtures.
-- [ ] Add path completion for path-like flags and positionals.
-- [ ] Add tests for representative path completion behavior.
+- [x] Add pinned `@stricli/auto-complete` dependency.
+- [x] Add completion route map with `completion install`, `completion uninstall`, and hidden `completion complete`.
+- [x] Implement out-of-the-box Stricli completion via `proposeCompletions(app, inputs, context)`.
+- [x] Add tests for command/route/flag/alias completion.
+- [x] Stop after phase 1 for review and next-phase type/API planning.
+  - Phase 1 uses `pictl completion complete -- ...`; the argument escape marker is needed so command-line words beginning with `-` are passed through as completion inputs.
+  - Added `src/app.ts` so normal execution and completion import the same app object. `src/completion.ts` imports `app`, so there is a small app/completion cycle; it is limited to the completion function reading `app` only when invoked.
+- [ ] Add target-id completion via prefix-aware `listAgentIds(prefix)` after review.
+- [ ] Add tests for target-id completion with isolated registry fixtures after review.
+- [ ] Add path completion for path-like flags and positionals after review.
+- [ ] Add tests for representative path completion behavior after review.
 - [ ] Validate help visibility for completion routes.
 - [ ] Run format, typecheck, lint, build, tests, and CLI smoke checks.

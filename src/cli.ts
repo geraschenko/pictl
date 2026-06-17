@@ -31,8 +31,10 @@ import { UsageError } from "./util.ts";
 
 type RuntimeProcess = StricliProcess & { env?: NodeJS.ProcessEnv };
 
+type RuntimeProcessWithEnv = StricliProcess & { env: NodeJS.ProcessEnv };
+
 export interface CommandContext extends StricliCommandContext {
-  process: StricliProcess;
+  process: RuntimeProcessWithEnv;
   env: NodeJS.ProcessEnv;
   /** Empty for targetMode none; length 1 for single; length >= 1 for multiple. */
   targets: AgentRecord[];
@@ -426,9 +428,11 @@ export async function runCliApp(
   proc: RuntimeProcess = process,
 ): Promise<void> {
   proc.exitCode = undefined;
+  const contextProcess = proc as RuntimeProcessWithEnv;
+  contextProcess.env ??= process.env;
   await run(app, argv, {
-    process: proc,
-    env: proc.env ?? process.env,
+    process: contextProcess,
+    env: contextProcess.env,
     targets: [],
   });
   if (typeof proc.exitCode === "number" && proc.exitCode < 0) {
