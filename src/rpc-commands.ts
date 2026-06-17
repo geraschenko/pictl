@@ -240,6 +240,7 @@ export async function prompt(
   const { images } = await imagesFromFlags(flags.image);
   await streamPrompt(this, {
     type,
+    // TDC: what is "prompt-complete"?
     until: flags.until ?? { kind: "prompt-complete" },
     timeoutMs: flags.timeout === undefined ? undefined : flags.timeout * 1000,
     message: await messageFrom(this, message),

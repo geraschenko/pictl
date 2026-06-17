@@ -32,7 +32,7 @@ export type PromptType = (typeof PROMPT_TYPES)[number];
 export type StreamUntil =
   | WaitCondition
   | { kind: "killed" }
-  | { kind: "prompt-complete" };
+  | { kind: "prompt-complete" };  // TDC: isn't prompt-complete the same as "turn-end"? Why add a new variant?
 
 export interface StreamCursorRecord {
   type: "pictl_cursor";
@@ -45,13 +45,13 @@ export interface StreamMessageRecord {
   message: AgentMessage;
 }
 
-export type StreamControlKind =
+export type StreamControlKind =  // TDC: why export?
   | "compaction"
   | "tree_navigated"
   | "session_changed"
   | "queue_update";
 
-export interface StreamControlRecord {
+export interface StreamControlRecord {  // TDC: why export?
   type: "control";
   control: {
     kind: StreamControlKind;
@@ -59,21 +59,21 @@ export interface StreamControlRecord {
   };
 }
 
-export type MessageStreamRecord =
+export type MessageStreamRecord =  // TDC: why export?
   | StreamMessageRecord
   | StreamControlRecord
   | StreamCursorRecord;
 
-export type EntryStreamRecord =
+export type EntryStreamRecord =  // TDC: why is this defined? It's not used
   | Extract<
       RpcResponse,
       { command: "get_entries"; success: true }
     >["data"]["entries"][number]
   | StreamCursorRecord;
 
-export type RawStreamRecord = SocketEvent;
+export type RawStreamRecord = SocketEvent;  // TDC: why define and export a new type here? This isn't even used.
 
-export interface StreamOptions {
+export interface StreamOptions {  // TDC: why export?
   outputType: StreamOutputType;
   since: string | undefined;
   limit: number | undefined;
@@ -90,7 +90,7 @@ export interface PromptStreamOptions {
   streamingBehavior: "steer" | "followUp" | undefined;
 }
 
-export type TailStreamOptions = StreamOptions;
+export type TailStreamOptions = StreamOptions;  // TDC: why export? only used in this file. Why define a synonym type?
 
 export interface JsonlWriter {
   writeRecord(record: unknown): void;
@@ -130,6 +130,7 @@ class StdoutJsonlWriter implements JsonlWriter {
   }
 }
 
+// TDC: this function exactly duplicated in src/rpc-commands.ts. Not cool. Move it to util.ts
 function oneOf<T extends string>(
   value: string,
   allowed: readonly T[],
@@ -170,6 +171,7 @@ export function normalizeFollowUntil(input: {
   return input.follow ? { kind: "killed" } : input.until;
 }
 
+// TDC: WTF? Why would you make this function? It's just needless indirection. Just inline it. Same with leafIdFrom and messagesFrom
 function entriesFrom(response: RpcResponse): GetEntriesData["entries"] {
   return (
     response as Extract<RpcResponse, { command: "get_entries"; success: true }>
