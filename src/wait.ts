@@ -23,6 +23,7 @@
 
 import {
   commandOneTarget,
+  completeChoices,
   oneTarget,
   requiredParsedFlag,
   secondsFlag,
@@ -35,6 +36,11 @@ import { connectWithRetry, getState, type PiSocketClient } from "./rpc.ts";
 import { UsageError } from "./util.ts";
 
 const SOCKET_CONNECT_DEADLINE_MS = 5_000;
+const WAIT_CONDITION_COMPLETIONS = [
+  "turn-end",
+  "idle",
+  "no-activity:",
+] as const;
 
 /** main.ts maps this to exit code 3. */
 export class WaitTimeoutError extends Error {}
@@ -153,7 +159,7 @@ const waitFlags = {
     `Wait condition (${WAIT_UNTIL_USAGE})`,
     parseWaitCondition,
     "cond",
-    // TDC: let's add a completion function here completeChoices(["turn-end", "idle", "no-activity:"])? We can move completeChoices into cli.ts
+    completeChoices(WAIT_CONDITION_COMPLETIONS),
   ),
   timeout: secondsFlag(),
 };

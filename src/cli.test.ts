@@ -210,9 +210,22 @@ test("completion command proposes target ids", async () => {
 });
 
 test("completion command proposes known positional values", async () => {
-  const completions = await completeWords(["pictl", "set-follow-up-mode"], {
-    COMP_LINE: "pictl set-follow-up-mode ",
-  });
-  assert.ok(completions.includes("all"));
-  assert.ok(completions.includes("one-at-a-time"));
+  const followUpModeCompletions = await completeWords(
+    ["pictl", "set-follow-up-mode"],
+    {
+      COMP_LINE: "pictl set-follow-up-mode ",
+    },
+  );
+  assert.ok(followUpModeCompletions.includes("all"));
+  assert.ok(followUpModeCompletions.includes("one-at-a-time"));
+
+  const waitUntilCompletions = await completeWords(
+    ["pictl", "wait", "--until"],
+    {
+      COMP_LINE: "pictl wait --until ",
+    },
+  );
+  assert.ok(waitUntilCompletions.includes("turn-end"));
+  assert.ok(waitUntilCompletions.includes("idle"));
+  assert.ok(waitUntilCompletions.includes("no-activity:"));
 });

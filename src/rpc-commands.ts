@@ -18,6 +18,7 @@ import type { RpcCommand, RpcResponse } from "@geraschenko/pi-coding-agent";
 import {
   booleanFlag,
   commandOneTarget,
+  completeChoices,
   enumFlag,
   oneTarget,
   parsedFlag,
@@ -58,15 +59,6 @@ function parseOnOff(value: string, what: string): boolean {
 }
 
 const QUEUE_MODES = ["all", "one-at-a-time"] as const;
-
-function completeChoices<const VALUES extends readonly string[]>(
-  values: VALUES,
-) {
-  return (partial: string): readonly VALUES[number][] =>
-    values.filter((value): value is VALUES[number] =>
-      value.startsWith(partial),
-    );
-}
 
 /**
  * Mirrors pi's ThinkingLevel union. Validated here because pi does not

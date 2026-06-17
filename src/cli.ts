@@ -64,9 +64,16 @@ interface CommandSpec<
   func: CommandFunction<FLAGS, ARGS, CommandContext>;
 }
 
-type CompletionFn = (
+export type CompletionFn = (
   partial: string,
 ) => readonly string[] | Promise<readonly string[]>;
+
+export function completeChoices<const VALUES extends readonly string[]>(
+  values: VALUES,
+): CompletionFn {
+  return (partial: string) =>
+    values.filter((value) => value.startsWith(partial));
+}
 
 const targetFlag = {
   kind: "parsed",
