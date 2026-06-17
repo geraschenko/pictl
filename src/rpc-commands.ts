@@ -31,7 +31,7 @@ import {
 import { ensureAgentRunning } from "./lifecycle.ts";
 import { piSocketPath } from "./registry.ts";
 import { connectWithRetry, type PiSocketClient } from "./rpc.ts";
-import { UsageError } from "./util.ts";
+import { oneOf, UsageError } from "./util.ts";
 import {
   parsePromptType,
   parseStreamUntil,
@@ -40,19 +40,6 @@ import {
 } from "./streaming.ts";
 
 const SOCKET_CONNECT_DEADLINE_MS = 5_000;
-
-function oneOf<T extends string>(
-  value: string,
-  allowed: readonly T[],
-  what: string,
-): T {
-  if ((allowed as readonly string[]).includes(value)) {
-    return value as T;
-  }
-  throw new UsageError(
-    `${what} must be one of: ${allowed.join(", ")} (got '${value}')`,
-  );
-}
 
 function parseOnOff(value: string, what: string): boolean {
   return oneOf(value, ["on", "off"], what) === "on";
@@ -240,8 +227,7 @@ export async function prompt(
   const { images } = await imagesFromFlags(flags.image);
   await streamPrompt(this, {
     type,
-    // TDC: what is "prompt-complete"?
-    until: flags.until ?? { kind: "prompt-complete" },
+    until: flags.until ?? { kind: "turn-end" },
     timeoutMs: flags.timeout === undefined ? undefined : flags.timeout * 1000,
     message: await messageFrom(this, message),
     images,

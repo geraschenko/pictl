@@ -285,29 +285,26 @@ export type StreamOutputType = (typeof STREAM_OUTPUT_TYPES)[number];
 export const PROMPT_TYPES = ["messages", "entries", "raw", "detach"] as const;
 export type PromptType = (typeof PROMPT_TYPES)[number];
 
-export type StreamUntil =
-  | WaitCondition
-  | { kind: "killed" }
-  | { kind: "prompt-complete" };
+export type StreamUntil = WaitCondition | { kind: "killed" };
 
-export interface StreamCursorRecord {
+interface StreamCursorRecord {
   type: "pictl_cursor";
   sessionId: string | null;
   entryId: string | null;
 }
 
-export interface StreamMessageRecord {
+interface StreamMessageRecord {
   type: "message";
   message: AgentMessage;
 }
 
-export type StreamControlKind =
+type StreamControlKind =
   | "compaction"
   | "tree_navigated"
   | "session_changed"
   | "queue_update";
 
-export interface StreamControlRecord {
+interface StreamControlRecord {
   type: "control";
   control: {
     kind: StreamControlKind;
@@ -315,21 +312,12 @@ export interface StreamControlRecord {
   };
 }
 
-export type MessageStreamRecord =
+type MessageStreamRecord =
   | StreamMessageRecord
   | StreamControlRecord
   | StreamCursorRecord;
 
-export type EntryStreamRecord =
-  | Extract<
-      RpcResponse,
-      { command: "get_entries"; success: true }
-    >["data"]["entries"][number]
-  | StreamCursorRecord;
-
-export type RawStreamRecord = SocketEvent;
-
-export interface StreamOptions {
+interface StreamOptions {
   outputType: StreamOutputType;
   since: string | undefined;
   limit: number | undefined;
@@ -346,9 +334,7 @@ export interface PromptStreamOptions {
   streamingBehavior: "steer" | "followUp" | undefined;
 }
 
-export interface TailStreamOptions extends StreamOptions {}
-
-export interface JsonlWriter {
+interface JsonlWriter {
   writeRecord(record: unknown): void;
 }
 
@@ -375,7 +361,7 @@ export async function streamPrompt(
 
 export async function streamTail(
   context: CommandContext,
-  options: TailStreamOptions,
+  options: StreamOptions,
 ): Promise<void>;
 ```
 
@@ -405,7 +391,7 @@ parseStreamUntil("no-activity:10"); // { kind: "no-activity", idleMs: 10000 }
 parseStreamUntil("killed");         // { kind: "killed" }
 ```
 
-Prompt flags have a prompt-specific type because `detach` is valid only for prompt:
+Prompt flags have a prompt-specific type because `detach` is valid only for prompt. The default prompt stop condition is represented as `{ kind: "turn-end" }`:
 
 ```ts
 interface PromptFlags {

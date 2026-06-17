@@ -9,7 +9,7 @@ import {
   type PiSocketClient,
   type SocketEvent,
 } from "./rpc.ts";
-import { UsageError } from "./util.ts";
+import { oneOf, UsageError } from "./util.ts";
 import {
   applyWaitCondition,
   parseWaitCondition,
@@ -29,29 +29,26 @@ export type StreamOutputType = (typeof STREAM_OUTPUT_TYPES)[number];
 export const PROMPT_TYPES = ["messages", "entries", "raw", "detach"] as const;
 export type PromptType = (typeof PROMPT_TYPES)[number];
 
-export type StreamUntil =
-  | WaitCondition
-  | { kind: "killed" }
-  | { kind: "prompt-complete" };  // TDC: isn't prompt-complete the same as "turn-end"? Why add a new variant?
+export type StreamUntil = WaitCondition | { kind: "killed" };
 
-export interface StreamCursorRecord {
+interface StreamCursorRecord {
   type: "pictl_cursor";
   sessionId: string | null;
   entryId: string | null;
 }
 
-export interface StreamMessageRecord {
+interface StreamMessageRecord {
   type: "message";
   message: AgentMessage;
 }
 
-export type StreamControlKind =  // TDC: why export?
+type StreamControlKind =
   | "compaction"
   | "tree_navigated"
   | "session_changed"
   | "queue_update";
 
-export interface StreamControlRecord {  // TDC: why export?
+interface StreamControlRecord {
   type: "control";
   control: {
     kind: StreamControlKind;
@@ -59,21 +56,12 @@ export interface StreamControlRecord {  // TDC: why export?
   };
 }
 
-export type MessageStreamRecord =  // TDC: why export?
+type MessageStreamRecord =
   | StreamMessageRecord
   | StreamControlRecord
   | StreamCursorRecord;
 
-export type EntryStreamRecord =  // TDC: why is this defined? It's not used
-  | Extract<
-      RpcResponse,
-      { command: "get_entries"; success: true }
-    >["data"]["entries"][number]
-  | StreamCursorRecord;
-
-export type RawStreamRecord = SocketEvent;  // TDC: why define and export a new type here? This isn't even used.
-
-export interface StreamOptions {  // TDC: why export?
+interface StreamOptions {
   outputType: StreamOutputType;
   since: string | undefined;
   limit: number | undefined;
@@ -90,9 +78,7 @@ export interface PromptStreamOptions {
   streamingBehavior: "steer" | "followUp" | undefined;
 }
 
-export type TailStreamOptions = StreamOptions;  // TDC: why export? only used in this file. Why define a synonym type?
-
-export interface JsonlWriter {
+interface JsonlWriter {
   writeRecord(record: unknown): void;
 }
 
@@ -130,20 +116,6 @@ class StdoutJsonlWriter implements JsonlWriter {
   }
 }
 
-// TDC: this function exactly duplicated in src/rpc-commands.ts. Not cool. Move it to util.ts
-function oneOf<T extends string>(
-  value: string,
-  allowed: readonly T[],
-  what: string,
-): T {
-  if ((allowed as readonly string[]).includes(value)) {
-    return value as T;
-  }
-  throw new UsageError(
-    `${what} must be one of: ${allowed.join(", ")} (got '${value}')`,
-  );
-}
-
 export function parseStreamOutputType(input: string): StreamOutputType {
   return oneOf(input, STREAM_OUTPUT_TYPES, "--type");
 }
@@ -171,25 +143,6 @@ export function normalizeFollowUntil(input: {
   return input.follow ? { kind: "killed" } : input.until;
 }
 
-// TDC: WTF? Why would you make this function? It's just needless indirection. Just inline it. Same with leafIdFrom and messagesFrom
-function entriesFrom(response: RpcResponse): GetEntriesData["entries"] {
-  return (
-    response as Extract<RpcResponse, { command: "get_entries"; success: true }>
-  ).data.entries;
-}
-
-function leafIdFrom(response: RpcResponse): string | null {
-  return (
-    response as Extract<RpcResponse, { command: "get_entries"; success: true }>
-  ).data.leafId;
-}
-
-function messagesFrom(response: RpcResponse): GetMessagesData["messages"] {
-  return (
-    response as Extract<RpcResponse, { command: "get_messages"; success: true }>
-  ).data.messages;
-}
-
 async function getEntries(
   client: PiSocketClient,
   since: string | undefined,
@@ -198,13 +151,12 @@ async function getEntries(
     type: "get_entries",
     ...(since !== undefined && { since }),
   });
-  return {
-    entries: entriesFrom(response),
-    leafId: leafIdFrom(response),
-  };
+  return (
+    response as Extract<RpcResponse, { command: "get_entries"; success: true }>
+  ).data;
 }
 
-export async function writeFinalCursor(
+async function writeFinalCursor(
   client: PiSocketClient,
   writer: JsonlWriter,
 ): Promise<StreamCursorRecord> {
@@ -269,10 +221,6 @@ async function waitForUntil(
   if (until.kind === "killed") {
     await client.waitClosed();
     throw new Error("pi socket closed");
-  }
-  if (until.kind === "prompt-complete") {
-    await applyWaitCondition(client, { kind: "turn-end" }, timeoutMs);
-    return;
   }
   await applyWaitCondition(client, until, timeoutMs);
 }
@@ -379,7 +327,13 @@ async function emitHistoricalMessages(
 ): Promise<void> {
   if (since === undefined) {
     const response = await client.request({ type: "get_messages" });
-    for (const message of limitedTail(messagesFrom(response), limit)) {
+    const messages = (
+      response as Extract<
+        RpcResponse,
+        { command: "get_messages"; success: true }
+      >
+    ).data.messages;
+    for (const message of limitedTail(messages, limit)) {
       writer.writeRecord({ type: "message", message });
     }
     return;
@@ -527,7 +481,7 @@ export async function streamPrompt(
 
 export async function streamTail(
   context: CommandContext,
-  options: TailStreamOptions,
+  options: StreamOptions,
 ): Promise<void> {
   if (options.outputType === "raw" && options.limit !== undefined) {
     throw new UsageError("-n is not supported with --type raw");
