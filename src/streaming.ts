@@ -247,6 +247,20 @@ function startStopWatcher(
   );
 }
 
+function deferredVoid(): {
+  promise: Promise<void>;
+  resolve: () => void;
+  reject: (error: unknown) => void;
+} {
+  let resolve!: () => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<void>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  return { promise, resolve, reject };
+}
+
 function messageRecordFromEvent(event: SocketEvent): MessageStreamRecord | undefined {
   if (event.type === "message_end") {
     return {
@@ -277,6 +291,7 @@ async function streamMessages(
   writer: JsonlWriter,
   until: StreamUntil | undefined,
   timeoutMs: number | undefined,
+  startStopAfter: Promise<void> = Promise.resolve(),
 ): Promise<void> {
   const state = newStreamState();
   client.onEvent((event) => {
@@ -287,10 +302,11 @@ async function streamMessages(
       state.notifyWake?.();
     }
   });
-  startStopWatcher(client, state, until, timeoutMs);
   if (until === undefined) {
     return;
   }
+  await startStopAfter;
+  startStopWatcher(client, state, until, timeoutMs);
   if (until.kind === "killed") {
     await waitForUntil(client, until, timeoutMs);
     return;
@@ -369,6 +385,7 @@ async function streamEntries(
   limit: number | undefined,
   until: StreamUntil | undefined,
   timeoutMs: number | undefined,
+  startStopAfter: Promise<void> = Promise.resolve(),
 ): Promise<void> {
   const state = newStreamState();
   client.onEvent((event) => handleSessionEvent(state, event));
@@ -376,6 +393,7 @@ async function streamEntries(
   if (until === undefined) {
     return;
   }
+  await startStopAfter;
   startStopWatcher(client, state, until, timeoutMs);
   if (until.kind === "killed") {
     while (true) {
@@ -416,8 +434,10 @@ async function streamRaw(
   writer: JsonlWriter,
   until: StreamUntil | undefined,
   timeoutMs: number | undefined,
+  startStopAfter: Promise<void> = Promise.resolve(),
 ): Promise<void> {
   client.onEvent((event) => writer.writeRecord(event));
+  await startStopAfter;
   if (until === undefined || until.kind === "killed") {
     await waitForUntil(client, { kind: "killed" }, timeoutMs);
     return;
@@ -456,9 +476,16 @@ export async function streamPrompt(
       options.type === "entries"
         ? (await getEntries(client, undefined)).entries.at(-1)?.id
         : undefined;
+    const stopStart = deferredVoid();
     const streamPromise =
       options.type === "messages"
-        ? streamMessages(client, writer, options.until, options.timeoutMs)
+        ? streamMessages(
+            client,
+            writer,
+            options.until,
+            options.timeoutMs,
+            stopStart.promise,
+          )
         : options.type === "entries"
           ? streamEntries(
               client,
@@ -467,9 +494,22 @@ export async function streamPrompt(
               undefined,
               options.until,
               options.timeoutMs,
+              stopStart.promise,
             )
-          : streamRaw(client, writer, options.until, options.timeoutMs);
-    await client.request(command);
+          : streamRaw(
+              client,
+              writer,
+              options.until,
+              options.timeoutMs,
+              stopStart.promise,
+            );
+    try {
+      await client.request(command);
+      stopStart.resolve();
+    } catch (error) {
+      stopStart.reject(error);
+      throw error;
+    }
     await streamPromise;
     if (isFiniteUntil(options.until)) {
       await writeFinalCursor(client, writer);
