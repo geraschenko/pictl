@@ -29,6 +29,7 @@ import type { AgentRecord } from "./registry.ts";
 import { loadAgent } from "./registry.ts";
 import { UsageError } from "./util.ts";
 
+// TDC: what's the point of having both RuntimeProcess and RuntimeProcessWithEnv? If we're requiring env to be defined, why not just make it required in RuntimeProcess?
 type RuntimeProcess = StricliProcess & { env?: NodeJS.ProcessEnv };
 
 type RuntimeProcessWithEnv = StricliProcess & { env: NodeJS.ProcessEnv };
