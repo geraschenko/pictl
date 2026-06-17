@@ -26,7 +26,7 @@ import {
 } from "@stricli/core";
 import type { Application } from "@stricli/core";
 import type { AgentRecord } from "./registry.ts";
-import { loadAgent } from "./registry.ts";
+import { listAgentIds, loadAgent } from "./registry.ts";
 import { UsageError } from "./util.ts";
 
 export interface CommandContext extends StricliCommandContext {
@@ -64,12 +64,17 @@ interface CommandSpec<
   func: CommandFunction<FLAGS, ARGS, CommandContext>;
 }
 
+type CompletionFn = (
+  partial: string,
+) => readonly string[] | Promise<readonly string[]>;
+
 const targetFlag = {
   kind: "parsed",
   parse: String,
   brief: "Target agent id or unique prefix",
   placeholder: "target",
   optional: true,
+  proposeCompletions: listAgentIds,
 } as const;
 
 const singleTargetFlags = {
@@ -199,6 +204,7 @@ export function booleanFlag(
 export function stringFlag(
   brief: string,
   placeholder: string,
+  proposeCompletions?: CompletionFn,
 ): CliFlag<
   string | undefined,
   TypedFlagParameter<string | undefined, CommandContext>
@@ -209,6 +215,7 @@ export function stringFlag(
     brief,
     placeholder,
     optional: true,
+    proposeCompletions,
   } as unknown as CliFlag<
     string | undefined,
     TypedFlagParameter<string | undefined, CommandContext>
@@ -218,6 +225,7 @@ export function stringFlag(
 export function variadicStringFlag(
   brief: string,
   placeholder: string,
+  proposeCompletions?: CompletionFn,
 ): CliFlag<
   readonly string[],
   TypedFlagParameter<readonly string[], CommandContext>
@@ -229,6 +237,7 @@ export function variadicStringFlag(
     placeholder,
     variadic: true,
     default: [],
+    proposeCompletions,
   } as unknown as CliFlag<
     readonly string[],
     TypedFlagParameter<readonly string[], CommandContext>
@@ -257,6 +266,7 @@ export function parsedFlag<T>(
   brief: string,
   parse: (input: string) => T,
   placeholder: string,
+  proposeCompletions?: CompletionFn,
 ): CliFlag<T | undefined, TypedFlagParameter<T | undefined, CommandContext>> {
   return {
     kind: "parsed",
@@ -264,6 +274,7 @@ export function parsedFlag<T>(
     brief,
     placeholder,
     optional: true,
+    proposeCompletions,
   } as unknown as CliFlag<
     T | undefined,
     TypedFlagParameter<T | undefined, CommandContext>
@@ -274,20 +285,23 @@ export function requiredParsedFlag<T>(
   brief: string,
   parse: (input: string) => T,
   placeholder: string,
+  proposeCompletions?: CompletionFn,
 ): CliFlag<T, TypedFlagParameter<T, CommandContext>> {
   return {
     kind: "parsed",
     parse,
     brief,
     placeholder,
+    proposeCompletions,
   } as unknown as CliFlag<T, TypedFlagParameter<T, CommandContext>>;
 }
 
 export function requiredStringFlag(
   brief: string,
   placeholder: string,
+  proposeCompletions?: CompletionFn,
 ): CliFlag<string, TypedFlagParameter<string, CommandContext>> {
-  return requiredParsedFlag(brief, String, placeholder);
+  return requiredParsedFlag(brief, String, placeholder, proposeCompletions);
 }
 
 export function secondsFlag(brief = "Timeout in seconds") {
@@ -312,8 +326,12 @@ export function restArgs(brief: string, placeholder: string, minimum = 0) {
   } as const;
 }
 
-export function stringArg(brief: string, placeholder: string) {
-  return { brief, placeholder, parse: String } as const;
+export function stringArg(
+  brief: string,
+  placeholder: string,
+  proposeCompletions?: CompletionFn,
+) {
+  return { brief, placeholder, parse: String, proposeCompletions } as const;
 }
 
 function markCommon(

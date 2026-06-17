@@ -62,6 +62,7 @@ async function withRegistry<T>(fn: (dir: string) => Promise<T>): Promise<T> {
   process.env.PICTL_DIR = dir;
   try {
     await mkdir(join(dir, "abcdef"));
+    await mkdir(join(dir, "zzzzzz"));
     await writeFile(
       join(dir, "abcdef", "agent.json"),
       JSON.stringify({
@@ -184,4 +185,34 @@ test("completion command honors trailing-space completion", async () => {
   });
   assert.ok(completions.includes("-t"));
   assert.ok(completions.includes("--target"));
+});
+
+test("completion command proposes target ids", async () => {
+  await withRegistry(async () => {
+    const longFlagCompletions = await completeWords([
+      "pictl",
+      "status",
+      "--target",
+      "ab",
+    ]);
+    assert.ok(longFlagCompletions.includes("abcdef"));
+    assert.ok(!longFlagCompletions.includes("zzzzzz"));
+
+    const aliasCompletions = await completeWords([
+      "pictl",
+      "status",
+      "-t",
+      "ab",
+    ]);
+    assert.ok(aliasCompletions.includes("abcdef"));
+    assert.ok(!aliasCompletions.includes("zzzzzz"));
+  });
+});
+
+test("completion command proposes known positional values", async () => {
+  const completions = await completeWords(["pictl", "set-follow-up-mode"], {
+    COMP_LINE: "pictl set-follow-up-mode ",
+  });
+  assert.ok(completions.includes("all"));
+  assert.ok(completions.includes("one-at-a-time"));
 });

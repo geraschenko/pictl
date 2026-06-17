@@ -59,6 +59,15 @@ function parseOnOff(value: string, what: string): boolean {
 
 const QUEUE_MODES = ["all", "one-at-a-time"] as const;
 
+function completeChoices<const VALUES extends readonly string[]>(
+  values: VALUES,
+) {
+  return (partial: string): readonly VALUES[number][] =>
+    values.filter((value): value is VALUES[number] =>
+      value.startsWith(partial),
+    );
+}
+
 /**
  * Mirrors pi's ThinkingLevel union. Validated here because pi does not
  * reject unknown levels — it silently clamps them (a typo would set "off").
@@ -396,7 +405,11 @@ const setThinkingLevelCommand = commandOneTarget<
       kind: "tuple",
       parameters: [
         {
-          ...stringArg("Thinking level", "level"),
+          ...stringArg(
+            "Thinking level",
+            "level",
+            completeChoices(THINKING_LEVELS),
+          ),
           parse: (value: string) =>
             oneOf(value, THINKING_LEVELS, "thinking level"),
         },
@@ -427,7 +440,11 @@ const setSteeringModeCommand = commandOneTarget<
       kind: "tuple",
       parameters: [
         {
-          ...stringArg("Mode", "all|one-at-a-time"),
+          ...stringArg(
+            "Mode",
+            "all|one-at-a-time",
+            completeChoices(QUEUE_MODES),
+          ),
           parse: (value: string) => oneOf(value, QUEUE_MODES, "steering mode"),
         },
       ],
@@ -449,7 +466,11 @@ const setFollowUpModeCommand = commandOneTarget<
       kind: "tuple",
       parameters: [
         {
-          ...stringArg("Mode", "all|one-at-a-time"),
+          ...stringArg(
+            "Mode",
+            "all|one-at-a-time",
+            completeChoices(QUEUE_MODES),
+          ),
           parse: (value: string) => oneOf(value, QUEUE_MODES, "follow-up mode"),
         },
       ],
@@ -487,7 +508,7 @@ const setAutoCompactionCommand = commandOneTarget<RawFlag, [boolean]>({
       kind: "tuple",
       parameters: [
         {
-          ...stringArg("Enabled", "on|off"),
+          ...stringArg("Enabled", "on|off", completeChoices(["on", "off"])),
           parse: (value: string) => parseOnOff(value, "auto-compaction"),
         },
       ],
@@ -506,7 +527,7 @@ const setAutoRetryCommand = commandOneTarget<RawFlag, [boolean]>({
       kind: "tuple",
       parameters: [
         {
-          ...stringArg("Enabled", "on|off"),
+          ...stringArg("Enabled", "on|off", completeChoices(["on", "off"])),
           parse: (value: string) => parseOnOff(value, "auto-retry"),
         },
       ],

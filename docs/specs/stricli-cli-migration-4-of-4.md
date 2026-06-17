@@ -381,9 +381,9 @@ Help tests should assert key lines rather than snapshotting full help text.
   - Use trailing optional completion callback arguments on helpers rather than options objects.
   - Do not add pictl path completion handlers now; bash native path fallback works for path-like flag values when Stricli returns no value candidates.
   - `set-follow-up-mode <mode>` is an argument completion case and should use `stringArg(..., complete)`.
-- [ ] Add target-id completion via prefix-aware `listAgentIds(prefix)` after review.
-- [ ] Add tests for target-id completion with isolated registry fixtures after review.
-- [ ] Add argument completion for known-value positionals after review.
-- [ ] Add tests for representative argument value completion after review.
-- [ ] Validate help visibility for completion routes.
-- [ ] Run format, typecheck, lint, build, tests, and CLI smoke checks.
+- [x] Add target-id completion via prefix-aware `listAgentIds(prefix)` after review.
+- [x] Add tests for target-id completion with isolated registry fixtures after review.
+- [x] Add argument completion for known-value positionals after review.
+- [x] Add tests for representative argument value completion after review.
+- [x] Validate help visibility for completion routes.
+- [x] Run format, typecheck, lint, build, and tests.

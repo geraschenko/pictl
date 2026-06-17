@@ -139,10 +139,12 @@ export async function writeAgentRecord(record: AgentRecord): Promise<void> {
   await rename(tmp, target);
 }
 
-export async function listAgentIds(): Promise<string[]> {
+export async function listAgentIds(prefix = ""): Promise<string[]> {
   try {
     const entries = await readdir(pictlBaseDir(), { withFileTypes: true });
-    return entries.filter((e) => e.isDirectory()).map((e) => e.name);
+    return entries
+      .filter((e) => e.isDirectory() && e.name.startsWith(prefix))
+      .map((e) => e.name);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
       return [];
