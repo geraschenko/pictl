@@ -12,23 +12,28 @@ This spec replaces the completion-only prompt behavior with a shared append-only
 
 - `pictl prompt` streams by default after the prompt is accepted.
 - `pictl prompt --detach` sends the prompt and returns as soon as the prompt is accepted.
-- `pictl tail --messages` and `pictl prompt` use the same append-only message/event filter-map.
-TDC: let's make `tail` stream messages by default, and require --events or --entries for different outputs, so that we match `prompt`.
+- `pictl tail` streams messages by default, matching `prompt`.
+- `pictl tail` and `pictl prompt` use the same append-only message/raw-event filter-map in message mode.
 - Entry-level output remains exact and uses `get_entries` because raw RPC events do not contain entry ids.
 - Message-level output is shaped exactly like `get_messages` records; message records do not include backing entry ids.
 - Streaming commands emit a single final cursor after the stop condition is met, so callers can resume with `tail --since` even when other actors may also interact with the same agent.
+- Initial output is JSONL only. Human-readable rendering is deferred to a follow-up spec.
 
-## Output levels
+## Output type
 
-Streaming commands support these output levels:
+Streaming commands support a shared output selector:
 
-- `--messages` / default: append-only message-shaped activity stream.  TDC: since this is the default, we don't need this flag, right?
-- `--entries`: session entries with real entry ids.
-- `--events`: raw RPC socket events.
-- `--raw`: raw passthrough of the underlying wire records, if distinct from `--events` in the implementation. TDC: actually, let's use --raw instead of --events. It's more consistent with the use of --raw in all the rpc passthrough commands. I'm pretty sure --events and --raw are *not* distinct, but please double check.
+```bash
+--type messages
+--type entries
+--type raw
+```
 
-Names are final for the spec except that `--messages` may be implicit and need not be shown in common examples.
-TDC: since implicit, the flag need not exist, or if we do keep it, it should be `--type [messages|entries|raw]`. Come to think of it, that's probably better for both prompt and tail.
+`--type messages` is the default. There is no separate `--messages` flag.
+
+`--type entries` emits session entries with real entry ids.
+
+`--type raw` emits raw RPC socket records. There is no separate `--events` flag. Current pi RPC socket “events” and raw wire records are not distinct for this purpose: the socket emits JSONL records such as `hello`, `session_changed`, responses, broadcast events, and shutdown notices. `raw` is the selected name because it matches existing pictl RPC passthrough terminology.
 
 ## Prompt behavior
 
@@ -41,7 +46,7 @@ pictl prompt --target worker "Investigate the failing test"
 Semantics:
 
 1. send the prompt to the selected target;
-2. once accepted, stream activity using the default message output level;
+2. once accepted, stream activity using `--type messages`;
 3. stop when the default prompt stop condition is satisfied;
 4. emit one final cursor record.
 
@@ -70,17 +75,17 @@ pictl tail --target worker
 
 Semantics:
 
-- output level defaults to messages;
-- output is append-only activity from the selected target;
+- output type defaults to `messages`;
+- message output is append-only activity from the selected target;
 - message mode uses the same event filter-map as `pictl prompt`;
 - entry mode uses `get_entries` and real entry ids;
-- event/raw mode streams socket records directly.
+- raw mode streams socket records directly.
 
-`tail --messages` is not a snapshot of `get_messages`. It is an append-only stream of message-shaped activity and control indicators derived from events.
+`tail --type messages` is not a snapshot of `get_messages`. It is an append-only stream of message-shaped activity and control indicators derived from events.
 
 ## Message stream semantics
 
-Message output emits records shaped like `get_messages` message records. It does not annotate messages with entry ids.
+Message output emits records containing message payloads shaped exactly like `get_messages` message records. It does not annotate messages with entry ids.
 
 The stream is append-only. It intentionally does not recompute or rewrite previously emitted messages when pi's visible session context changes.
 
@@ -91,9 +96,9 @@ The message filter-map emits:
   - compaction;
   - tree navigation / fork-like movement;
   - session replacement;
-  - queue updates when relevant to human-readable output.
+  - queue updates when relevant to the stream.
 
-The exact human rendering of control indicators is formatter-owned. JSON output must preserve them as typed records so scripts can distinguish them from message records.
+Control indicators are typed JSONL records so scripts can distinguish them from message records.
 
 ## Entry stream semantics
 
@@ -101,24 +106,26 @@ Entry output must use actual session entries and actual entry ids.
 
 Because current pi RPC socket events do not contain the entry ids generated by `SessionManager.appendMessage()` and related append methods, pictl must not try to derive entries from raw events.
 
-For `tail --entries` and `prompt --entries`, pictl should use the current wakeup-and-drain strategy:
+For `tail --type entries` and `prompt --type entries`, pictl should use the current wakeup-and-drain strategy:
 
-1. listen for RPC socket events as wakeups;
+1. listen for RPC socket records as wakeups;
 2. call `get_entries --since <cursor>`;
 3. emit newly drained entries;
 4. advance the entry cursor.
 
 This repeated `get_entries` behavior is accepted for entry mode only.
 
-## Event/raw stream semantics
+## Raw stream semantics
 
-Event output streams current RPC socket events directly.
+Raw output streams current RPC socket records directly.
 
-`-n` is not supported with `--events` or raw event passthrough because past events cannot be accessed.
+`-n` is not supported with `--type raw` because past socket records cannot be accessed.
+
+`tail --type raw` has no historical backlog. If no stop condition is supplied, it behaves like `--until never` and streams future socket records until interrupted.
 
 ## Cursor semantics
 
-Streaming commands emit a single final cursor after the stop condition is met, except detached prompt mode.
+Streaming commands emit a single final cursor after the stop condition is met, except detached prompt mode and never-ending streams interrupted externally.
 
 The final cursor is based on a final `get_entries` call and must be suitable for later use with:
 
@@ -130,27 +137,38 @@ The cursor should identify the current leaf entry when available. If no leaf exi
 
 Message records do not carry entry ids. The final cursor is the only required cursor information in message mode.
 
-In JSON output, the cursor is a typed record after all streamed records. In human-readable output, formatters may choose a compact footer or may suppress it in pretty displays, but the default command semantics include producing the cursor.
+The cursor is a typed JSONL record after all streamed records.
 
 ## Stop conditions
 
-`prompt` and `tail --follow` share stop-condition machinery.
+`prompt` and `tail` share stop-condition machinery through `--until`.
 
 Supported stop controls include:
 
 ```bash
 pictl prompt --target worker "..." --until no-activity:10 --timeout 120
-pictl tail --target worker --follow --until no-activity:10 --timeout 120
+pictl tail --target worker --until no-activity:10 --timeout 120
+pictl tail --target worker --until never
+pictl tail --target worker -f
 ```
-TDC: it occurs to me that --follow and --until are redundant and should not be used together. We should remove --follow or consider it to be syntactic sugar for `--until never`. Let's add a `never` option to --until. Does stricli allow us to make `-f` an alias for `--until never`?
 
-Default `prompt` stop condition is normal prompt/run completion. `tail` without `--follow` is bounded by available backlog and exits after emitting the requested historical output.
+`--until never` means stream indefinitely until interrupted or until the target/socket fails.
+
+`-f` is syntactic sugar for `--until never`. Stricli flag aliases cannot directly mean “this other flag with this fixed value”; Stricli aliases are alternate single-character names for an existing flag. Implement `-f` as its own boolean flag and normalize it to `until: "never"` in command logic. Supplying both `-f` and `--until` is a usage error.
+
+Default `prompt` stop condition is normal prompt/run completion.
+
+Default `tail` behavior depends on output type:
+
+- `messages`: emit available bounded output, then exit;
+- `entries`: emit available bounded entries, then exit;
+- `raw`: stream future records indefinitely, equivalent to `--until never`, because raw historical records are unavailable.
 
 No-activity timers and timeouts are driven by the selected stream pipeline:
 
 - message mode: message/control records and relevant completion events count as activity;
 - entry mode: drained entries count as activity;
-- event mode: raw events count as activity.
+- raw mode: raw socket records count as activity.
 
 ## `-n` semantics
 
@@ -158,33 +176,30 @@ No-activity timers and timeouts are driven by the selected stream pipeline:
 
 ```bash
 pictl tail --target worker -n 20
-pictl tail --target worker --entries -n 100
+pictl tail --target worker --type entries -n 100
 ```
 
 `-n` counts the selected output unit:
 
 - message mode: messages/control records in the message stream;
 - entry mode: entries;
-- event/raw mode: unsupported.
+- raw mode: unsupported.
 
-With `--follow`, `-n` uses conventional `tail -f` behavior: emit the last `n` available output units, then continue following.
+With `--until never` or `-f`, `-n` uses conventional `tail -f` behavior: emit the last `n` available output units, then continue following.
 
-## JSON and human-readable output
+## JSONL output
 
-Default output is human-readable.
+All output for this spec is JSONL. There is no human-readable streaming output and no `--json` flag for these streaming forms.
 
-`--json` produces JSONL records.
-TDC: it occurs to me that the human-readable form is going to be a can of worms (e.g. do you display full tool responses? if not, how do you truncate them? How exactly do you indicate tree changes?), so let's _only_ support jsonl output for now. We can come back to human-readable output in a follow-up spec.
-
-For message mode, JSONL records should distinguish at least:
+For message mode, JSONL records distinguish at least:
 
 - message records, whose message payload is exactly `get_messages`-shaped;
 - control records;
 - the final cursor record.
 
-For entries/events/raw modes, JSONL should preserve the selected low-level record shape as directly as practical, plus a final cursor where applicable.
+For entries/raw modes, JSONL should preserve the selected low-level record shape as directly as practical, plus a final cursor where applicable.
 
-Human-readable formatting is allowed to be pleasant and concise. Pretty helpers may omit or de-emphasize cursor/control details, but the structured output must preserve them.
+Human-readable formatting, pretty truncation, and display policy for tool results/tree changes are deferred to a follow-up spec.
 
 ## Examples
 
@@ -200,11 +215,11 @@ Prompt and return immediately after acceptance:
 pictl prompt --target worker "Investigate the failing test" --detach
 ```
 
-Prompt and stream entries until no activity for 10 seconds or 120 seconds pass (whichever comes first):
+Prompt and stream entries until no activity for 10 seconds or 120 seconds pass, whichever comes first:
 
 ```bash
 pictl prompt --target worker "Investigate the failing test" \
-  --entries \
+  --type entries \
   --until no-activity:10 \
   --timeout 120
 ```
@@ -212,20 +227,20 @@ pictl prompt --target worker "Investigate the failing test" \
 Tail recent message activity and continue following:
 
 ```bash
-pictl tail --target worker -n 20 --follow
+pictl tail --target worker -n 20 -f
 ```
 
-Tail entries from a previous cursor:
+Tail entries from a previous cursor and continue following:
 
 ```bash
-pictl tail --target worker --entries --since 1a2b3c4d --follow
+pictl tail --target worker --type entries --since 1a2b3c4d -f
 ```
 
-Raw events cannot be historically bounded:
+Raw records cannot be historically bounded:
 
 ```bash
-pictl tail --target worker --events --follow
-pictl tail --target worker --events -n 20 # usage error
+pictl tail --target worker --type raw
+pictl tail --target worker --type raw -n 20 # usage error
 ```
 
 ## Edge cases
@@ -234,7 +249,7 @@ pictl tail --target worker --events -n 20 # usage error
 - If compaction occurs, message mode emits a compaction control record and continues append-only. It does not retract or rewrite earlier messages.
 - If tree navigation occurs, message mode emits a tree-navigation control record and continues append-only from subsequent events.
 - If multiple actors interact with the same agent, streamed message output may include activity not caused by this prompt. The final cursor still represents the target's leaf after the stop condition.
-- If final cursor lookup fails, the command should report an error in structured form and exit non-zero unless a specific formatter chooses to make cursor failure non-fatal later.
+- If final cursor lookup fails, the command should report an error in structured form and exit non-zero.
 
 ## Non-goals
 
@@ -242,7 +257,8 @@ pictl tail --target worker --events -n 20 # usage error
 - Do not derive entry ids from raw events.
 - Do not make message mode exactly equal to repeatedly calling `get_messages`.
 - Do not preserve `--and-wait` as a distinct silent completion mode.
-- Do not support `-n` with event/raw streams.
+- Do not support `-n` with raw streams.
+- Do not implement human-readable streaming output in this spec.
 
 ## Type Design
 
@@ -257,14 +273,14 @@ Implementation must not begin until the Type Design is added and approved. The i
 Use a shared streaming engine for `prompt` and `tail`:
 
 ```text
-RPC socket events
+RPC socket records
   -> selected output pipeline
   -> stop-condition observer
-  -> formatter
+  -> JSONL formatter
   -> final cursor lookup via get_entries
 ```
 
-Message/event modes can avoid repeated `get_entries` calls during streaming. Entry mode keeps the existing event-wakeup plus `get_entries --since` drain loop.
+Message/raw modes can avoid repeated `get_entries` calls during streaming. Entry mode keeps the existing event-wakeup plus `get_entries --since` drain loop.
 
 ## Message filter-map sketch
 
@@ -287,11 +303,15 @@ Because historical events are unavailable, `tail -n` in message mode cannot be i
 1. call `get_messages` for the current snapshot and emit the last `n` messages, then follow append-only events;
 2. call `get_entries`, map entries to append-only-ish message/control records as best as possible, then follow events.
 
-This is an implementation trade-off to resolve during type design. The spec requirement is user-facing: `-n` counts selected output units and then `--follow` continues.
+This is an implementation trade-off to resolve during type design. The spec requirement is user-facing: `-n` counts selected output units and then `--until never` / `-f` continues.
 
 ## Cursor finalization
 
 Final cursor lookup can call `get_entries` without `--since` and use `leafId`, or call a lighter RPC command if one exists later. The spec only requires a cursor usable by `tail --since`.
+
+## Stricli handling for `-f`
+
+Stricli supports single-character aliases for flags, but not aliases that expand to a different flag plus a fixed value. Model `-f` as an independent boolean flag, then normalize `{ follow: true, until: undefined }` to `{ until: "never" }`. Reject `{ follow: true, until: ... }` as ambiguous.
 
 ## Compatibility
 
@@ -303,7 +323,8 @@ Removing `--and-wait` and changing default `prompt` behavior is intentionally br
 
 - [x] Archived prior thought document to `docs/thoughts/old/prompt-and-tail.md`.
 - [x] Drafted behavioral spec for prompt/tail streaming.
+- [x] Addressed review comments from `a75df0d`: default message output for `tail`, `--type messages|entries|raw`, no `--events`, `-f` as sugar for `--until never`, and JSONL-only output for this spec.
 - [ ] Add and approve Type Design before implementation.
 - [ ] Implement shared streaming pipeline.
 - [ ] Update CLI help and docs.
-- [ ] Add tests for prompt default streaming, `--detach`, message/event/entry modes, final cursor, and `-n` behavior.
+- [ ] Add tests for prompt default streaming, `--detach`, message/entry/raw modes, final cursor, and `-n` behavior.
