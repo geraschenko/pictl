@@ -153,6 +153,7 @@ const waitFlags = {
     `Wait condition (${WAIT_UNTIL_USAGE})`,
     parseWaitCondition,
     "cond",
+    // TDC: let's add a completion function here completeChoices(["turn-end", "idle", "no-activity:"])? We can move completeChoices into cli.ts
   ),
   timeout: secondsFlag(),
 };

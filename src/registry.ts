@@ -142,6 +142,7 @@ export async function writeAgentRecord(record: AgentRecord): Promise<void> {
 export async function listAgentIds(prefix = ""): Promise<string[]> {
   try {
     const entries = await readdir(pictlBaseDir(), { withFileTypes: true });
+    // TDC: can readdir read just files matching a given prefix? If not, this is okay, but if there are thousands of files starting with "b" it'd be nice if it didn't make the completion slow when the user has typed the prefix "a".
     return entries
       .filter((e) => e.isDirectory() && e.name.startsWith(prefix))
       .map((e) => e.name);
