@@ -1,4 +1,4 @@
-# Stricli CLI migration, 1 of 4, 1 of 4
+# Stricli CLI migration, 1 of 4
 
 # SPEC
 

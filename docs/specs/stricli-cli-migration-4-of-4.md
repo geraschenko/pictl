@@ -108,6 +108,8 @@ Path-like inputs include at least:
 
 Path completion should not validate command semantics. It only proposes filesystem path strings.
 
+TDC: I suspect that we'll want to modify our various helpers like stringFlag in src/cli.ts to accept not only a placeholder but a completion function. We should stop and discuss details about how to do this immediately after phase 1, *before* starting on phase 2.
+
 ## Stricli completion contract
 
 Stricli's completion API lives in the local Stricli clone at:
