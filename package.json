@@ -12,6 +12,7 @@
     "lint": "eslint src",
     "test": "node --test \"src/**/*.test.ts\"",
     "fmt": "treefmt",
+    "setup-worktree": "scripts/setup-worktree.sh",
     "presubmit": "npm run check && npm run lint && treefmt --fail-on-change && npm test"
   },
   "dependencies": {
