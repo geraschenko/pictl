@@ -149,12 +149,13 @@ Supported stop controls include:
 pictl prompt --target worker "..." --until no-activity:10 --timeout 120
 pictl tail --target worker --until no-activity:10 --timeout 120
 pictl tail --target worker --until never
+pictl tail --target worker --follow
 pictl tail --target worker -f
 ```
 
 `--until never` means stream indefinitely until interrupted or until the target/socket fails.
 
-`-f` is syntactic sugar for `--until never`. Stricli flag aliases cannot directly mean “this other flag with this fixed value”; Stricli aliases are alternate single-character names for an existing flag. Implement `-f` as its own boolean flag and normalize it to `until: "never"` in command logic. Supplying both `-f` and `--until` is a usage error.
+`--follow` and `-f` are equivalent syntactic sugar for `--until never`. Stricli flag aliases cannot directly mean “this other flag with this fixed value”; Stricli aliases are alternate single-character names for an existing flag. Implement follow mode as its own boolean flag exposed as `--follow` with alias `-f`, then normalize it to `until: "never"` in command logic. Supplying both `--follow`/`-f` and `--until` is a usage error.
 
 Default `prompt` stop condition is normal prompt/run completion.
 
@@ -185,7 +186,7 @@ pictl tail --target worker --type entries -n 100
 - entry mode: entries;
 - raw mode: unsupported.
 
-With `--until never` or `-f`, `-n` uses conventional `tail -f` behavior: emit the last `n` available output units, then continue following.
+With `--until never`, `--follow`, or `-f`, `-n` uses conventional `tail -f` behavior: emit the last `n` available output units, then continue following.
 
 ## JSONL output
 
@@ -227,7 +228,7 @@ pictl prompt --target worker "Investigate the failing test" \
 Tail recent message activity and continue following:
 
 ```bash
-pictl tail --target worker -n 20 -f
+pictl tail --target worker -n 20 --follow
 ```
 
 Tail entries from a previous cursor and continue following:
@@ -303,15 +304,15 @@ Because historical events are unavailable, `tail -n` in message mode cannot be i
 1. call `get_messages` for the current snapshot and emit the last `n` messages, then follow append-only events;
 2. call `get_entries`, map entries to append-only-ish message/control records as best as possible, then follow events.
 
-This is an implementation trade-off to resolve during type design. The spec requirement is user-facing: `-n` counts selected output units and then `--until never` / `-f` continues.
+This is an implementation trade-off to resolve during type design. The spec requirement is user-facing: `-n` counts selected output units and then `--until never` / `--follow` / `-f` continues.
 
 ## Cursor finalization
 
 Final cursor lookup can call `get_entries` without `--since` and use `leafId`, or call a lighter RPC command if one exists later. The spec only requires a cursor usable by `tail --since`.
 
-## Stricli handling for `-f`
+## Stricli handling for `--follow` / `-f`
 
-Stricli supports single-character aliases for flags, but not aliases that expand to a different flag plus a fixed value. Model `-f` as an independent boolean flag, then normalize `{ follow: true, until: undefined }` to `{ until: "never" }`. Reject `{ follow: true, until: ... }` as ambiguous.
+Stricli supports single-character aliases for flags, but not aliases that expand to a different flag plus a fixed value. Model follow mode as a boolean flag named `follow` with alias `f`, then normalize `{ follow: true, until: undefined }` to `{ until: "never" }`. Reject `{ follow: true, until: ... }` as ambiguous.
 
 ## Compatibility
 
@@ -324,6 +325,7 @@ Removing `--and-wait` and changing default `prompt` behavior is intentionally br
 - [x] Archived prior thought document to `docs/thoughts/old/prompt-and-tail.md`.
 - [x] Drafted behavioral spec for prompt/tail streaming.
 - [x] Addressed review comments from `a75df0d`: default message output for `tail`, `--type messages|entries|raw`, no `--events`, `-f` as sugar for `--until never`, and JSONL-only output for this spec.
+- [x] Updated follow semantics so `--follow` and `-f` are equivalent sugar for `--until never`, and either conflicts with explicit `--until`.
 - [ ] Add and approve Type Design before implementation.
 - [ ] Implement shared streaming pipeline.
 - [ ] Update CLI help and docs.
