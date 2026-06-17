@@ -80,6 +80,7 @@ Completion must be generated from the real `app` route map. Do not duplicate the
 After phase 1 works, add dynamic completions for the shared target flag.
 
 When the current completion position is a value for `--target` or `-t`, completion should suggest existing agent ids from `listAgentIds()` in `src/registry.ts`.
+TDC: calling listAgentIds and then filtering is probably less efficient than having listAgentIds take a prefix argument and only fetching that subset from disk.
 
 Filtering behavior:
 
@@ -89,6 +90,8 @@ completeAgentIds("")    // returns all known ids
 ```
 
 The completion callback should only list agent ids. It must not load full `AgentRecord`s, resolve prefixes, revive agents, connect to sockets, or validate whether a completed id is currently running.
+
+TDC: we can do more than just doing completion for agent ids. For any flag or arg that's meant to be a path, we can use path completion. I think stricli might support something like this already, but if not we should be able to easily implement it.
 
 ## Stricli completion contract
 
@@ -241,6 +244,7 @@ pictl completion complete pictl status --
 pictl completion complete pictl status -
 # includes -t when alias completion is enabled
 ```
+TDC: note that I want *all* commands included in completion, not just the non-hidden ones.
 
 Target completion tests should use an isolated `PICTL_DIR` registry fixture:
 
