@@ -1,13 +1,15 @@
 /**
- * I (geraschenko) don't entirely know what I'm doing here, but here's a short
- * summary of my goals in this file. It's possible there's a cli library out
- * there that just does all this more cleanly.
+ * I (geraschenko) don't entirely know what I'm doing here. It's possible
+ * there's a cli library out there that just does all this more cleanly. The
+ * goals:
  * - Subcommands should be pretty easy to define and maintain, keeping
  *   information about the types of arguments/flags, the help text, and the
  *   subcommand definition all next to each other in code.
- *
- * Target resolution (which subcommands accept -t/--target and how target
- * strings resolve to agents) lives in targets.ts.
+ * - A subcommand of pictl must specify whether takes zero, one, or multiple
+ *   target agents with -t/--target. The resolution of targets to AgentRecords
+ *   and the validation of the correct number of targets should be centralized
+ *   (currently in target.ts). I want to be able to set the PICTL_TARGET env var
+ *   to imply a target when there's no target(s) specified.
  */
 import {
   buildCommand,

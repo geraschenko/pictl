@@ -12,6 +12,8 @@
  * - no-activity:<secs>: no socket events for N seconds, regardless of streaming
  *   state; catches turns stalled on human-facing UI, which `idle` never reports.
  *   N may be fractional (e.g. `no-activity:0.5`).
+ * 
+ * TDC: why not include "killed" here to mean "until this process or the pi process dies"? Basically, why have StreamUntil as a separate type from UntilCondition? It seems perfectly sensible to say --until killed for wait, tail, and prompt.
  */
 
 import { IdleTimeoutError, waitIdle } from "./lifecycle.ts";

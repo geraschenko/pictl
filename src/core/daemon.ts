@@ -121,6 +121,7 @@ function isCursorHidden(terminal: xterm.Terminal): boolean {
   return core?.coreService?.isCursorHidden ?? false;
 }
 
+// TDC: this function being here is a smell. Shouldn't this be handled by attach rather than the daemon? Conceptually, the daemon just holds the tty without expressing any opinions about how clients use it. If a client wants an extra line at the bottom, they can do so by talking to the socket.
 /**
  * Make the bottom row available for the attach client's hint line. When pi's
  * content reaches the bottom row, append a one-line scroll and re-park the
