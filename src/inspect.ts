@@ -21,7 +21,7 @@ import {
   listAgentIds,
   piSocketPath,
 } from "./registry.ts";
-import { connectWithRetry, getState } from "./rpc.ts";
+import { connectWithRetry, getState } from "./pi-socket-client.ts";
 
 const PROBE_CONNECT_DEADLINE_MS = 2_000;
 

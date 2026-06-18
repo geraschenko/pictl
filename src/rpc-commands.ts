@@ -30,7 +30,7 @@ import {
 } from "./cli.ts";
 import { ensureAgentRunning } from "./lifecycle.ts";
 import { piSocketPath } from "./registry.ts";
-import { connectWithRetry, type PiSocketClient } from "./rpc.ts";
+import { connectWithRetry, type PiSocketClient } from "./pi-socket-client.ts";
 import { oneOf, UsageError } from "./util.ts";
 import {
   parsePromptType,

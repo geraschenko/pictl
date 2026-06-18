@@ -32,7 +32,7 @@ import {
 } from "./cli.ts";
 import { IdleTimeoutError, waitIdle } from "./lifecycle.ts";
 import { isPidAlive, piSocketPath } from "./registry.ts";
-import { connectWithRetry, getState, type PiSocketClient } from "./rpc.ts";
+import { connectWithRetry, getState, type PiSocketClient } from "./pi-socket-client.ts";
 import { UsageError } from "./util.ts";
 
 const SOCKET_CONNECT_DEADLINE_MS = 5_000;

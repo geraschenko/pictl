@@ -8,7 +8,7 @@ import {
   getState,
   type PiSocketClient,
   type SocketEvent,
-} from "./rpc.ts";
+} from "./pi-socket-client.ts";
 import { oneOf, UsageError } from "./util.ts";
 import {
   applyWaitCondition,

@@ -41,7 +41,7 @@ import {
   connectWithRetry,
   type SessionChangedEvent,
   type SocketEvent,
-} from "./rpc.ts";
+} from "./pi-socket-client.ts";
 import { TtyServer } from "./tty-server.ts";
 import { fileExists } from "./util.ts";
 

@@ -38,7 +38,7 @@ import {
   reviveLockPath,
   tombstonePath,
 } from "./registry.ts";
-import { connectWithRetry, getState, type PiSocketClient } from "./rpc.ts";
+import { connectWithRetry, getState, type PiSocketClient } from "./pi-socket-client.ts";
 import { launchDaemon } from "./spawn.ts";
 
 const SOCKET_CONNECT_DEADLINE_MS = 5_000;
