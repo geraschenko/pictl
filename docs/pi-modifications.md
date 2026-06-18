@@ -4,7 +4,7 @@ Purpose: explain the temporary pi fork changes that pictl depends on. This docum
 
 Question answered: **what changed in pi, and what problems do those changes solve?**
 
-These changes are currently implemented in the pi fork at [https://github.com/geraschenko/pi], rebased on upstream pi with the pictl-relevant work in the last few commits. They are not presented here as the only right design. They are the solution used to make pictl possible. If upstream pi accepts equivalent functionality in a different shape, this document should either be rewritten around that shape or removed.
+These changes are currently implemented in the pi fork at <https://github.com/geraschenko/pi>, rebased on upstream pi with the pictl-relevant work in the last few commits. They are not presented here as the only right design. They are the solution used to make pictl possible. If upstream pi accepts equivalent functionality in a different shape, this document should either be rewritten around that shape or removed.
 
 ## Summary
 
@@ -23,30 +23,30 @@ This runs normal interactive pi while also exposing pi's RPC protocol over a Uni
 
 The fork also expands the RPC surface in small ways so external clients can observe and control the session with enough fidelity to build robust orchestration:
 
-- socket handshake and socket-only lifecycle records; TDC: is this only hello, or also something else? Ah, I see there's an "orderly shutdown" message as well. Please indicate explicitly that those are the only lifecycle records.
 - multi-client event broadcast with per-client command responses;
-- `session_changed` visibility when the active session is replaced; TDC: there was no reason for this to exist when there could only be one client, since the client would know that it had changed the session. It is required now so that one client knows when another has changed the session. Same for tree_navigated; this event is only interesting if some _other_ client can navigate the tree and you're "watching".
-- `navigate_tree` plus `tree_navigated` so RPC clients can perform and observe `/tree`-style navigation;
+- two socket-only lifecycle records: `hello` on connect and `shutdown` on orderly shutdown;
+- `session_changed` visibility so one client can learn that another client, or the human in the TUI, replaced the active session;
+- `navigate_tree` plus `tree_navigated` so RPC clients can perform `/tree`-style navigation and other clients can observe that the active branch moved;
 - `get_entries` and `get_tree` for durable session-entry cursors and tree visibility;
-- RPC image validation/resizing parity with CLI file arguments; TDC: this is not strictly necessary, but is intended to move in the direction of the RPC interface matching the behavior of the interactive interface.
-- additive runtime rebind listeners so interactive mode and the socket server can both survive session replacement. TDC: what is this?
+- RPC image validation/resizing parity with CLI file arguments, moving RPC behavior closer to the interactive and CLI ingestion paths;
+- internal runtime/session rebinding hooks so interactive mode and the socket server can both stay attached to the current session after `/new`, `/resume`, `fork`, `clone`, and similar replacements.
 
-## Why `--mode rpc` is not enough
+## Why `--mode rpc` is not the chosen path
 
-Upstream pi already has `pi --mode rpc`, but that mode replaces the normal interactive interface with a JSONL stdio protocol. That is useful for headless embedding, but it does not solve pictl's problem.
+Upstream pi already has `pi --mode rpc`, but that mode replaces the normal interactive interface with a JSONL stdio protocol. That is useful for headless embedding and could support a pictl-like system if the goal were only programmatic access.
 
-pictl needs the same live agent to be usable by:
+A sufficiently rich RPC command/event surface could even support multiple programmatic clients and one or more independently implemented interactive UIs. With event broadcast, per-client responses, and enough semantic visibility, a client could reimplement the pi UI on top of RPC.
 
-- a human in the interactive TUI;
+That is not the path pictl takes. The appeal of `--rpc-socket` is that it avoids building and maintaining a second pi UI. A human can keep using what appears to be vanilla interactive pi, while scripts, agents, and supervisors get structured access to the same live process.
+
+pictl therefore needs the same live agent to be usable by:
+
+- a human in the normal interactive TUI;
 - one or more CLI/script clients;
 - other agents acting as automation clients;
 - long-running supervisors that observe progress and keep cursors.
 
-A headless-only RPC mode forces a choice between interactivity and automation. pictl needs both at the same time.
-
-The other possible fallback would be screen scraping or keystroke injection through a PTY/tmux layer. The fork avoids that. pictl uses terminal attach only for terminal interaction, and uses pi's semantic RPC protocol for prompts, state, tree reads, waits, and durable tailing.
-
-TDC: This may be overstating things. Realistically, --mode rpc (or whatever sdk for some other agent) would be usable for pictl if you _only_ wanted programmatic access. The strategy of broadcasting events to all subscribers and sending per-client responses would work to multiplex access so long as the event stream is rich enough that it gives all subscribers have enough information to know what's going on even if other clients are issuing commands. If the event and command surface is good enough that you can reimplement an interactive UI on it, then programmatic access is all you need, and that even gives you the ability to attache multiple interactive UIs. However, I personally find something very appealing about being able to connect interactively _without_ the development and maintenance burden of writing my own UI reimplementation. I just want to be able to use what appears to be vanilla pi and automagically get the benefits of scriptability and programmatic management.
+The other possible fallback would be screen scraping or keystroke injection through a PTY/tmux layer. The fork avoids that too. pictl uses terminal attach only for terminal interaction, and uses pi's semantic RPC protocol for prompts, state, tree reads, waits, and durable tailing.
 
 ## `--rpc-socket` mode
 
@@ -141,8 +141,9 @@ Important caveat: pi may announce a session file before it exists on disk. Sessi
 
 Interactive mode remains the sole owner of extension UI. Socket clients do not answer extension UI requests and do not render custom TUI components.
 
-That means the normal stdio RPC `extension_ui_request` / `extension_ui_response` flow is not used on the socket. Instead, socket clients receive summary events when progress is blocked on human-facing extension UI.
-TDC: this is an important difference from --mode rpc. The reason for it to be this way is that it encodes the understanding that if extension UI pops up, it's expecting the response to come from interactive mode if possible. It seems plausible to me that some future version of rpc-socket mode will send along the extension_ui_requests rather than just ui_wait_start. I'm genuinely unsure how this should behave.
+That is an important difference from stdio `--mode rpc`. In socket mode, if extension UI appears, the current fork assumes the response should come from the interactive TUI when possible. The normal stdio RPC `extension_ui_request` / `extension_ui_response` flow is therefore not used on the socket. Instead, socket clients receive summary events when progress is blocked on human-facing extension UI.
+
+This is current fork behavior, not necessarily the final upstream design. A future design might forward richer `extension_ui_request` details to socket clients while still treating the TUI as the primary responder, or might allow socket clients to answer under an explicit policy. The point of the current design is narrower: automation can see that progress is blocked on human UI without taking ownership of that UI.
 
 Example start event:
 
