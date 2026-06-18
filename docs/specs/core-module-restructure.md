@@ -113,13 +113,13 @@ The condition engine moves to `until.ts`; the `wait` command stays in `wait.ts` 
 
 **`src/core/until.ts`** (the `--until` condition engine):
 
-| moved from `wait.ts` | new name in `until.ts` |
-|---|---|
-| `WaitCondition` (type) | `UntilCondition` |
-| `parseWaitCondition` | `parseUntilCondition` |
-| `applyWaitCondition` | `applyUntilCondition` |
-| `WAIT_UNTIL_USAGE` | `UNTIL_USAGE` |
-| `WaitTimeoutError` | `UntilTimeoutError` |
+| moved from `wait.ts`         | new name in `until.ts`         |
+| ---------------------------- | ------------------------------ |
+| `WaitCondition` (type)       | `UntilCondition`               |
+| `parseWaitCondition`         | `parseUntilCondition`          |
+| `applyWaitCondition`         | `applyUntilCondition`          |
+| `WAIT_UNTIL_USAGE`           | `UNTIL_USAGE`                  |
+| `WaitTimeoutError`           | `UntilTimeoutError`            |
 | `WAIT_CONDITION_COMPLETIONS` | `UNTIL_COMPLETIONS` (exported) |
 
 Private helpers `waitTurnEnd`, `waitNoActivity`, `withDeadline` move into `until.ts` and keep their names (the verb "wait" accurately describes blocking; they remain unexported). `SOCKET_CONNECT_DEADLINE_MS` stays in `wait.ts` (only the command uses it).
@@ -237,10 +237,14 @@ export {
 
 **Instructions**: Update this section during each work session. Add new tasks, mark completed ones with [x], document decisions and problems encountered.
 
-- [ ] Change 1: move `src/*` → `src/core/`; update `package.json` (`bin` + `chmod` path) and `docs/architecture.md` links; verify `npm run presubmit`.
-- [ ] Change 2: split `cli.ts` → `targets.ts` + `cli.ts`; move `determineTargets` test to `targets.test.ts`; update `cli.test.ts` import; verify green.
-- [ ] Change 3: extract `until.ts` from `wait.ts` with `Wait*`→`Until*` renames; update `streaming.ts` and `app.ts`; verify green.
-- [ ] Change 4: add `src/core/index.ts` with the provisional surface; verify `npm run check`.
-- [ ] Final: `npm run presubmit` green; summarize changes for batch review (no commits by agent).
+- [x] Change 1: move `src/*` → `src/core/`; update `package.json` (`bin` + `chmod` path) and `docs/architecture.md` links; verify `npm run presubmit`.
+- [x] Change 2: split `cli.ts` → `targets.ts` + `cli.ts`; move `determineTargets` test to `targets.test.ts`; update `cli.test.ts` import; verify green.
+- [x] Change 3: extract `until.ts` from `wait.ts` with `Wait*`→`Until*` renames; update `streaming.ts` and `app.ts`; verify green.
+- [x] Change 4: add `src/core/index.ts` with the provisional surface; verify `npm run check`.
+- [x] Final: `npm run presubmit` green (30 tests pass); `npm run build` + `node dist/core/main.js --version`/`--help` confirm the relocated bin works. No commits by agent.
 
-*Work log entries go here*
+## Implementation-Time Decisions
+
+- **`cli.ts` keeps its `./util.ts` import.** The split removed `determineTargets` (a `UsageError` user) from `cli.ts`, but `secondsFlag` also throws `UsageError`, so `cli.ts` still imports it. Caught by `tsc` after an initial over-eager removal.
+- **`WaitTimeoutError` doc comment corrected during the rename.** The original `/** main.ts maps this to exit code 3. */` was inaccurate — the mapping lives in `app.ts`'s `determineExitCode`. Updated to `app.ts` while renaming the class to `UntilTimeoutError`.
+- **Condition-semantics comments moved with the engine.** The `turn-end`/`idle`/`no-activity` definitions moved from the `wait.ts` header into `until.ts` (they document `UntilCondition`); `wait.ts`'s header now describes only the command (usage line, exit codes, dormant-agent behavior).

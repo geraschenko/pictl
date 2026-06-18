@@ -20,9 +20,9 @@ import {
   commandNoTarget,
   restArgs,
   stringFlag,
-  type CommandContext,
   type InferFlags,
 } from "./cli.ts";
+import { type CommandContext } from "./targets.ts";
 import { agentDirPath, daemonLogPath, pictlBaseDir } from "./registry.ts";
 
 interface DaemonLaunch {

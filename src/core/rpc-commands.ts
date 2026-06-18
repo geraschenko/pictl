@@ -20,14 +20,13 @@ import {
   commandOneTarget,
   completeChoices,
   enumFlag,
-  oneTarget,
   parsedFlag,
   stringArg,
   stringFlag,
   variadicStringFlag,
-  type CommandContext,
   type InferFlags,
 } from "./cli.ts";
+import { oneTarget, type CommandContext } from "./targets.ts";
 import { ensureAgentRunning } from "./lifecycle.ts";
 import { piSocketPath } from "./registry.ts";
 import { connectWithRetry, type PiSocketClient } from "./pi-socket-client.ts";

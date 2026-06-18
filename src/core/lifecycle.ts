@@ -20,11 +20,10 @@ import {
   booleanFlag,
   commandMultiTarget,
   commandNoTarget,
-  multiTargets,
   secondsFlag,
-  type CommandContext,
   type InferFlags,
 } from "./cli.ts";
+import { multiTargets, type CommandContext } from "./targets.ts";
 import {
   type AgentRecord,
   agentDirPath,
@@ -38,7 +37,11 @@ import {
   reviveLockPath,
   tombstonePath,
 } from "./registry.ts";
-import { connectWithRetry, getState, type PiSocketClient } from "./pi-socket-client.ts";
+import {
+  connectWithRetry,
+  getState,
+  type PiSocketClient,
+} from "./pi-socket-client.ts";
 import { launchDaemon } from "./spawn.ts";
 
 const SOCKET_CONNECT_DEADLINE_MS = 5_000;

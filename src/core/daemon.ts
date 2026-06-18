@@ -25,9 +25,9 @@ import {
   requiredStringFlag,
   restArgs,
   stringFlag,
-  type CommandContext,
   type InferFlags,
 } from "./cli.ts";
+import { type CommandContext } from "./targets.ts";
 import {
   type AgentRecord,
   daemonLogPath,

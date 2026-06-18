@@ -1,6 +1,5 @@
 import type { RpcCommand, RpcResponse } from "@geraschenko/pi-coding-agent";
-import type { CommandContext } from "./cli.ts";
-import { oneTarget } from "./cli.ts";
+import { oneTarget, type CommandContext } from "./targets.ts";
 import { ensureAgentRunning } from "./lifecycle.ts";
 import { piSocketPath } from "./registry.ts";
 import {
@@ -11,11 +10,11 @@ import {
 } from "./pi-socket-client.ts";
 import { oneOf, UsageError } from "./util.ts";
 import {
-  applyWaitCondition,
-  parseWaitCondition,
-  WAIT_UNTIL_USAGE,
-  type WaitCondition,
-} from "./wait.ts";
+  applyUntilCondition,
+  parseUntilCondition,
+  UNTIL_USAGE,
+  type UntilCondition,
+} from "./until.ts";
 
 const SOCKET_CONNECT_DEADLINE_MS = 5_000;
 const STREAMING_NOISE_EVENTS = new Set([
@@ -29,7 +28,7 @@ export type StreamOutputType = (typeof STREAM_OUTPUT_TYPES)[number];
 export const PROMPT_TYPES = ["messages", "entries", "raw", "detach"] as const;
 export type PromptType = (typeof PROMPT_TYPES)[number];
 
-export type StreamUntil = WaitCondition | { kind: "killed" };
+export type StreamUntil = UntilCondition | { kind: "killed" };
 
 interface StreamCursorRecord {
   type: "pictl_cursor";
@@ -124,13 +123,13 @@ export function parsePromptType(input: string): PromptType {
   return oneOf(input, PROMPT_TYPES, "--type");
 }
 
-export const STREAM_UNTIL_USAGE = `${WAIT_UNTIL_USAGE}|killed`;
+export const STREAM_UNTIL_USAGE = `${UNTIL_USAGE}|killed`;
 
 export function parseStreamUntil(input: string): StreamUntil {
   if (input === "killed") {
     return { kind: "killed" };
   }
-  return parseWaitCondition(input);
+  return parseUntilCondition(input);
 }
 
 export function normalizeFollowUntil(input: {
@@ -222,7 +221,7 @@ async function waitForUntil(
     await client.waitClosed();
     throw new Error("pi socket closed");
   }
-  await applyWaitCondition(client, until, timeoutMs);
+  await applyUntilCondition(client, until, timeoutMs);
 }
 
 function startStopWatcher(

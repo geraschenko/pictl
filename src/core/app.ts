@@ -1,6 +1,6 @@
 import { buildApplication, buildRouteMap, text_en } from "@stricli/core";
 import { attachRoute } from "./attach.ts";
-import { type CommandContext } from "./cli.ts";
+import { type CommandContext } from "./targets.ts";
 import { completionRoute } from "./completion.ts";
 import { internalRoutes } from "./daemon.ts";
 import { listRoute, statusRoute } from "./inspect.ts";
@@ -10,7 +10,8 @@ import { spawnRoute } from "./spawn.ts";
 import { tailRoute } from "./tail.ts";
 import { UsageError } from "./util.ts";
 import { VERSION } from "./version.ts";
-import { waitRoute, WaitTimeoutError } from "./wait.ts";
+import { UntilTimeoutError } from "./until.ts";
+import { waitRoute } from "./wait.ts";
 
 const routes = {
   ...spawnRoute,
@@ -84,5 +85,9 @@ export const app = buildApplication<CommandContext>(root, {
     },
   },
   determineExitCode: (error) =>
-    error instanceof WaitTimeoutError ? 3 : error instanceof UsageError ? 2 : 1,
+    error instanceof UntilTimeoutError
+      ? 3
+      : error instanceof UsageError
+        ? 2
+        : 1,
 });

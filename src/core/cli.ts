@@ -5,18 +5,15 @@
  * - Subcommands should be pretty easy to define and maintain, keeping
  *   information about the types of arguments/flags, the help text, and the
  *   subcommand definition all next to each other in code.
- * - A subcommand of pictl must specify whether takes zero, one, or multiple
- *   target agents with -t/--target. The resolution of targets to AgentRecords
- *   and the validation of the correct number of targets should be centralized
- *   in this file. I want to be able to set the PICTL_TARGET env var to imply a
- *   target when there's no target(s) specified.
+ *
+ * Target resolution (which subcommands accept -t/--target and how target
+ * strings resolve to agents) lives in targets.ts.
  */
 import {
   buildCommand,
   run,
   type Aliases,
   type Command,
-  type CommandContext as StricliCommandContext,
   type CommandFunction,
   type FlagParametersForType,
   type StricliProcess,
@@ -25,16 +22,14 @@ import {
   type TypedPositionalParameters,
 } from "@stricli/core";
 import type { Application } from "@stricli/core";
-import type { AgentRecord } from "./registry.ts";
-import { listAgentIds, loadAgent } from "./registry.ts";
+import {
+  determineTargets,
+  multiTargetFlags,
+  resolveTargets,
+  singleTargetFlags,
+  type CommandContext,
+} from "./targets.ts";
 import { UsageError } from "./util.ts";
-
-export interface CommandContext extends StricliCommandContext {
-  process: StricliProcess & { env: NodeJS.ProcessEnv };
-  env: NodeJS.ProcessEnv;
-  /** Empty for targetMode none; length 1 for single; length >= 1 for multiple. */
-  targets: AgentRecord[];
-}
 
 type CommandRoute = Command<CommandContext> & { common?: true };
 
@@ -73,83 +68,6 @@ export function completeChoices<const VALUES extends readonly string[]>(
 ): CompletionFn {
   return (partial: string) =>
     values.filter((value) => value.startsWith(partial));
-}
-
-const targetFlag = {
-  kind: "parsed",
-  parse: String,
-  brief: "Target agent id or unique prefix",
-  placeholder: "target",
-  optional: true,
-  proposeCompletions: listAgentIds,
-} as const;
-
-const singleTargetFlags = {
-  target: targetFlag,
-} satisfies FlagParametersForType<{ target?: string }, CommandContext>;
-
-const multiTargetFlags = {
-  target: { ...targetFlag, variadic: true },
-} satisfies FlagParametersForType<
-  { target?: readonly string[] },
-  CommandContext
->;
-
-/** @internal Exported for focused tests of target precedence/cardinality. */
-export function determineTargets(
-  targetMode: "none" | "single" | "multiple",
-  flagTargets: readonly string[],
-  env: NodeJS.ProcessEnv,
-): string[] {
-  switch (targetMode) {
-    case "none":
-      if (flagTargets.length > 0) {
-        throw new UsageError("this command does not accept --target");
-      }
-      return [];
-    case "single": {
-      if (flagTargets.length > 1) {
-        throw new UsageError("expected at most one --target");
-      }
-      const target = flagTargets[0] ?? env.PICTL_TARGET;
-      if (target === undefined || target === "") {
-        throw new UsageError("expected --target <agent> (or PICTL_TARGET)");
-      }
-      return [target];
-    }
-    case "multiple": {
-      if (flagTargets.length > 0) {
-        return [...flagTargets];
-      }
-      if (env.PICTL_TARGET !== undefined && env.PICTL_TARGET !== "") {
-        return [env.PICTL_TARGET];
-      }
-      throw new UsageError(
-        "expected at least one --target <agent> (or PICTL_TARGET)",
-      );
-    }
-  }
-}
-
-export async function resolveTargets(
-  targetInputs: readonly string[],
-): Promise<AgentRecord[]> {
-  return await Promise.all(targetInputs.map((target) => loadAgent(target)));
-}
-
-export function oneTarget(context: CommandContext): AgentRecord {
-  const target = context.targets[0];
-  if (target === undefined || context.targets.length !== 1) {
-    throw new Error(`internal error: expected exactly one target`);
-  }
-  return target;
-}
-
-export function multiTargets(context: CommandContext): readonly AgentRecord[] {
-  if (context.targets.length === 0) {
-    throw new Error(`internal error: expected at least one target`);
-  }
-  return context.targets;
 }
 
 // This symbol is never created at runtime. It is a "phantom" property used

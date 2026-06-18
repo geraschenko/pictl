@@ -15,7 +15,8 @@ import {
   SAVE_CURSOR,
   SHOW_CURSOR,
 } from "./ansi.ts";
-import { commandOneTarget, oneTarget, type CommandContext } from "./cli.ts";
+import { commandOneTarget } from "./cli.ts";
+import { oneTarget, type CommandContext } from "./targets.ts";
 import { ensureAgentRunning } from "./lifecycle.ts";
 import { ttySocketPath } from "./registry.ts";
 import {

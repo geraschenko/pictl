@@ -9,11 +9,10 @@ import {
   booleanFlag,
   commandMultiTarget,
   commandNoTarget,
-  multiTargets,
   stringFlag,
-  type CommandContext,
   type InferFlags,
 } from "./cli.ts";
+import { multiTargets, type CommandContext } from "./targets.ts";
 import {
   type AgentRecord,
   classifyAgentDir,

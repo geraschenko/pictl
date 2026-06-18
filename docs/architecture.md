@@ -81,7 +81,7 @@ The daemon therefore exposes a separate framed protocol on `tty.sock` for:
 - terminal resize messages;
 - daemon-exit notification.
 
-The working definition of this protocol is [`src/tty-protocol.ts`](../src/tty-protocol.ts).
+The working definition of this protocol is [`src/core/tty-protocol.ts`](../src/core/tty-protocol.ts).
 
 This separation is intentional. `pi.sock` is for meaning; `tty.sock` is for terminal bytes. Keeping them separate avoids forcing pi to know about remote terminal attach, and avoids overloading the RPC protocol with high-volume TTY data.
 
@@ -116,7 +116,7 @@ $PICTL_DIR/
 
 There is no central registry daemon and no central index file. Commands discover agents by reading directories and probing processes or sockets.
 
-`agent.json` is daemon-owned metadata. Its exact schema is not important for this document and is expected to evolve; the working source reference is [`src/registry.ts`](../src/registry.ts). The important invariants are:
+`agent.json` is daemon-owned metadata. Its exact schema is not important for this document and is expected to evolve; the working source reference is [`src/core/registry.ts`](../src/core/registry.ts). The important invariants are:
 
 - the daemon is the only writer;
 - CLI commands do not use `agent.json` for locking or multi-process coordination;
@@ -162,8 +162,8 @@ The design goal is that anything a human can do by hand should have a correspond
 
 This document should eventually link to more specific references rather than contain every detail itself:
 
-- exact `tty.sock` frame protocol: [`src/tty-protocol.ts`](../src/tty-protocol.ts);
-- exact `agent.json` schema: [`src/registry.ts`](../src/registry.ts);
+- exact `tty.sock` frame protocol: [`src/core/tty-protocol.ts`](../src/core/tty-protocol.ts);
+- exact `agent.json` schema: [`src/core/registry.ts`](../src/core/registry.ts);
 - pi RPC command reference: [`rpc-types.ts`](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/src/modes/rpc/rpc-types.ts);
 - session-entry cursor semantics: entry ids within append-only pi session files are suitable durable cursors;
 - examples of direct `tty.sock` clients;

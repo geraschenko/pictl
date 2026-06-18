@@ -9,7 +9,8 @@ import {
   buildUninstallCommand,
 } from "@stricli/auto-complete";
 import { app } from "./app.ts";
-import { commandNoTarget, restArgs, type CommandContext } from "./cli.ts";
+import { commandNoTarget, restArgs } from "./cli.ts";
+import { type CommandContext } from "./targets.ts";
 
 function completionInputs(inputs: readonly string[], env: NodeJS.ProcessEnv) {
   const completedInputs = inputs.slice(1);

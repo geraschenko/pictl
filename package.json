@@ -4,10 +4,10 @@
   "description": "Spawn, observe, control, and attach to a fleet of pi coding-agent instances",
   "type": "module",
   "bin": {
-    "pictl": "dist/main.js"
+    "pictl": "dist/core/main.js"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && node -e \"require('node:fs').chmodSync('dist/main.js', 0o755)\"",
+    "build": "tsc -p tsconfig.build.json && node -e \"require('node:fs').chmodSync('dist/core/main.js', 0o755)\"",
     "check": "tsc --noEmit",
     "lint": "eslint src",
     "test": "node --test \"src/**/*.test.ts\"",
