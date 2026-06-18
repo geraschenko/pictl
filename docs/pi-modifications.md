@@ -48,7 +48,7 @@ pictl therefore needs the same live agent to be usable by:
 
 The other possible fallback would be screen scraping or keystroke injection through a PTY/tmux layer. The fork avoids that too. pictl uses terminal attach only for terminal interaction, and uses pi's semantic RPC protocol for prompts, state, tree reads, waits, and durable tailing.
 
-## `--rpc-socket` mode
+## why `--rpc-socket` mode
 
 `--rpc-socket <path>` starts interactive pi normally, but creates a Unix domain socket at `<path>`. Socket clients speak JSONL. Commands and response shapes are intended to match `--mode rpc` as closely as possible.
 
@@ -63,6 +63,10 @@ Important properties:
 - Human submissions and socket-originated submissions enter the same session APIs in the same Node process.
 
 `--rpc-socket` is intentionally incompatible with modes that already replace interactive operation, such as `--mode rpc`, `--mode json`, and `--print`. It requires interactive TTY stdin/stdout.
+
+# Details
+
+Stuff below here is human-readable and correct, but AI-generated and probably not worth reading unless you care about some specific detail. It is unlikely to be important to your understanding of this project.
 
 ### Socket hello
 
