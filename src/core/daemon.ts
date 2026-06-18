@@ -37,11 +37,7 @@ import {
   ttySocketPath,
   writeAgentRecord,
 } from "./registry.ts";
-import {
-  connectWithRetry,
-  type SessionChangedEvent,
-  type SocketEvent,
-} from "./pi-socket-client.ts";
+import { connectWithRetry, type SocketEvent } from "./pi-socket-client.ts";
 import { TtyServer } from "./tty-server.ts";
 import { fileExists } from "./util.ts";
 
@@ -121,7 +117,13 @@ function isCursorHidden(terminal: xterm.Terminal): boolean {
   return core?.coreService?.isCursorHidden ?? false;
 }
 
-// TDC: this function being here is a smell. Shouldn't this be handled by attach rather than the daemon? Conceptually, the daemon just holds the tty without expressing any opinions about how clients use it. If a client wants an extra line at the bottom, they can do so by talking to the socket.
+// Reserving a row for a client hint line is an attach-client policy, so the
+// daemon arguably shouldn't bake it into every snapshot. The computation must
+// stay here — it reads the authoritative xterm buffer (cursor/bottom-row state)
+// that only the daemon has — but the "reserve one row" decision could become a
+// per-client parameter in the tty protocol instead of being hardcoded. Left as
+// a note rather than a refactor: a richer client (e.g. an embedded terminal)
+// can render its hint outside the emulated bounds and not need this at all.
 /**
  * Make the bottom row available for the attach client's hint line. When pi's
  * content reaches the bottom row, append a one-line scroll and re-park the
@@ -143,6 +145,17 @@ export function hintRoomSequence(terminal: xterm.Terminal): string {
   const parkedRow = Math.max(1, buffer.cursorY);
   const parkedCol = buffer.cursorX + 1;
   return `${cursorToRow(terminal.rows)}\n${cursorTo(parkedRow, parkedCol)}`;
+}
+
+/**
+ * The one socket event whose payload the daemon reads structurally (to track
+ * session rotation below). Every other event is forwarded opaquely as a bare
+ * SocketEvent, so only this one earns a typed shape, narrowed via the guard.
+ */
+interface SessionChangedEvent {
+  type: "session_changed";
+  sessionFile?: string;
+  sessionId: string;
 }
 
 function isSessionChangedEvent(

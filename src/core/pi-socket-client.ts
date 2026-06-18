@@ -16,12 +16,6 @@ import type {
   RpcSessionState,
 } from "@geraschenko/pi-coding-agent";
 
-export interface SessionChangedEvent {
-  type: "session_changed";
-  sessionFile?: string;
-  sessionId: string;
-}
-
 /** Any broadcast record that is not a response: agent events, session events, side-channel events. */
 export type SocketEvent = { type: string } & Record<string, unknown>;
 

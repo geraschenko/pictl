@@ -13,7 +13,6 @@ export {
   connectWithRetry,
   getState,
   type SocketEvent,
-  type SessionChangedEvent,  // TDC: isn't SessionChangedEvent just an example of a SocketEvent? Why do we have a special type for this event but not others? I guess it's because the PiSocketClient needs to *do* something differently when it sees it?
 } from "./pi-socket-client.ts";
 
 // tty.sock protocol

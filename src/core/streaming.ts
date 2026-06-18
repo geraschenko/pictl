@@ -28,6 +28,12 @@ export type StreamOutputType = (typeof STREAM_OUTPUT_TYPES)[number];
 export const PROMPT_TYPES = ["messages", "entries", "raw", "detach"] as const;
 export type PromptType = (typeof PROMPT_TYPES)[number];
 
+// "killed" is a streaming-only extension, not a pi.sock state predicate like
+// the UntilCondition cases: it means "follow until the socket closes" and
+// resolves by throwing (see waitForUntil), never by reaching a success state.
+// It lives here rather than in until.ts because only the streaming commands
+// (tail/prompt -f) follow indefinitely; `wait` consumes the bare UntilCondition
+// engine, where "until killed" would just block for pi's death and exit nonzero.
 export type StreamUntil = UntilCondition | { kind: "killed" };
 
 interface StreamCursorRecord {
