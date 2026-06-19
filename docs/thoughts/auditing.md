@@ -1,0 +1,1 @@
+There should probably be an audit trail for all pictl commands sent to an agent, perhaps including when they were sent and by whom.

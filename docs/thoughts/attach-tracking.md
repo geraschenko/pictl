@@ -1,0 +1,1 @@
+agent.json should track some kind of information about interactive attachments. At the very least, "is somebody interactively attached?", since this is important context when doing things like navigate-tree from a script. It may be reasonable to track the number of attachments, their pids, and maybe terminal sizes.
