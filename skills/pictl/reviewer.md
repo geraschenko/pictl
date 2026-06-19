@@ -55,8 +55,6 @@ Return only:
 EOF
 ```
 
-Any edit invalidates prior approval: re-read the final on-disk artifact before approving.
-
 Archive reviewers you spawned when done:
 
 ```bash
