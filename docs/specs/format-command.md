@@ -18,9 +18,8 @@ The existing `scripts/pictl-render` jq prototype must remain in place unchanged 
 - For all three subcommands, omitted `file` and `-` both mean stdin.
 - Formatted output includes copyable entry ids where entry ids are relevant.
 - Message formatting renders user and assistant text in full, indicates thinking without printing thinking contents, renders tool calls compactly, and does not print full successful tool responses by default.
-- Message formatting summarizes successful tool results by default. Failed tool result snippets are shown when `--tool-results errors` is selected. `--tool-results full` prints full tool results, successful or failed.
-TDC: I want to see short snippets for failed tool results by default, so we only need summary|none|full.
-- Entry formatting shows all entries by default, including model changes, thinking level changes, compactions, branch summaries, labels, custom entries, messages, tool results, and any future entry type with valid base fields.
+- Message formatting summarizes successful tool results by default. Failed tool results include short snippets by default. `--tool-results full` prints full tool results, successful or failed.
+- Entry formatting shows all valid session entries by default, including model changes, thinking level changes, compactions, branch summaries, labels, custom entries, messages, and tool results.
 - Tree formatting defaults to a conversation-oriented view containing only user and assistant message entries.
 - Tree formatting supports pi-aligned filter modes with explicit source comments identifying the pi implementation they are adapted from.
 - No existing pictl subcommand output changes in this spec.
@@ -41,7 +40,7 @@ pictl format tree [file]
 Flags:
 
 ```bash
---tool-results summary|errors|none|full
+--tool-results summary|none|full
 --max-tool-arg-chars <count>
 --max-error-lines <count>
 ```
@@ -52,20 +51,21 @@ Defaults:
 - `--max-tool-arg-chars 120`
 - `--max-error-lines 10`
 
+`summary` mode prints full user/assistant text, compact tool calls, successful tool result summaries, and truncated failed tool result snippets.
+
 ### `pictl format entries`
 
 Flags:
 
 ```bash
 --timestamps
---messages summary|full
+--full
 ```
-TDC: --messages is a confusing flag name, because it cognitively overlaps with `pictl format messages`. Let's make the default to show summaries and use --full to show full entries.
 
 Defaults:
 
 - timestamps hidden unless `--timestamps` is passed
-- `--messages summary`
+- entries are shown as summaries unless `--full` is passed
 
 ### `pictl format tree`
 
@@ -73,15 +73,13 @@ Flags:
 
 ```bash
 --filter conversation|pi-default|pi-no-tools|pi-user-only|pi-labeled-only|pi-all
---current-leaf <entry-id>
 --width <columns>
 ```
-TDC: what does --current-leaf do? It's confusing that this exists, since _display_ can't set the current leaf.
 
 Defaults:
 
 - `--filter conversation`
-- current leaf taken from input `leafId` when present
+- current leaf taken from required input `leafId`
 - `--width 120`
 
 ## Examples
@@ -92,6 +90,7 @@ Message stream input:
 {"type":"message","message":{"role":"user","content":[{"type":"text","text":"Hello"}]}}
 {"type":"message","message":{"role":"assistant","content":[{"type":"thinking","thinking":"hidden"},{"type":"toolCall","name":"read","arguments":{"path":"README.md"}}]}}
 {"type":"message","message":{"role":"toolResult","toolName":"read","content":[{"type":"text","text":"large output"}],"isError":false}}
+{"type":"pictl_cursor","sessionId":"session-1","entryId":"0eb932a9"}
 ```
 
 Formatted message output shape:
@@ -104,33 +103,37 @@ Hello
 [thinking]
 [tool:read path: README.md]
 [read:ok 1 lines, 12 bytes]
+[cursor: 0eb932a9]
 ```
-TDC: note that when the stream/file includes a cursor at the end, message formatting should also include the entry id from that cursor at the end.
 
 Entry output shape:
 
-TDC: let's no show parentId by default
 ```text
 79d4e93e user       Help me write a small jq-based script...
 ab4e0c01 assistant  [thinking] [tool: read]
 0eb932a9 toolResult read ok, 63 lines, 2953 bytes
 ```
 
-Tree output shape:
-TDC: this needs elaboration. You need to show an example where there's branching
+Entries do not show `parentId` by default. They show the entry id, role/type, and compact summary.
+
+Tree output shape with branching:
+
 ```text
 79d4e93e user: Help me write a small jq-based script...
-ab4e0c01 assistant: [thinking] [tool: read]
+├─ ab4e0c01 assistant: [thinking] [tool: read]
+│  └─ 0eb932a9 user: What else should this script do?
+└─ d66116fb user: I prefer TypeScript over jq.
+   └─ › ea28b2b5 assistant: Agreed. Let's make this `pictl format`...
+[cursor: ea28b2b5]
 ```
-TDC: Since this always comes from get-tree, we always get a leafId. That leafId should be include at the end of the tree output as a cursor, or I guess we can use a little pointer or "*" or ">" or something.
+
+The current leaf line is marked with `›`, and tree output ends with a cursor line containing the input `leafId`.
 
 Formatted text ends with exactly one trailing newline when there is at least one output line. Empty formatted output is the empty string.
 
 Truncation uses the single Unicode ellipsis character `…`. Width-limited one-line summaries are truncated to fit within the configured width, including the ellipsis.
 
 Line counts count newline-separated text lines after joining text content. Byte counts use UTF-8 byte length.
-
-Entry rows display `null` parent ids as `root`.
 
 ## Tree filter behavior
 
@@ -210,30 +213,7 @@ export type MessageStreamRecord =
 ```ts
 import type { SessionEntry, SessionTreeNode } from "@geraschenko/pi-coding-agent";
 
-export interface UnknownSessionEntry {
-  readonly type: string;
-  readonly id: string;
-  readonly parentId: string | null;
-  readonly timestamp?: string;
-  readonly [key: string]: unknown;
-}
-
-export type FormatSessionEntry = SessionEntry | UnknownSessionEntry;
-
-// TDC: why are both of these needed? Why exactly do we even have a type for unknown session entries? If something doesn't conform to SessionEntry, shouldn't we just do our best to display it somehow? But the expectation is that all entries _will_ conform to SessionEntry, right? If not, we should probably emit an error or have non-zero exit code, because somebody is using this for something other than entries. I guess `tail --type entries` does return a pictl_cursor at the end, so we have to tolerate that. Maybe it _shouldn't_ return a pictl_cursor at the end, since the entries already have the relevant cursor information. That sounds cleanest to me.
-export function isKnownSessionEntry(entry: FormatSessionEntry): entry is SessionEntry;
-
-export function isUnknownSessionEntry(
-  entry: FormatSessionEntry,
-): entry is UnknownSessionEntry;
-
-// isKnownSessionEntry returns true only for entries whose type is a current
-// known SessionEntry variant and whose shape is valid for that variant.
-// isUnknownSessionEntry returns true only for entries with valid base fields
-// (type, id, parentId) whose type is not a current known SessionEntry variant.
-// A malformed entry using a known type string is invalid input, not an
-// UnknownSessionEntry.
-export type ToolResultDisplayMode = "summary" | "errors" | "none" | "full";
+export type ToolResultDisplayMode = "summary" | "none" | "full";
 
 export interface MessageFormatOptions {
   readonly maxToolArgChars: number;
@@ -243,7 +223,7 @@ export interface MessageFormatOptions {
 
 export interface EntryFormatOptions {
   readonly timestamps: boolean;
-  readonly messages: "summary" | "full";
+  readonly full: boolean;
 }
 
 /**
@@ -253,7 +233,8 @@ export interface EntryFormatOptions {
  * entries are shown.
  *
  * `pi-*` modes are intentionally aligned with pi's TreeSelector FilterMode from:
- * /home/anton/git/earendil-works/pi/packages/coding-agent/src/modes/interactive/components/tree-selector.ts
+ * repo-relative: packages/coding-agent/src/modes/interactive/components/tree-selector.ts
+ * local reference: /home/anton/git/earendil-works/pi/packages/coding-agent/src/modes/interactive/components/tree-selector.ts
  *
  * If pi changes TreeSelector filtering behavior, update these modes to match.
  */
@@ -267,24 +248,17 @@ export type TreeFilterMode =
 
 export interface TreeFormatOptions {
   readonly filter: TreeFilterMode;
-  readonly currentLeafId: string | null | undefined;
   readonly width: number;
 }
 
 export interface EntriesInput {
-  readonly entries: readonly FormatSessionEntry[];
+  readonly entries: readonly SessionEntry[];
   readonly leafId?: string | null;
 }
 
 export interface TreeInput {
   readonly tree: readonly SessionTreeNode[];
-  readonly leafId?: string | null;
-}
-
-export interface ToolCallInfo {
-  readonly id: string;
-  readonly name: string;
-  readonly arguments: Readonly<Record<string, unknown>>;
+  readonly leafId: string | null;
 }
 ```
 
@@ -328,12 +302,13 @@ export function formatMessageRecord(
 ): string | undefined;
 ```
 
-`formatMessageRecords` calls `formatMessageRecord` for each record and joins emitted strings.
+`formatMessageRecords` calls `formatMessageRecord` for each record and joins emitted strings. Cursor records are rendered as `[cursor: <entryId>]` when `entryId` is non-null and `[cursor: null]` otherwise.
 
 ### `src/format/entries.ts`
 
 ```ts
-import type { EntriesInput, EntryFormatOptions, FormatSessionEntry, ToolCallInfo } from "./types.ts";
+import type { SessionEntry } from "@geraschenko/pi-coding-agent";
+import type { EntriesInput, EntryFormatOptions } from "./types.ts";
 
 export const DEFAULT_ENTRY_FORMAT_OPTIONS: EntryFormatOptions;
 
@@ -343,25 +318,23 @@ export function formatEntriesInput(
 ): string;
 
 export function formatEntryJsonl(
-  entries: Iterable<FormatSessionEntry>,
+  entries: Iterable<SessionEntry>,
   options?: Partial<EntryFormatOptions>,
 ): string;
 
 export function formatEntry(
-  entry: FormatSessionEntry,
+  entry: SessionEntry,
   options: EntryFormatOptions,
-  // TDC: tool calls are _separate_ from the entry? That doesn't look right. tool calls are part of the `content` of an entry. Why are we passing both the entry and the tool calls separately?
-  toolCalls: ReadonlyMap<string, ToolCallInfo>,
 ): string;
 ```
 
-`formatEntriesInput` and `formatEntryJsonl` materialize entries in input order, build the tool-call lookup map from assistant tool-call content blocks, then call `formatEntry` for each entry.
+`formatEntriesInput` and `formatEntryJsonl` call `formatEntry` for each entry in input order.
 
 ### `src/format/tree.ts`
 
 ```ts
 import type { SessionTreeNode } from "@geraschenko/pi-coding-agent";
-import type { ToolCallInfo, TreeFilterMode, TreeFormatOptions, TreeInput } from "./types.ts";
+import type { TreeFilterMode, TreeFormatOptions, TreeInput } from "./types.ts";
 
 export const DEFAULT_TREE_FORMAT_OPTIONS: TreeFormatOptions;
 
@@ -387,33 +360,32 @@ export function formatTreeInput(
 
 export function flattenTreeForFormat(
   roots: readonly SessionTreeNode[],
-  currentLeafId: string | null | undefined,
+  currentLeafId: string | null,
   filter: TreeFilterMode,
 ): readonly FlatTreeNode[];
 
 export function formatTreeNodeLine(
   flatNode: FlatTreeNode,
   options: TreeFormatOptions,
-  // TDC: again, why are we passing tool calls separately? They're in the `node` already. This doesn't make sense to me.
-  toolCalls: ReadonlyMap<string, ToolCallInfo>,
 ): string;
 ```
 
-`formatTreeInput` builds the tool-call lookup map from assistant tool-call content blocks, calls `flattenTreeForFormat`, then calls `formatTreeNodeLine` for each flat node.
-TDC: what is this tool-call lookup map? The toolResult message already has the name of the tool called and the result. What else do you need?
+`formatTreeInput` passes `input.leafId` to `flattenTreeForFormat`, calls `formatTreeNodeLine` for each flat node, and appends `[cursor: <leafId>]`.
 
 Any tree flattening, filtering, connector, or entry-summary logic adapted from pi must have explicit comments naming the source file:
 
 ```text
-/home/anton/git/earendil-works/pi/packages/coding-agent/src/modes/interactive/components/tree-selector.ts
+repo-relative: packages/coding-agent/src/modes/interactive/components/tree-selector.ts
+local reference: /home/anton/git/earendil-works/pi/packages/coding-agent/src/modes/interactive/components/tree-selector.ts
 ```
 
 ### `src/format/input.ts`
 
 ```ts
+import type { SessionEntry } from "@geraschenko/pi-coding-agent";
 import type { MessageStreamRecord, StreamCursorRecord } from "../core/stream-types.ts";
 import type { CommandContext } from "../core/targets.ts";
-import type { EntriesInput, FormatSessionEntry, TreeInput } from "./types.ts";
+import type { EntriesInput, TreeInput } from "./types.ts";
 
 export async function readInputFile(
   context: CommandContext,
@@ -424,54 +396,58 @@ export function parseJsonInput(input: string): unknown;
 
 export function parseJsonlInput(input: string): readonly unknown[];
 
-// TDC: I'm confused about these assertions. If we see something that's not the form it should be, we should return non-zero exit status and emit a useful error, but probably should not crash. Where do you intend to use these assertions?
-export function assertMessageStreamRecord(
-  value: unknown,
-): asserts value is MessageStreamRecord;
+export function decodeMessageStreamRecord(value: unknown): MessageStreamRecord;
 
-export function assertStreamCursorRecord(
-  value: unknown,
-): asserts value is StreamCursorRecord;
+export function decodeStreamCursorRecord(value: unknown): StreamCursorRecord;
 
-export function assertFormatSessionEntry(
-  value: unknown,
-): asserts value is FormatSessionEntry;
+export function decodeSessionEntry(value: unknown): SessionEntry;
 
-export function assertEntriesInput(value: unknown): asserts value is EntriesInput;
+export function decodeEntriesInput(value: unknown): EntriesInput;
 
-export function assertTreeInput(value: unknown): asserts value is TreeInput;
+export function decodeTreeInput(value: unknown): TreeInput;
 
-export function parseEntriesInput(input: string): EntriesInput | readonly FormatSessionEntry[];
+export function parseEntriesInput(input: string): EntriesInput | readonly SessionEntry[];
 
 export function parseTreeInput(input: string): TreeInput;
 
 export function parseMessageRecords(input: string): readonly MessageStreamRecord[];
 ```
 
+The `decode*` functions validate unknown input and return typed values. Invalid input throws `UsageError` with a useful message so the command exits non-zero without crashing. `parseEntriesInput` accepts and ignores `pictl_cursor` records in JSONL input; non-cursor records must decode as `SessionEntry`.
+
 ### `src/format/command.ts`
 
 ```ts
 import type { RouteMap } from "@stricli/core";
+import {
+  booleanFlag,
+  commandNoTarget,
+  enumFlag,
+  parsedFlag,
+  stringArg,
+  type InferFlags,
+} from "../core/cli.ts";
 import type { CommandContext } from "../core/targets.ts";
 import type { ToolResultDisplayMode, TreeFilterMode } from "./types.ts";
 
-// TDC: follow the convention in the rest of the repo. Everything related to a command should be as close together as possible in code, so flag interfaces go right next to the command definition. Do not put all the flag interfaces first followed by all command definitions.
-export interface MessageFormatFlags {
-  readonly toolResults?: ToolResultDisplayMode;
-  readonly maxToolArgChars?: number;
-  readonly maxErrorLines?: number;
-}
-
-export interface EntryFormatFlags {
-  readonly timestamps: boolean;
-  readonly messages?: "summary" | "full";
-}
-
-export interface TreeFormatFlags {
-  readonly filter?: TreeFilterMode;
-  readonly currentLeaf?: string;
-  readonly width?: number;
-}
+const messageFormatFlags = {
+  toolResults: enumFlag("Tool result display (summary|none|full)", [
+    "summary",
+    "none",
+    "full",
+  ]),
+  maxToolArgChars: parsedFlag(
+    "Maximum tool argument characters",
+    parsePositiveInteger,
+    "count",
+  ),
+  maxErrorLines: parsedFlag(
+    "Maximum failed tool result snippet lines",
+    parsePositiveInteger,
+    "count",
+  ),
+};
+type MessageFormatFlags = InferFlags<typeof messageFormatFlags>;
 
 export async function formatMessagesCommand(
   this: CommandContext,
@@ -479,11 +455,60 @@ export async function formatMessagesCommand(
   file?: string,
 ): Promise<void>;
 
+const messagesCommand = commandNoTarget<MessageFormatFlags, [string | undefined]>({
+  common: true,
+  docs: { brief: "format pictl message JSONL" },
+  parameters: {
+    flags: messageFormatFlags,
+    positional: {
+      kind: "tuple",
+      parameters: [
+        { ...stringArg("Input file or - for stdin", "file"), optional: true },
+      ],
+    },
+  },
+  func: formatMessagesCommand,
+});
+
+const entryFormatFlags = {
+  timestamps: booleanFlag("Show timestamps"),
+  full: booleanFlag("Show full entry details"),
+};
+type EntryFormatFlags = InferFlags<typeof entryFormatFlags>;
+
 export async function formatEntriesCommand(
   this: CommandContext,
   flags: EntryFormatFlags,
   file?: string,
 ): Promise<void>;
+
+const entriesCommand = commandNoTarget<EntryFormatFlags, [string | undefined]>({
+  common: true,
+  docs: { brief: "format pictl entries JSON or JSONL" },
+  parameters: {
+    flags: entryFormatFlags,
+    positional: {
+      kind: "tuple",
+      parameters: [
+        { ...stringArg("Input file or - for stdin", "file"), optional: true },
+      ],
+    },
+  },
+  func: formatEntriesCommand,
+});
+
+const treeFormatFlags = {
+  filter: enumFlag("Tree filter", [
+    "conversation",
+    "pi-default",
+    "pi-no-tools",
+    "pi-user-only",
+    "pi-labeled-only",
+    "pi-all",
+  ]),
+  width: parsedFlag("Output width", parsePositiveInteger, "columns"),
+};
+type TreeFormatFlags = InferFlags<typeof treeFormatFlags>;
 
 export async function formatTreeCommand(
   this: CommandContext,
@@ -491,8 +516,27 @@ export async function formatTreeCommand(
   file?: string,
 ): Promise<void>;
 
+const treeCommand = commandNoTarget<TreeFormatFlags, [string | undefined]>({
+  common: true,
+  docs: { brief: "format pictl tree JSON" },
+  parameters: {
+    flags: treeFormatFlags,
+    positional: {
+      kind: "tuple",
+      parameters: [
+        { ...stringArg("Input file or - for stdin", "file"), optional: true },
+      ],
+    },
+  },
+  func: formatTreeCommand,
+});
+
+export function parsePositiveInteger(input: string): number;
+
 export const formatRoute: RouteMap<CommandContext>;
 ```
+
+Flag specs and inferred flag types are intentionally adjacent to their commands, following the existing repo convention.
 
 `formatMessagesCommand` calls `readInputFile`, `parseMessageRecords`, and `formatMessageRecords`.
 
@@ -500,20 +544,20 @@ export const formatRoute: RouteMap<CommandContext>;
 
 `formatTreeCommand` calls `readInputFile`, `parseTreeInput`, and `formatTreeInput`.
 
-`formatRoute` is a no-target route map with subcommands `messages`, `entries`, and `tree`. `src/core/app.ts` imports `formatRoute` from `../format/command.ts` and includes it in the top-level routes as `format`.
+`formatRoute` is a no-target route map with subcommands `messages`, `entries`, and `tree`. `src/core/app.ts` imports `formatRoute` from `../format/command.ts` and includes it in the top-level routes as `format: formatRoute`.
 
 ## Edge cases
 
 - Empty input behavior is subcommand-specific: `format messages` treats empty input as an empty JSONL stream and emits empty output; `format entries` treats empty input as an empty JSONL stream and emits empty output; `format tree` requires a JSON object and reports a parse error for empty input.
 - Invalid JSON or JSONL should produce a command error rather than partial misleading output.
 - Unknown message content blocks should not crash formatting; they should render as compact placeholders using `summarizeContentBlock`.
-- Unknown future entry types with valid base fields should be represented compactly by entry id, parent id, type, and a compact JSON summary. Malformed entries using known entry type names are invalid input and should produce a command error.
+- Entry input that is not a valid `SessionEntry` is invalid, except for `pictl_cursor` records in entry JSONL.
 - Message formatting is defined for the stream record types exported from `src/core/stream-types.ts`; invalid or unsupported records should produce a command error rather than misleading output.
 - Entry JSONL input may include `pictl_cursor` records from bounded `pictl tail --type entries`; these cursor records are ignored.
 - Repeated noisy control records in message streams may be coalesced only for `queue_update` records with identical rendered text and repeated `compaction_start` records. Session changes, tree navigation, and compaction end records are always shown.
 - Tool call arguments may be large and must be truncated according to `maxToolArgChars`.
 - Full successful tool results are printed only when `--tool-results full` is selected.
-- Failed tool result snippets are printed when `--tool-results errors` is selected. Full tool results, successful or failed, are printed when `--tool-results full` is selected.
+- Failed tool result snippets are printed in `summary` mode and in `full` mode; `none` mode suppresses all tool results.
 
 ## Non-goals
 
@@ -550,10 +594,10 @@ export const formatRoute: RouteMap<CommandContext>;
 - [x] Derisked type design: no `FormatMode`, no id display mode, no duplicated stream record schema in `src/format/types.ts`.
 - [x] Derisked maintainability requirement: comments must explicitly identify pi source for copied/adapted tree behavior.
 - [x] Critiqued and revised spec: removed unsupported unknown-stream-record behavior so message formatting stays aligned with the extracted core stream types.
-- [x] Incorporated reviewer feedback approved by user: context-aware stdin reading, parser assertion functions, cursor handling for entry JSONL, shared tool-call info, exact defaults, exact newline/truncation/counting basics, tree tool-call lookup, and explicit app integration.
-- [x] Incorporated second reviewer pass: resolved tool-result wording, moved tree filter predicates into SPEC, added positive integer validation, and replaced entry assertions with `FormatSessionEntry` so unknown entry types render compactly.
-- [x] Incorporated third reviewer pass: added `isKnownSessionEntry`/`isUnknownSessionEntry` guards for safe narrowing, made normalized tree width non-optional, defined exact conversation assistant predicate, and specified empty input behavior per subcommand.
-- [x] Incorporated fourth reviewer pass: clarified that unknown entry fallback applies only to unrecognized future entry type strings with valid base fields; malformed known-type entries are invalid input.
+- [x] Incorporated reviewer feedback approved by user: context-aware stdin reading, parser validation functions, cursor handling for entry JSONL, exact defaults, exact newline/truncation/counting basics, and explicit app integration.
+- [x] Incorporated second reviewer pass: moved tree filter predicates into SPEC and added positive integer validation.
+- [x] Incorporated user review comments from `3ed6088`: removed `errors` tool-result mode, made failed snippets part of default `summary`, changed entries full output flag to `--full`, removed tree `--current-leaf`, removed parent id from default entry examples, expanded tree branching/cursor example, removed unknown-entry fallback types, removed separate tool-call lookup parameters, replaced assertion functions with decode functions, and specified command flags adjacent to command definitions.
+- [x] Re-ran reviewer after user review comment incorporation and fixed the Stricli optional positional parameter design.
 - [ ] Implement stream type extraction.
 - [ ] Implement formatter modules.
 - [ ] Add `pictl format` route.
