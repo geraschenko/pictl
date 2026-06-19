@@ -67,7 +67,7 @@ pictl status
 Send a prompt programmatically and wait for the turn to finish:
 
 ```sh
-pictl prompt --and-wait "Say hello in one sentence."
+pictl prompt "Say hello in one sentence."
 ```
 
 Print the last assistant response:
@@ -121,10 +121,11 @@ export PICTL_TARGET="<agent-id-from-terminal-a>"
 
 Now send prompts from Terminal B and watch Terminal A update:
 
+TDC: how is the agent going to know what demo is currently happening? If we want the agent to know something about pictl, it needs to learn that information somehow.
 ```sh
-pictl prompt --and-wait "Explain in one short paragraph what is happening in this demo."
+pictl prompt "Explain in one short paragraph what is happening in this demo."
 
-pictl prompt --and-wait "List three things a script can do to this same live agent while a human is attached."
+pictl prompt "List three things a script can do to this same live agent while a human is attached."
 
 pictl get-last-assistant-text
 ```
