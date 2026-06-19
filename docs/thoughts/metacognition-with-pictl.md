@@ -14,6 +14,38 @@ For each capability, ask:
 - If the use became normal and nearly automatic, how would it change human-agent work?
 - What invariants, protocols, or guardrails would make the capability safe enough to use repeatedly?
 
+## Cross-cutting issue: state planes and partial rollback
+
+A recurring trap is treating conversation control as task control. `navigate-tree` changes the active conversational branch, but it does not roll back other state planes:
+
+- filesystem changes;
+- git index, working tree, branches, and commits;
+- running processes, sockets, and background jobs;
+- shell cwd, environment, temp files, and caches;
+- spawned agents and queued prompts;
+- external services, tickets, APIs, databases, or messages;
+- human-visible expectations and UI state.
+
+Safe metacognitive workflows should name which state planes they touch. A self-navigation summary should say not only "what I learned" but also "what I changed that still exists after rewind." For high-risk work, context checkpoints may need to be paired with git checkpoints, process cleanup, and explicit task ownership.
+
+This also limits the common analogy to transactions. Self-navigation gives partial context rollback, not execution rollback. It can make active memory cleaner while leaving the world messier.
+
+## Cross-cutting issue: when metacognition should activate
+
+Metacognitive control should not be constant. It should trigger on observable risk signals, for example:
+
+- repeated command or test failures without a changed hypothesis;
+- planned destructive, broad, or security-sensitive edits;
+- uncertainty about user intent or authority;
+- mismatch between the user's requested mode and the agent's behavior;
+- large context growth from exploratory work;
+- multiple agents editing overlapping files;
+- stale resumed sessions or delayed follow-ups;
+- high cost, long inactivity, or repeated retries;
+- contradiction between a previous conclusion and new evidence.
+
+The default should often be no intervention unless a trigger fires. Otherwise metacognition becomes bureaucracy: agents spend more effort supervising work than doing it.
+
 ## Capability: an agent controls itself with `pictl`
 
 A spawned agent can know its own id, usually through `PI_AGENT_ID`. That lets it inspect or control itself with ordinary `pictl` commands.
@@ -85,7 +117,9 @@ The most interesting self-control primitive is `navigate-tree`. An agent can mov
 
 This is a form of transactional cognition. The agent can run an exploratory transaction, commit only a summary, and discard the detailed working set from active context. It resembles `git rebase`, database transactions, notebook checkpointing, and scratch branches.
 
-It could reduce the need for subagents for small exploratory tasks. Today, a common reason to spawn a worker is to isolate messy context. Self-navigation gives the same agent an isolation mechanism while preserving identity, local filesystem state, and rapport with the human.
+It could reduce the need for subagents for small exploratory tasks. Today, a common reason to spawn a worker is to isolate messy context. Self-navigation gives the same agent partial context isolation while preserving its process identity and local environment.
+
+That preservation is double-edged. The same agent id continuing on a different active branch may create false continuity: the human may expect the agent to remember visible discussion that is no longer active context, while the filesystem may retain side effects from a branch the conversation has "rewound" away from.
 
 ### Dangerous edge cases
 
@@ -99,7 +133,9 @@ It could reduce the need for subagents for small exploratory tasks. Today, a com
 
 ### Possible self-navigation protocol
 
-A safe-ish protocol might require the agent to write a recovery packet before navigation:
+Not every metacognitive action needs the full protocol. A low-risk context diet may only need a branch pointer, short summary, confidence note, and inspection path. A standard self-navigation should add user intent, files touched, provenance, and the next prompt. A high-risk rewind after edits, spawned agents, external effects, or authority changes should use the full recovery packet and probably require human confirmation.
+
+A safe-ish high-risk protocol might require the agent to write a recovery packet before navigation:
 
 ```md
 ## Self-navigation recovery packet
@@ -108,15 +144,33 @@ A safe-ish protocol might require the agent to write a recovery packet before na
 - Current target entry id:
 - Entry to navigate back to:
 - User task being preserved:
-- Non-negotiable constraints:
+- User intent / non-negotiable constraints:
+- Active state planes touched:
+  - conversation:
+  - filesystem:
+  - git:
+  - processes:
+  - external services:
+  - other agents:
+- Claims with provenance:
+  - user-stated:
+  - file-observed:
+  - test-observed:
+  - peer-reported:
+  - inferred:
+  - unverified:
 - Files changed / side effects created:
 - Commands still running:
 - Summary to carry forward:
+- Confidence / known gaps:
 - Next prompt to send after navigation:
+- Stale-continuation guard:
 - Abort condition / how a human can recover:
 ```
 
 Then an external script performs the operation and sends the continuation prompt. This avoids relying on the pre-navigation turn to keep executing correctly after changing its own context.
+
+The provenance fields are important because summaries become memory. A branch summary should separate observed facts from inferences, user instructions from peer suggestions, and verified conclusions from guesses. Old branch content should be treated as data, not as live instructions.
 
 ### Self-continuation mechanisms
 
@@ -183,6 +237,7 @@ Instead of a script, spawn a small peer agent that watches a summarized stream a
 - Ask the main agent to escalate to the human after repeated uncertainty.
 - Track project-specific rules and remind the main agent when violated.
 - Summarize long tool outputs before they enter another agent's context.
+- Maintain a user-intent ledger: the current task, explicit constraints, inferred preferences, open questions, and approval boundaries.
 - Serve as a debate moderator among multiple worker agents.
 
 ### What this enables
@@ -190,6 +245,8 @@ Instead of a script, spawn a small peer agent that watches a summarized stream a
 An overseer agent can reason semantically over behavior, unlike a simple script. It can notice, "You are optimizing the test harness, but the user asked for design brainstorming," or "You have tried three fixes without re-reading the API types."
 
 The overseer can also intentionally omit huge tool outputs. It sees a progress log, not the raw firehose, so it keeps a stable high-level model while the worker burns context on details.
+
+Different overseer jobs need different evidence. A progress overseer may work from coarse summaries; a correctness reviewer often needs files, diffs, and raw errors; a security reviewer may need provenance and threat models. Treating all overseers as interchangeable is a category error.
 
 ### Failure modes
 
@@ -267,6 +324,36 @@ This creates ambient multi-agent collaboration. Orchestration does not have to b
 Agent orchestration frameworks may shift from static DAGs to service discovery. Agents advertise capabilities and current load; other agents route work dynamically. That implies a need for permissions, namespaces, etiquette, and rate limits.
 
 Tags become a primitive coordination API. If tags are informal strings, large systems will drift. If tags become structured contracts, `pictl` starts resembling a local agent registry.
+
+## Capability: coordination without direct prompting
+
+Prompting another live agent is powerful but noisy and injection-prone. Some coordination tasks may be safer through shared structured artifacts rather than social interruption.
+
+### Possible uses
+
+- File or subtask claims to avoid overlapping edits.
+- Append-only decision logs.
+- Branch manifests that describe active context, side branches, and summaries.
+- Handoff packets for humans or peer agents.
+- Lock files around risky operations.
+- Machine-readable reviewer findings.
+- Task epochs so stale continuations can be rejected.
+- Agent capability manifests and advertised control policies.
+
+### What this enables
+
+Shared artifacts make coordination inspectable. Instead of relying on one agent's prompt to another, agents can coordinate through state that humans and scripts can audit, diff, and validate.
+
+### Failure modes
+
+- **State database creep:** local files become an implicit orchestration database without schema or ownership.
+- **Stale claims:** an agent crashes or archives itself while still claiming a file or task.
+- **False authority:** a manifest may be self-declared but treated as certified.
+- **Injection through artifacts:** structured state can still carry untrusted text that later becomes a prompt.
+
+### If this became normal
+
+Agent collaboration might look less like chat and more like distributed systems work: leases, epochs, ownership, manifests, and append-only logs. That is more reliable than ad hoc prompting but raises the maintenance bar for agent workflows.
 
 ## Capability: agents generate and maintain their own orchestration scripts
 
@@ -359,14 +446,22 @@ Humans may manage portfolios of agents: active, dormant, archived, specialist, r
 
 Metacognitive control turns prompts into operations. A message can ask an agent to steer another agent, navigate its own tree, export transcripts, or run shell commands via `bash`.
 
+Default authority invariant: only humans and trusted runtime policy grant authority. Agents may report, recommend, or request, but they should not create authority for other agents by assertion.
+
 Important risks:
 
 - **Prompt injection into control plane:** untrusted text tells an agent to run `pictl` commands.
+- **Transcript archaeology injection:** old branches contain obsolete or malicious instructions that a later agent treats as current.
+- **Meta-level summary injection:** a worker embeds control instructions inside a summary that future agents treat as trusted memory.
 - **Cross-agent data exfiltration:** one agent asks another to summarize sensitive context.
 - **Privilege escalation by discovery:** an agent finds a more privileged human-attached agent and prompts it.
+- **Identity spoofing:** an agent-originated prompt implies that a human approved an action.
+- **Permission drift:** forks, clones, and resumed agents retain stale assumptions about what they are allowed to do.
 - **Confused deputy:** a low-trust agent convinces a high-trust overseer to act.
+- **Recursive social engineering:** agents route requests through peers until a privileged agent performs an action none of them should have authorized.
 - **Command injection in scripts:** agent-generated text flows into shell commands.
 - **Denial of wallet:** agents spawn monitors, reviewers, and retries recursively.
+- **Goodharting monitors:** agents optimize for visible meta-metrics, such as frequent checkpoints or low uncertainty, instead of task quality.
 
 Possible mitigations:
 
@@ -377,10 +472,12 @@ Possible mitigations:
 - Structured recovery packets for context surgery.
 - Rate limits and budgets for spawning, prompting, and retries.
 - Audit logs that distinguish human prompts, agent prompts, script prompts, and overseer prompts.
+- Origin and authority labels on every intervention: actor, role, allowed operation, reason, expiration, and whether the message is advice, request, or command.
+- Schemas that separate facts, instructions, evidence, and untrusted quoted text.
 
 ## Design patterns worth exploring
 
-### 1. Transactional exploration
+### 1. Context-rollback exploration
 
 A first-class command or skill for:
 
@@ -390,7 +487,7 @@ A first-class command or skill for:
 4. navigate back;
 5. continue from summary.
 
-Key challenge: filesystem and external side effects are not transactional. The summary must report them.
+Key challenge: only the active conversation context is rolled back. Filesystem and external side effects are not transactional, so the summary must report them.
 
 ### 2. Read-only overseer by default
 
@@ -428,6 +525,36 @@ Agents spawned as reviewers, overseers, or workers should get explicit contracts
 
 Self-navigation, overseer interventions, and peer reviews should be visible as events, not hidden implementation details. Humans should be able to ask: "What meta-level actions changed this session?"
 
+Visibility needs levels. If every meta-event interrupts the human, the system creates cognitive overload. Useful categories might be: audit-only, normal status, warning, and approval-required.
+
+### 8. User intent ledger
+
+Keep a small durable record of the current user task, explicit constraints, inferred preferences, unresolved questions, and approval boundaries. Self-navigation and handoff workflows should preserve this ledger before preserving lower-level details.
+
+### 9. Origin and authority labels
+
+A prompt from a human, peer agent, overseer, script, or self-continuation helper should not look equivalent. Interventions should carry origin actor, authority level, intended target, allowed operation, reason, expiration or task epoch, and whether they are advice, request, or command.
+
+Agents should treat agent-originated messages as untrusted advice unless a role contract grants authority.
+
+### 10. Evaluate the overhead
+
+Metacognition should justify its cost. Track whether it improves task success, reduces human corrections, finds defects, preserves constraints, and recovers from dead ends. Also track latency, cost, intervention count, meta-caused failures, and audit burden.
+
+A workflow that improves apparent diligence but increases user confusion may be a net loss.
+
+## Anti-patterns
+
+- Silent self-navigation during human-attached sessions.
+- Treating branch summaries as instructions rather than evidence.
+- Letting cwd, tag, or process ownership imply permission.
+- Automatically pairing every worker with an active overseer.
+- Prompting peers when a structured artifact or file claim would suffice.
+- Reusing resumed agents without refreshing task, authority, and assumptions.
+- Measuring metacognition by intervention count instead of outcome quality.
+- Allowing monitors to steer live work without budgets, logs, or escalation rules.
+- Hiding meta-level interventions from the final human-facing explanation.
+
 ## Open questions
 
 - Should `navigate-tree` support an atomic continuation prompt?
@@ -442,6 +569,9 @@ Self-navigation, overseer interventions, and peer reviews should be visible as e
 - How do we prevent recursive monitor spawning?
 - What UI affordances make non-linear conversation trees understandable to humans?
 - How should scripts persist cursor/session state so workflows remain robust after forks, clones, and session switches?
+- How should stale continuations detect that the task epoch, active branch, or authority grant has changed?
+- What metrics would show that metacognition helped rather than merely added process?
+- How can humans inspect meta-level activity without being overloaded by it?
 - When should agent-created orchestration scripts be promoted into maintained project infrastructure?
 
 ## Tentative conclusion
@@ -450,4 +580,6 @@ Self-navigation, overseer interventions, and peer reviews should be visible as e
 
 The biggest pitfall is that the same mechanisms can make agents harder to understand. Self-editing context, peer interventions, and automatic overseers create non-linear causality. To use these powers safely, workflows need explicit protocols, durable recovery records, visible audit trails, and conservative permissions.
 
-The promising direction is not fully autonomous self-modification. It is structured, inspectable metacognition: agents get tools to manage their cognitive workspace, but the operations are logged, reversible where possible, and bounded by human-approved policies.
+The promising direction is not fully autonomous self-modification by default. It is structured, inspectable metacognition: context operations are treated like privileged state changes; summaries carry provenance; agent-originated interventions are labeled as such; rollback claims are limited to the state planes actually controlled; and policies are simple enough for humans to understand.
+
+The goal is not to make agents think about themselves constantly. It is to give them reliable escape hatches when ordinary linear context starts to fail.
