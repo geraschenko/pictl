@@ -19,6 +19,7 @@ The existing `scripts/pictl-render` jq prototype must remain in place unchanged 
 - Formatted output includes copyable entry ids where entry ids are relevant.
 - Message formatting renders user and assistant text in full, indicates thinking without printing thinking contents, renders tool calls compactly, and does not print full successful tool responses by default.
 - Message formatting summarizes successful tool results by default. Failed tool result snippets are shown when `--tool-results errors` is selected. `--tool-results full` prints full tool results, successful or failed.
+TDC: I want to see short snippets for failed tool results by default, so we only need summary|none|full.
 - Entry formatting shows all entries by default, including model changes, thinking level changes, compactions, branch summaries, labels, custom entries, messages, tool results, and any future entry type with valid base fields.
 - Tree formatting defaults to a conversation-oriented view containing only user and assistant message entries.
 - Tree formatting supports pi-aligned filter modes with explicit source comments identifying the pi implementation they are adapted from.
@@ -48,8 +49,8 @@ Flags:
 Defaults:
 
 - `--tool-results summary`
-- `--max-tool-arg-chars 240`
-- `--max-error-lines 20`
+- `--max-tool-arg-chars 120`
+- `--max-error-lines 10`
 
 ### `pictl format entries`
 
@@ -59,6 +60,7 @@ Flags:
 --timestamps
 --messages summary|full
 ```
+TDC: --messages is a confusing flag name, because it cognitively overlaps with `pictl format messages`. Let's make the default to show summaries and use --full to show full entries.
 
 Defaults:
 
@@ -74,6 +76,7 @@ Flags:
 --current-leaf <entry-id>
 --width <columns>
 ```
+TDC: what does --current-leaf do? It's confusing that this exists, since _display_ can't set the current leaf.
 
 Defaults:
 
@@ -99,25 +102,27 @@ Hello
 
 == assistant ==
 [thinking]
-[tool call: read]
-  path: README.md
-[tool result: read, 1 lines, 12 bytes]
+[tool:read path: README.md]
+[read:ok 1 lines, 12 bytes]
 ```
+TDC: note that when the stream/file includes a cursor at the end, message formatting should also include the entry id from that cursor at the end.
 
 Entry output shape:
 
+TDC: let's no show parentId by default
 ```text
-79d4e93e <- bb06e1ea  message user       Help me write a small jq-based script...
-ab4e0c01 <- 79d4e93e  message assistant  [thinking] [tool: read]
-0eb932a9 <- ab4e0c01  message toolResult read ok, 63 lines, 2953 bytes
+79d4e93e user       Help me write a small jq-based script...
+ab4e0c01 assistant  [thinking] [tool: read]
+0eb932a9 toolResult read ok, 63 lines, 2953 bytes
 ```
 
 Tree output shape:
-
+TDC: this needs elaboration. You need to show an example where there's branching
 ```text
-  79d4e93e user: Help me write a small jq-based script...
-› ab4e0c01 assistant: [thinking] [tool: read]
+79d4e93e user: Help me write a small jq-based script...
+ab4e0c01 assistant: [thinking] [tool: read]
 ```
+TDC: Since this always comes from get-tree, we always get a leafId. That leafId should be include at the end of the tree output as a cursor, or I guess we can use a little pointer or "*" or ">" or something.
 
 Formatted text ends with exactly one trailing newline when there is at least one output line. Empty formatted output is the empty string.
 
@@ -215,6 +220,7 @@ export interface UnknownSessionEntry {
 
 export type FormatSessionEntry = SessionEntry | UnknownSessionEntry;
 
+// TDC: why are both of these needed? Why exactly do we even have a type for unknown session entries? If something doesn't conform to SessionEntry, shouldn't we just do our best to display it somehow? But the expectation is that all entries _will_ conform to SessionEntry, right? If not, we should probably emit an error or have non-zero exit code, because somebody is using this for something other than entries. I guess `tail --type entries` does return a pictl_cursor at the end, so we have to tolerate that. Maybe it _shouldn't_ return a pictl_cursor at the end, since the entries already have the relevant cursor information. That sounds cleanest to me.
 export function isKnownSessionEntry(entry: FormatSessionEntry): entry is SessionEntry;
 
 export function isUnknownSessionEntry(
@@ -344,6 +350,7 @@ export function formatEntryJsonl(
 export function formatEntry(
   entry: FormatSessionEntry,
   options: EntryFormatOptions,
+  // TDC: tool calls are _separate_ from the entry? That doesn't look right. tool calls are part of the `content` of an entry. Why are we passing both the entry and the tool calls separately?
   toolCalls: ReadonlyMap<string, ToolCallInfo>,
 ): string;
 ```
@@ -387,11 +394,13 @@ export function flattenTreeForFormat(
 export function formatTreeNodeLine(
   flatNode: FlatTreeNode,
   options: TreeFormatOptions,
+  // TDC: again, why are we passing tool calls separately? They're in the `node` already. This doesn't make sense to me.
   toolCalls: ReadonlyMap<string, ToolCallInfo>,
 ): string;
 ```
 
 `formatTreeInput` builds the tool-call lookup map from assistant tool-call content blocks, calls `flattenTreeForFormat`, then calls `formatTreeNodeLine` for each flat node.
+TDC: what is this tool-call lookup map? The toolResult message already has the name of the tool called and the result. What else do you need?
 
 Any tree flattening, filtering, connector, or entry-summary logic adapted from pi must have explicit comments naming the source file:
 
@@ -415,6 +424,7 @@ export function parseJsonInput(input: string): unknown;
 
 export function parseJsonlInput(input: string): readonly unknown[];
 
+// TDC: I'm confused about these assertions. If we see something that's not the form it should be, we should return non-zero exit status and emit a useful error, but probably should not crash. Where do you intend to use these assertions?
 export function assertMessageStreamRecord(
   value: unknown,
 ): asserts value is MessageStreamRecord;
@@ -445,6 +455,7 @@ import type { RouteMap } from "@stricli/core";
 import type { CommandContext } from "../core/targets.ts";
 import type { ToolResultDisplayMode, TreeFilterMode } from "./types.ts";
 
+// TDC: follow the convention in the rest of the repo. Everything related to a command should be as close together as possible in code, so flag interfaces go right next to the command definition. Do not put all the flag interfaces first followed by all command definitions.
 export interface MessageFormatFlags {
   readonly toolResults?: ToolResultDisplayMode;
   readonly maxToolArgChars?: number;
