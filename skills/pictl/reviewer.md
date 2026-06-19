@@ -2,7 +2,17 @@
 
 Use this branch for a fresh-context blind-spot review: peer review, adversarial review, second opinion, or critique. Reviewers have bounded authority: they report findings; they do not edit, test, or take over unless explicitly asked.
 
-## Default pattern
+## Review philosophy
+
+Reviewer agents are not a bureaucratic checkbox. Use them because a fresh, critical mind can make the artifact better.
+
+Treat the reviewer as a collaborator with a distinct role: they are the critic; you are the owner/advocate. Build a substantive exchange. Explain what you are trying to improve, what tradeoffs you made, and what kind of pressure would be most useful.
+
+Do not cargo-cult the prompts below. They are scaffolds, not rituals. Tune your prompt to the review moment. A good follow-up may be short and conversational: "I addressed your concern about X by doing Y; I chose not to do Z because... Does that resolve the risk, or do you still see a blocker?"
+
+## Starting pattern
+
+This is a useful first-pass prompt. Adapt it freely based on what you're trying to achieve with this review.
 
 Spawn a read-only reviewer:
 
@@ -39,21 +49,23 @@ Use these when helpful:
 
 For high-stakes reviews, keep roles separate: the reviewer is the critic; the main agent is the advocate/owner. Iterate until both approve the final on-disk artifact, or until remaining objections are explicitly deferred.
 
-After edits, ask for an additional pass:
+## Follow-up style
+
+After edits, talk to the reviewer directly. Summarize what changed and why. Invite them to stay critical, but avoid repeating a large boilerplate prompt unless it is useful.
+
+Example:
 
 ```bash
 pictl prompt -t "$reviewer" - <<'EOF' | ./scripts/pictl-render
-I incorporated your feedback. Re-read the final on-disk artifact.
+I addressed your concern about the parser contract by adding explicit assertion functions and defining malformed known-type entries as invalid input.
 
-Stay in critic mode. Probe weaknesses; do not merely agree.
+I intentionally did not add a fallback for malformed known types because that would hide schema drift.
 
-Return only:
-1. Whether your main concerns were addressed.
-2. Any remaining high-confidence issues.
-3. Any overcorrection, redundancy, or misleading framing.
-4. Approve, or name the smallest next edit needed for approval.
+Can you re-read the spec and tell me whether this resolves your blocker? If not, name the smallest remaining edit needed for approval.
 EOF
 ```
+
+Use structured return formats when they clarify the task; otherwise prefer a natural review conversation.
 
 Archive reviewers you spawned when done:
 
