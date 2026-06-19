@@ -7,7 +7,7 @@ description: Use pictl to discover, message, monitor, spawn, suspend, resume, an
 
 `pictl` controls long-lived pi agents. Use it to discover peers, send them work, monitor progress, and spawn helper agents.
 
-For scripting/orchestration details, read [references/orchestration.md](references/orchestration.md). For reviewer agents, read [references/reviewer.md](references/reviewer.md). For RPC command gotchas, read [references/rpc-details.md](references/rpc-details.md).
+For orchestration scripts, read [references/orchestration.md](references/orchestration.md). For fresh-context reviewers, read [references/reviewer.md](references/reviewer.md). For RPC gotchas, read [references/rpc-details.md](references/rpc-details.md).
 
 ## Core rules
 

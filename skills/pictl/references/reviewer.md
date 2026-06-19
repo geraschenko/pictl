@@ -1,6 +1,6 @@
 # pictl reviewer agents
 
-Use this branch when the user asks for a peer review, adversarial review, second opinion, or fresh-context critique. The goal is cognitive diversity with bounded authority: reviewers report findings; they do not take over the work unless explicitly asked.
+Use this branch for a fresh-context blind-spot review: peer review, adversarial review, second opinion, or critique. Reviewers have bounded authority: they report findings; they do not edit, test, or take over unless explicitly asked.
 
 ## Default pattern
 
@@ -9,74 +9,49 @@ Spawn a read-only reviewer:
 ```bash
 reviewer=$(pictl spawn --tag reviewer -- --tools read,grep,find,ls)
 pictl prompt -t "$reviewer" - <<EOF | ./scripts/pictl-render
-You are a fresh peer review agent.
+You are a fresh-context reviewer. Be critical and look for blind spots.
 
 Context:
-- Repository/task context: <short context>
-- Artifact to review: <path or branch/diff>
-
-Please review <path>. Be constructively critical and look for blind spots, not just copyedits.
+- Goal: <short task context>
+- Artifact: <path, branch, or diff>
+- Review focus: <correctness/security/clarity/maintainability/omissions>
 
 Return:
-1. Strongest parts.
-2. Important missing issues or underdeveloped ideas.
-3. Risks, failure modes, or security concerns.
-4. Places that are vague, misleading, or too optimistic.
-5. Concrete recommended edits.
+1. High-confidence issues.
+2. Speculative concerns.
+3. Vague, misleading, or overconfident parts.
+4. Concrete recommended edits.
 EOF
 ```
 
-`scripts/pictl-render` is critical to avoid flooding your own context with raw JSONL from a large review.
+Use read-only reviewers for critique. If a finding needs tests or edits, the main agent should usually perform that follow-up.
 
-## Keep reviewers read-only
+## Prompt knobs
 
-Use reviewers for critique, not verification or patching. If a finding needs a test run or edit, the main agent should usually do that follow-up after reading the review.
+Use these when helpful:
 
-Read-only reviewers reduce accidental edits, shell side effects, and prompt-injection impact. They also make the role contract clear: report findings to the main agent or human.
-
-## Prompting guidance
-
-A fresh reviewer starts with little context. Give it:
-
-- its role and authority boundaries;
-- the artifact path, diff, or branch to review;
-- enough task context to evaluate intent;
-- the kind of critique wanted: correctness, security, clarity, maintainability, novelty, omissions;
-- output shape, so findings are easy to merge;
-- permission to be critical.
-
-Ask for blind spots the main agent is likely to miss. Useful reviewer prompts include:
-
-- "Assume the author is overconfident; find hidden assumptions."
+- "Red-team this for hidden assumptions and unsafe failure modes."
 - "Focus on what is missing, misleading, or unsafe."
-- "Do not rewrite; report concrete findings and suggested edits."
+- "Do not rewrite; report findings and suggested edits."
 - "Separate high-confidence issues from speculative concerns."
 
-## Work with the reviewer, not just once
+## Second pass
 
-A second pass is often high-leverage: after incorporating feedback, ask the same reviewer to inspect the delta for overcorrection, redundancy, or remaining high-value issues.
+After incorporating feedback, ask the same reviewer for a narrow second pass:
 
 ```bash
 pictl prompt -t "$reviewer" - <<'EOF' | ./scripts/pictl-render
-I incorporated your main feedback. Please re-read the updated artifact and give a brief second-pass review.
-Focus only on high-value remaining issues:
-- Did the changes address your main concerns?
-- Did they introduce redundancy, over-structure, or misleading framing?
-- What are the top 3 remaining edits you would make?
+I incorporated your main feedback. Re-read the updated artifact and give a brief second-pass review.
+
+Return only:
+1. Whether the main concerns were addressed.
+2. Any overcorrection, redundancy, or misleading framing.
+3. The top 3 remaining edits.
 EOF
 ```
 
-Use additional passes only with narrow scopes. Open-ended third and fourth passes tend to produce diminishing returns.
-
-## Hygiene
-
-- Tag reviewers clearly, e.g. `reviewer`, `security-reviewer`, or `docs-reviewer`.
-- Keep the reviewer id in a variable or state file while using it.
-- Archive reviewers you spawned when done:
+Archive reviewers you spawned when done:
 
 ```bash
 pictl archive -t "$reviewer"
 ```
-
-- Do not purge reviewers unless the user explicitly asks for permanent deletion.
-- If the reviewer finds a major issue, preserve its id and cursor so the human can revive or interview it later.
