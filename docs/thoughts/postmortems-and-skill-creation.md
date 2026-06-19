@@ -65,44 +65,30 @@ This is especially useful because agents experience failures humans may not see:
 
 A useful suggestion box should be structured enough to sort, review, and revive context, but not so heavy that agents avoid using it.
 
-### Suggested record schema
+### Suggested record shape
 
-```md
-# Suggestion: <short title>
+Start with a lightweight Markdown note. Do not add fields until there is infrastructure that uses them.
 
-- id: <stable id or filename>
-- created_at: <timestamp>
-- agent_id: <PI_AGENT_ID>
-- session_id: <if known>
-- entry_id: <entry where suggestion was made>
-- cwd: <working directory>
-- task: <one-line user task/context>
-TDC: git commit hash would be good
+Suggested header:
+
+- title: short human-readable title
+- agent_id: `PI_AGENT_ID`
+- session_id: if known
+- entry_id: entry where the suggestion was made
+- cwd: working directory
+- git_commit: current commit hash, if the suggestion concerns repository state
+- task: one-line user task/context
 - impact: annoyance | reliability | safety | cost | speed | maintainability
-TDC: I don't know about the fields below. Given that there's currently no infrastructure for this, it's an awful lot of bureaucracy. Let's not add these until we do something with them
-- category: skill | tool | docs | project-structure | workflow | safety | bug
-- confidence: low | medium | high
-- status: proposed | accepted | rejected | implemented | needs-interview
 
-## Observation
+Suggested body:
 
-What happened? Include concise evidence, not a full transcript.
+- **Observation:** what happened, with concise evidence rather than a full transcript.
+- **Why it matters:** what failure, cost, or confusion this could prevent.
+- **Proposal:** what should change, concrete enough for a human to evaluate.
+- **Risks / counterarguments:** how this could be wrong, overfit, unsafe, or too expensive.
+- **Revival instructions:** how to inspect or revive the original context.
 
-## Why it matters
-
-What failure, cost, or confusion could this prevent?
-
-## Proposal
-
-What should change? Be concrete enough for a human to evaluate.
-
-## Risks / counterarguments
-
-How could this be wrong, overfit, unsafe, or too expensive?
-
-## Revival instructions
-
-How to inspect or revive the original context:
+Example revival commands:
 
 ```bash
 pictl status -t <agent_id>
@@ -125,7 +111,7 @@ The important field is not the prose; it is the revival pointer: agent id, sessi
 
 A human reviewing suggestions should be able to:
 
-1. list suggestions by category, confidence, impact, and status;
+1. list suggestions by title, impact, repository, or task;
 2. read the rendered suggestion;
 3. inspect the originating transcript around the entry id;
 4. revive or clone the agent at that point for interview;
@@ -192,10 +178,9 @@ However, navigation does not roll back post-mortem side effects. If the branch w
 ## Open questions
 
 - Should suggestion records live in `.pictl/`, project docs, or both?
-- Should `pictl` expose a helper to record current `agent_id`, `session_id`, and `entry_id` in a suggestion file?
+- Should a helper script or skill record current `agent_id`, `session_id`, and `entry_id` in a suggestion file?
 - Should post-mortem branches be labeled in the conversation tree?
-- Should there be a standard `pictl postmortem` wrapper that creates a branch, prompts for reflection, records suggestions, and returns?
-TDC: I don't think this should be part of pictl. I'm thinking of this as a powerful utility or skill that is _enabled_ by pictl, but absolutely not core to it.
+- What should a non-core post-mortem utility look like if it is enabled by `pictl` but not part of `pictl` itself?
 - How do we prevent suggestion spam while still capturing valuable process knowledge?
 - How should sensitive transcript details be redacted from durable suggestions?
 - Should accepted suggestions become tests for skills or orchestration scripts?
