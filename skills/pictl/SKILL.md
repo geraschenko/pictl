@@ -1,13 +1,13 @@
 ---
 name: pictl
-description: Use pictl to discover, message, monitor, spawn, suspend, resume, and coordinate pi agent peers. Load this when asked to work with other agents, peer reviewers, supervisors/workers, agent fleets, or pictl orchestration.
+description: Use pictl to coordinate pi agent peers: discover, message, monitor, spawn, suspend, resume, review, and orchestrate agents.
 ---
 
 # pictl
 
-`pictl` controls long-lived pi agents. Use it to discover peers, send them work, monitor progress, and spawn helper agents.
+`pictl` controls long-lived pi agents.
 
-For orchestration scripts, read [references/orchestration.md](references/orchestration.md). For fresh-context reviewers, read [references/reviewer.md](references/reviewer.md). For RPC gotchas, read [references/rpc-details.md](references/rpc-details.md).
+Read branch references as needed: [orchestration](references/orchestration.md), [fresh-context reviewers](references/reviewer.md), [RPC gotchas](references/rpc-details.md).
 
 ## Core rules
 
@@ -26,7 +26,7 @@ Agents commonly need peers working in the same directory:
 echo "$PI_AGENT_ID"         # your own agent id, if pictl spawned you
 pictl list --cwd .          # human-readable agents in this cwd
 pictl list --cwd . --json   # machine-readable agents in this cwd
-pictl status -t <agent>        # details for one agent
+pictl status -t <agent>     # details for one agent
 ```
 
 `<agent>` accepts a full agent id or any unique prefix. Use cwd, tags, and status output to avoid confusing unrelated agents.
