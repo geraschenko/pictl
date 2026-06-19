@@ -3,11 +3,12 @@ name: pictl
 description: Use pictl to coordinate pi agent peers: discover, message, monitor, spawn, suspend, resume, review, and orchestrate agents.
 ---
 
-# pictl
-
 `pictl` controls long-lived pi agents.
 
-Read branch references as needed: [orchestration](references/orchestration.md), [fresh-context reviewers](references/reviewer.md), [RPC gotchas](references/rpc-details.md).
+Read branch references as needed:
+[orchestration](references/orchestration.md)
+[fresh-context reviewers](references/reviewer.md)
+[RPC gotchas](references/rpc-details.md).
 
 ## Core rules
 

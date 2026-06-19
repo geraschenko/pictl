@@ -37,9 +37,9 @@ Use these when helpful:
 
 ## Critic/advocate loop
 
-For high-stakes reviews, keep roles separate: the reviewer is the critic; the main agent is the advocate/owner. Iterate only while new high-value issues appear.
+For high-stakes reviews, keep roles separate: the reviewer is the critic; the main agent is the advocate/owner. Iterate until you are both satisfied (within reason).
 
-After edits, ask for a bounded second pass:
+After edits, ask for an additional pass:
 
 ```bash
 pictl prompt -t "$reviewer" - <<'EOF' | ./scripts/pictl-render
@@ -54,8 +54,6 @@ Return only:
 4. Approve, or name the smallest next edit needed for approval.
 EOF
 ```
-
-Any edit invalidates prior approval: re-read the final on-disk artifact before approving. Stop after approval or after two review passes unless the user asks to continue.
 
 Archive reviewers you spawned when done:
 
