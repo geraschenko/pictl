@@ -13,8 +13,9 @@ For scripting/orchestration details, read [references/orchestration.md](referenc
 
 - Do **not** purge, force-kill, or take over agents you did not create unless the user explicitly asks.
 - When spawning subagents, give them clear role instructions and tell them relevant agent ids, including your own `$PI_AGENT_ID`.
-- Prefer `pictl prompt ... --streaming-behavior ...` over raw `steer`/`follow-up`; it avoids races when the target's streaming state changes.
-- Use machine-readable output for scripts (`list --json`, `status --json`, RPC command output, `tail`); do not parse human TUI text.
+- Prefer `pictl prompt -t ... --streaming-behavior ...` over raw `steer`/`follow-up`; it avoids races when the target's streaming state changes.
+- `pictl prompt` streams JSONL by default and emits a final cursor. Use `--type detach` only when you want to send the prompt and return after acceptance without output.
+- Use machine-readable output for scripts (`list --json`, `status --json`, prompt/tail JSONL, RPC command output); do not parse human TUI text.
 
 ## Identify yourself and discover nearby agents
 
@@ -24,33 +25,39 @@ Agents commonly need peers working in the same directory:
 echo "$PI_AGENT_ID"         # your own agent id, if pictl spawned you
 pictl list --cwd .          # human-readable agents in this cwd
 pictl list --cwd . --json   # machine-readable agents in this cwd
-pictl status <agent>        # details for one agent
+pictl status -t <agent>        # details for one agent
 ```
 
 `<agent>` accepts a full agent id or any unique prefix. Use cwd, tags, and status output to avoid confusing unrelated agents.
 
 ## Message another agent
 
-Send a normal task and wait for that turn to finish:
+Send a normal task, stream its activity as JSONL, and get a final cursor:
 
 ```bash
-pictl prompt <agent> "Please do X and report back."
+pictl prompt -t <agent> "Please do X and report back."
+```
+
+Send without streaming output:
+
+```bash
+pictl prompt -t <agent> "Please do X and report back." --type detach
 ```
 
 Read a longer prompt from stdin:
 
 ```bash
-pictl prompt <agent> - < task.md
+pictl prompt -t <agent> - < task.md
 ```
 
 If the peer might be busy, choose what should happen explicitly:
 
 ```bash
 # Timely correction to the active turn if it is streaming; normal prompt otherwise.
-pictl prompt <agent> "Correction: use branch feature/foo, not main." --streaming-behavior steer
+pictl prompt -t <agent> "Correction: use branch feature/foo, not main." --streaming-behavior steer
 
 # Queue this as the next turn if the agent is streaming; normal prompt otherwise.
-pictl prompt <agent> "After your current turn, also check Y." --streaming-behavior follow-up
+pictl prompt -t <agent> "After your current turn, also check Y." --streaming-behavior follow-up
 ```
 
 Use raw `pictl steer` and `pictl follow-up` only when you deliberately want those exact RPC commands. In most cases, `prompt --streaming-behavior ...` is safer.
@@ -58,15 +65,15 @@ Use raw `pictl steer` and `pictl follow-up` only when you deliberately want thos
 Abort only when necessary:
 
 ```bash
-pictl abort <agent>
+pictl abort -t <agent>
 ```
 
 ## Wait for progress
 
 ```bash
-pictl wait <agent> --until turn-end
-pictl wait <agent> --until idle
-pictl wait <agent> --until no-activity:30 --timeout 120
+pictl wait -t <agent> --until turn-end
+pictl wait -t <agent> --until idle
+pictl wait -t <agent> --until no-activity:30 --timeout 120
 ```
 
 - `turn-end`: the current or queued turn finished.
@@ -80,10 +87,10 @@ Exit code `3` means `--timeout` expired. Do not assume the task failed; the cond
 For casual inspection:
 
 ```bash
-pictl get-state <agent>
-pictl get-last-assistant-text <agent>
-pictl get-messages <agent>
-pictl get-session-stats <agent>
+pictl get-state -t <agent>
+pictl get-last-assistant-text -t <agent>
+pictl get-messages -t <agent>
+pictl get-session-stats -t <agent>
 ```
 
 For continuous or crash-resumable scripts, use `pictl tail`; see [references/orchestration.md](references/orchestration.md).
@@ -92,7 +99,7 @@ For continuous or crash-resumable scripts, use `pictl tail`; see [references/orc
 
 ```bash
 worker=$(pictl spawn --tag worker -- --approve)
-pictl prompt "$worker" "You are my worker agent. My agent id is $PI_AGENT_ID. Please ..."
+pictl prompt -t "$worker" "You are my worker agent. My agent id is $PI_AGENT_ID. Please ..."
 ```
 
 Use `--tag` to make helpers discoverable.
@@ -102,7 +109,7 @@ Use `--tag` to make helpers discoverable.
 Archive agents you created when you are done with them:
 
 ```bash
-pictl archive <agent>
+pictl archive -t <agent>
 ```
 
 `archive` waits until the agent is idle, stops its process, and hides it from normal `pictl list` output. Archived agents are still visible with `pictl list --all` and are revived automatically if you interact with them later.

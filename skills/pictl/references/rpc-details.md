@@ -7,14 +7,14 @@ Use this reference when you need exact command behavior beyond the top-level pic
 Prefer `prompt` for most messaging.
 
 ```bash
-pictl prompt <agent> "Do this."
+pictl prompt -t <agent> "Do this."
 ```
 
 When the target may be streaming, use `prompt --streaming-behavior` instead of checking status and then choosing a raw command:
 
 ```bash
-pictl prompt <agent> "Correction: use branch feature/foo." --streaming-behavior steer
-pictl prompt <agent> "After this turn, also check Y." --streaming-behavior follow-up
+pictl prompt -t <agent> "Correction: use branch feature/foo." --streaming-behavior steer
+pictl prompt -t <agent> "After this turn, also check Y." --streaming-behavior follow-up
 ```
 
 Why: checking whether an agent is streaming and then calling raw `steer` or `follow-up` is a race. The target may finish between your check and your send. `prompt --streaming-behavior ...` lets pi decide atomically:
@@ -25,31 +25,31 @@ Why: checking whether an agent is streaming and then calling raw `steer` or `fol
 Raw commands still exist for exact RPC use:
 
 ```bash
-pictl steer <agent> "Interject into the current turn."
-pictl follow-up <agent> "Queue this after the current turn."
+pictl steer -t <agent> "Interject into the current turn."
+pictl follow-up -t <agent> "Queue this after the current turn."
 ```
 
 Use them only when you deliberately want those exact semantics.
 
-## Waiting after prompting
+## Prompt streaming and waiting
 
-`pictl prompt` waits on the same socket connection used to send the prompt. This is the recommended one-shot form because it avoids subscription races.
+`pictl prompt` streams JSONL on the same socket connection used to send the prompt. This is the recommended one-shot form because it avoids subscription races and returns the activity plus a final cursor.
 
 ```bash
-pictl prompt <agent> "Do X."
+pictl prompt -t <agent> "Do X."
 ```
 
-Equivalent two-step usage is usually fine too:
+Equivalent two-step usage is available when you do not need prompt output:
 
 ```bash
-pictl prompt <agent> "Do X."
-pictl wait <agent> --until turn-end
+pictl prompt -t <agent> "Do X." --type detach
+pictl wait -t <agent> --until turn-end
 ```
 
-Use `--and-wait-until` when you want a condition other than turn end:
+Use `--until` when you want a stop condition other than turn end:
 
 ```bash
-pictl prompt <agent> "Start investigating." --and-wait-until no-activity:30
+pictl prompt -t <agent> "Start investigating." --until no-activity:30
 ```
 
 ## Abort etiquette
@@ -57,13 +57,13 @@ pictl prompt <agent> "Start investigating." --and-wait-until no-activity:30
 `abort` interrupts the current turn. Prefer sending a correction first:
 
 ```bash
-pictl prompt <agent> "Correction: stop editing foo; inspect bar instead." --streaming-behavior steer
+pictl prompt -t <agent> "Correction: stop editing foo; inspect bar instead." --streaming-behavior steer
 ```
 
 Use abort when continuing the current turn is harmful or wasteful:
 
 ```bash
-pictl abort <agent>
+pictl abort -t <agent>
 ```
 
 ## Lifecycle command meanings
@@ -100,13 +100,13 @@ Session changes can happen via `/new`, `/resume`, `fork`, `clone`, or `switch-se
 ## Useful passthrough commands
 
 ```bash
-pictl get-state <agent>                 # model, streaming state, pending count, session info
-pictl get-last-assistant-text <agent>   # text of the last assistant message
-pictl get-messages <agent>              # full message history
-pictl get-entries <agent>               # session entries
-pictl get-tree <agent>                  # session entry tree
-pictl get-session-stats <agent>         # token/cost stats
-pictl get-commands <agent>              # slash commands available to prompt
+pictl get-state -t <agent>                 # model, streaming state, pending count, session info
+pictl get-last-assistant-text -t <agent>   # text of the last assistant message
+pictl get-messages -t <agent>              # full message history
+pictl get-entries -t <agent>               # session entries
+pictl get-tree -t <agent>                  # session entry tree
+pictl get-session-stats -t <agent>         # token/cost stats
+pictl get-commands -t <agent>              # slash commands available to prompt
 ```
 
 Most passthrough commands print response data as JSON. Add `--raw` for the raw RPC response record.

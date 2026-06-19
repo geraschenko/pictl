@@ -1,7 +1,7 @@
 /*
  * The `--until` condition engine: parsing condition strings and blocking on a
  * pi.sock client until the condition holds. Shared by the `wait` command,
- * `tail --until`, and `prompt --and-wait-until`.
+ * `tail --until`, and streaming `prompt --until`.
  *
  * - turn-end: the next `agent_end` with `willRetry === false` (a true value
  *   announces an auto-retry continuation, not a turn end). Returns immediately

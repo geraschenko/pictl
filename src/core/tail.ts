@@ -92,7 +92,7 @@ export async function tail(
 const tailCommand = commandOneTarget<TailFlags>({
   common: true,
   docs: { brief: "stream session activity as JSONL" },
-  parameters: { flags: tailFlags, aliases: { f: "follow" } },
+  parameters: { flags: tailFlags, aliases: { f: "follow", n: "n" } },
   func: tail,
 });
 

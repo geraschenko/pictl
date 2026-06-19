@@ -4,7 +4,7 @@ Use this reference when writing scripts or workflows around `pictl`. For one-off
 
 ## General scripting rules
 
-- Prefer machine-readable output: `list --json`, `status --json`, RPC command output, and `pictl tail` JSONL. RPC commands already print JSON by default; use `--raw` only when you need the exact wire response.
+- Prefer machine-readable output: `list --json`, `status --json`, prompt/tail JSONL, and RPC command output. RPC commands already print JSON by default; use `--raw` only when you need the exact wire response.
 - Do not parse the interactive TUI or human-readable `status` output in scripts.
 - Persist enough state to restart safely: agent ids, role names, and any tail cursor.
 - Make scripts idempotent: if an agent id already exists, reuse it.
@@ -32,9 +32,9 @@ Commands that need the socket transparently revive dormant or archived agents.
 ## Wait conditions
 
 ```bash
-pictl wait <agent> --until turn-end
-pictl wait <agent> --until idle
-pictl wait <agent> --until no-activity:30 --timeout 120
+pictl wait -t <agent> --until turn-end
+pictl wait -t <agent> --until idle
+pictl wait -t <agent> --until no-activity:30 --timeout 120
 ```
 
 - `turn-end`: the current or queued turn finishes. Good after sending a prompt.
@@ -48,9 +48,9 @@ Exit codes:
 - `2`: usage error
 - `3`: timeout
 
-## Tail entries and cursors
+## Tail streams and cursors
 
-`pictl tail` emits JSONL. It prints session entries and cursor records:
+`pictl tail` emits JSONL. Message mode is the default. Use `--type entries` for raw session entries or `--type raw` for future socket records. Bounded message/entry streams end with a cursor record:
 
 ```json
 {"type":"pictl_cursor","sessionId":"...","entryId":"..."}
@@ -59,11 +59,12 @@ Exit codes:
 Examples:
 
 ```bash
-pictl tail <agent>
-pictl tail <agent> --since "$ENTRY_ID"
-pictl tail <agent> --follow
-pictl tail <agent> --follow --until idle
-pictl tail <agent> --events --until no-activity:10
+pictl tail -t <agent>
+pictl tail -t <agent> --since "$ENTRY_ID"
+pictl tail -t <agent> --type entries --since "$ENTRY_ID"
+pictl tail -t <agent> --follow
+pictl tail -t <agent> --until idle
+pictl tail -t <agent> --type raw
 ```
 
 Cursor records are the durable place to resume from. Persist the latest cursor record after each drain. For robust scripts, persist both `sessionId` and `entryId`: entry ids are session-scoped. Session changes are uncommon in simple worker scripts, but they can happen through `/new`, `/resume`, `fork`, or `clone`.
@@ -92,26 +93,36 @@ if [ -s "$cursor_file" ]; then
   fi
 fi
 
-pictl wait "$worker" --until turn-end
-pictl tail "$worker" "${since_args[@]}" > "$entries_file"
+pictl wait -t "$worker" --until turn-end
+pictl tail -t "$worker" --type entries "${since_args[@]}" > "$entries_file"
 
 grep '"type":"pictl_cursor"' "$entries_file" | tail -1 > "$cursor_file"
 
 # Only notify when there were non-cursor entries.
 if grep -v '"type":"pictl_cursor"' "$entries_file" >/dev/null; then
-  pictl prompt "$supervisor" - < "$entries_file"
+  pictl prompt -t "$supervisor" - < "$entries_file"
 fi
 ```
 
 ## Prompting from scripts
 
-Use `--and-wait` when you only need to know that the turn completed:
+`pictl prompt` streams JSONL by default and emits a final cursor after the prompt's turn completes:
 
 ```bash
-pictl prompt "$agent" "Do the task and report completion." --and-wait
+pictl prompt -t "$agent" "Do the task and report completion."
 ```
 
-If you need the agent's resulting entries as data, use a cursor: record the latest cursor before prompting, send the prompt, wait for completion, then drain entries since that cursor. Avoid treating `--and-wait` as if it returned the agent's new messages.
+Use `--type detach` when you only need to enqueue the prompt and return after acceptance:
+
+```bash
+pictl prompt -t "$agent" "Do the task and report completion." --type detach
+```
+
+If you need entry-shaped data instead of message-shaped data, request entries directly:
+
+```bash
+pictl prompt -t "$agent" "Do the task and report completion." --type entries
+```
 
 Use stdin for structured or multi-line messages:
 
@@ -120,12 +131,12 @@ cat > "$state_dir/task.md" <<'EOF'
 Please inspect the latest worker entries and decide what to do next.
 Return either a command for the worker or a short status update.
 EOF
-pictl prompt "$agent" - < "$state_dir/task.md"
+pictl prompt -t "$agent" - < "$state_dir/task.md"
 ```
 
 If the target might already be streaming, avoid check-then-act races by using prompt's streaming behavior:
 
 ```bash
-pictl prompt "$agent" "Correction: use branch feature/foo." --streaming-behavior steer
-pictl prompt "$agent" "Queue this after the current turn." --streaming-behavior follow-up
+pictl prompt -t "$agent" "Correction: use branch feature/foo." --streaming-behavior steer
+pictl prompt -t "$agent" "Queue this after the current turn." --streaming-behavior follow-up
 ```

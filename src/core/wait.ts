@@ -4,7 +4,7 @@
  * 1 runtime error, 2 usage error, 3 `--timeout` expired.
  *
  * The condition grammar and blocking logic live in until.ts (shared with
- * `tail --until` and `prompt --and-wait-until`).
+ * `tail --until` and streaming `prompt --until`).
  *
  * A dormant or archived agent is reported as having met any of these conditions
  * immediately — its process is doing nothing — and is never revived: revival
