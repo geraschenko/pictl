@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Render JSONL from `pictl tail` / `pictl prompt` as a compact transcript.
+# Usage:
+#   pictl tail -t <agent> -f | scripts/pictl-render
+#   pictl tail -t <agent> -f | tee /tmp/pictl-tail | scripts/pictl-render
+
+jq --unbuffered -n -r '
+  def nl: "\n";
+  def header($s): "\n== " + $s + " ==";
+  def text_blocks:
+    [ .[]? | select(.type == "text") | .text ] | join("\n");
+  def summarize_value:
+    if type == "string" then
+      if (length > 240) then .[0:240] + "…" else . end
+    else
+      tojson
+    end;
+  def call_args:
+    if (.arguments // null) == null then ""
+    elif (.arguments | type) == "object" then
+      (.arguments
+       | to_entries
+       | map("  " + .key + ": " + (.value | summarize_value))
+       | join("\n"))
+    else
+      "  " + (.arguments | summarize_value)
+    end;
+  def byte_count: tostring | length;
+  def line_count: tostring | split("\n") | length;
+  def result_summary:
+    (.content // [] | map(.text? // empty) | join("\n")) as $text
+    | "[tool result: " + (.toolName // "tool")
+      + (if .isError then " ERROR" else "" end)
+      + ", " + ($text | line_count | tostring) + " lines"
+      + ", " + ($text | byte_count | tostring) + " bytes]";
+
+  def render:
+  if .type == "message" then
+    .message as $m
+    | if $m.role == "user" then
+        header("user") + nl + ($m.content | text_blocks)
+      elif $m.role == "assistant" then
+        [
+          (if any($m.content[]?; .type == "thinking") then "[thinking]" else empty end),
+          ($m.content[]? | select(.type == "toolCall") | "[tool call: " + .name + "]" + (if (call_args | length) > 0 then nl + call_args else "" end)),
+          ($m.content | text_blocks)
+        ]
+        | map(select(length > 0))
+        | if length == 0 then empty else header("assistant") + nl + join(nl) end
+      elif $m.role == "toolResult" then
+        $m | result_summary
+      else
+        "[message: " + ($m.role // "unknown") + "]"
+      end
+  elif .type == "control" then
+    .control as $c
+    | if $c.kind == "queue_update" then
+        "[queue: " + (($c.event.queueLength // $c.event.size // $c.event.count // "changed") | tostring) + "]"
+      elif $c.kind == "compaction" then
+        "[" + ($c.event.type // "compaction") + "]"
+      else
+        "[" + $c.kind + "]"
+      end
+  elif .type == "pictl_cursor" then
+    "[cursor: session=" + (.sessionId // "null") + " entry=" + (.entryId // "null") + "]"
+  else
+    "[event: " + (.type // "unknown") + "]"
+  end;
+
+  def is_noisy_control:
+    startswith("[queue:") or . == "[compaction_start]";
+
+  foreach inputs as $record ({lastNoisy: null, emit: null};
+    ($record | render) as $out
+    | .emit = if ($out == null) then null
+      elif (($out | is_noisy_control) and $out == .lastNoisy) then null
+      else $out end
+    | .lastNoisy = if ($out != null and ($out | is_noisy_control)) then $out else .lastNoisy end;
+    .emit // empty
+  )
+' "$@"
