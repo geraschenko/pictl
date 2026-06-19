@@ -6,8 +6,9 @@ Use this branch when the user asks for a peer review, adversarial review, second
 
 Spawn a read-only reviewer unless the task requires tests or edits:
 
+TDC: why does the reviewer need the main agent id? Since it's read-only it can't use pictl anyway. The main agent already sees the responses in the output of `pictl prompt`.
 ```bash
-reviewer=$(pictl spawn --tag reviewer -- --approve --tools read,grep,find,ls)
+reviewer=$(pictl spawn --tag reviewer -- --tools read,grep,find,ls)
 main_agent=${PI_AGENT_ID:-unknown}
 pictl prompt -t "$reviewer" - <<EOF | ./scripts/pictl-render
 You are a fresh peer review agent.
@@ -28,13 +29,15 @@ Return:
 EOF
 ```
 
-If `scripts/pictl-render` is unavailable, use an equivalent renderer or keep the prompt narrow. Do not flood your own context with raw JSONL from a large review.
+`scripts/pictl-render` is critical to avoid flooding your own context with raw JSONL from a large review.
 
 ## Choose reviewer authority deliberately
 
 - **Read-only reviewer:** default for document review, architecture critique, security review, and adversarial review. Tools: `read,grep,find,ls`.
 - **Verification reviewer:** can run tests or typechecks, but should not edit. Add only the minimum tool needed, usually `bash`.
 - **Patch reviewer/fixer:** can edit only when the user explicitly asks the reviewer to change files.
+
+TDC: why would we ever want the reviewer to do verification or make patches rather than asking the main agent to do them?
 
 Read-only reviewers reduce accidental edits, shell side effects, and prompt-injection impact. They also make the role contract clear: report findings to the main agent or human.
 

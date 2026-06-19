@@ -13,7 +13,7 @@ For scripting/orchestration details, read [references/orchestration.md](referenc
 
 - Do **not** purge, force-kill, or take over agents you did not create unless the user explicitly asks.
 - When spawning subagents, give them clear role instructions and tell them relevant agent ids, including your own `$PI_AGENT_ID`.
-- Spawn review agents read-only by default (`-- --approve --tools read,grep,find,ls`) unless tests or edits are explicitly needed.
+- Spawn review agents read-only by default (`-- --tools read,grep,find,ls`) unless tests or edits are explicitly needed.
 - Prefer `pictl prompt -t ... --streaming-behavior ...` over raw `steer`/`follow-up`; it avoids races when the target's streaming state changes.
 - `pictl prompt` streams JSONL by default and emits a final cursor. Use `--type detach` only when you want to send the prompt and return after acceptance without output.
 - Use machine-readable output for scripts (`list --json`, `status --json`, prompt/tail JSONL, RPC command output); do not parse human TUI text.
@@ -99,7 +99,7 @@ For continuous or crash-resumable scripts, use `pictl tail`; see [references/orc
 ## Spawn helper agents
 
 ```bash
-worker=$(pictl spawn --tag worker -- --approve)
+worker=$(pictl spawn --tag worker)
 pictl prompt -t "$worker" "You are my worker agent. My agent id is $PI_AGENT_ID. Please ..."
 ```
 
