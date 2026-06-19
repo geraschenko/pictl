@@ -61,7 +61,11 @@ This is especially useful because agents experience failures humans may not see:
 - **Privacy leakage:** post-mortems can quote sensitive transcript details into durable files.
 - **Revival confusion:** if humans revive the agent at the suggestion point, the filesystem and agent fleet may have changed since then.
 
-## Suggestion box design
+## Suggestion box skill design
+
+The suggestion box probably should not be core `pictl` functionality. A better first shape is a small skill that relies on `pictl` for agent identity, transcript/tree revival, and optional helper commands.
+
+The skill would teach agents when to leave suggestions, where to put them, what metadata to include, and how to keep proposals grounded in an actual incident. It can include a README and template in `.pictl/suggestions/` without requiring `pictl` itself to own the workflow.
 
 A useful suggestion box should be structured enough to sort, review, and revive context, but not so heavy that agents avoid using it.
 
@@ -73,12 +77,11 @@ Suggested header:
 
 - title: short human-readable title
 - agent_id: `PI_AGENT_ID`
-- session_id: if known
 - entry_id: entry where the suggestion was made
-- cwd: working directory
-- git_commit: current commit hash, if the suggestion concerns repository state
 - task: one-line user task/context
 - impact: annoyance | reliability | safety | cost | speed | maintainability
+
+Optional fields, only when they materially help review: session id, cwd, git commit, side effects, or related agents.
 
 Suggested body:
 
@@ -95,16 +98,30 @@ pictl navigate-tree -t <agent_id> <entry_id>
 pictl attach -t <agent_id>
 ```
 
-Also note side effects that may no longer match the revived conversation state.
+If the suggestion involved navigation or file edits, note side effects that may no longer match the revived conversation state.
 
 ### Storage options
 
-- `.pictl/suggestions/` for local, agent-generated suggestions that are not project docs yet.
+- `.pictl/suggestions/` for local, agent-generated suggestions that are not project docs yet. A suggestion-box skill could create or document this directory with a README and template.
 - `docs/thoughts/suggestions/` for suggestions worth preserving in the repository.
 - Issue tracker integration for accepted suggestions.
 - A JSONL append-only log for scripts, plus rendered Markdown for human review.
 
-The important field is not the prose; it is the revival pointer: agent id, session id, entry id, cwd, and side-effect notes.
+The important field is not the prose; it is the revival pointer. In the simplest case, that is just agent id plus entry id. Other context should be optional until tooling proves it is useful.
+
+### Possible skill contents
+
+A suggestion-box skill could include:
+
+- when to write a suggestion and when not to;
+- a `README.md` explaining human review and revival;
+- a `TEMPLATE.md` with the lightweight header/body fields;
+- examples of good suggestions and overfit/bad suggestions;
+- guidance to redact sensitive transcript details;
+- a reminder that suggestions are proposals, not permission to edit skills or tools;
+- an optional helper to capture the current entry id and agent id once `pictl-render` or another tool exposes those cleanly.
+
+Agents cannot rely on exported shell variables persisting across separate tool calls. For repeated commands against a spawned agent, a workflow can record the agent id in a uniquely named temp file or state file, but should not recommend a fixed path that multiple agents might clobber.
 
 ## Human review workflow
 
@@ -177,7 +194,8 @@ However, navigation does not roll back post-mortem side effects. If the branch w
 ## Open questions
 
 - Should suggestion records live in `.pictl/`, project docs, or both?
-- Should a helper script or skill record current `agent_id`, `session_id`, and `entry_id` in a suggestion file?
+- What should the first suggestion-box skill include beyond a README and template?
+- Should a helper script eventually pre-fill current `agent_id` and `entry_id`, or is that premature?
 - Should post-mortem branches be labeled in the conversation tree?
 - What should a non-core post-mortem utility look like if it is enabled by `pictl` but not part of `pictl` itself?
 - How do we prevent suggestion spam while still capturing valuable process knowledge?

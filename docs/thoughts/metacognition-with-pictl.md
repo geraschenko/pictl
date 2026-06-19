@@ -263,6 +263,18 @@ The default worker might always be paired with an overseer. Agent UIs could show
 
 This pushes orchestration frameworks toward explicit roles, permissions, and message routing. The key design question becomes: what powers should an overseer have? Read-only critique is safer; direct `steer`, `abort`, or `navigate-tree` is powerful but risky.
 
+### Experiment: read-only sidecar overseer
+
+A useful next experiment is a deliberately weak overseer:
+
+1. Spawn a fresh read-only agent with a narrow role: watch high-level progress and report only stuck/off-task/escalation signals.
+2. Feed it a rendered or summarized tail, not raw JSONL or huge tool outputs. It could trigger on each turn-end to start.
+3. Forbid direct control commands. It can only write observations or recommend a human/main-agent intervention.
+4. Give it an intervention budget, such as one warning plus one final post-mortem.
+5. Compare its findings with the main agent's own assessment after the task.
+
+The experiment should test usefulness, not autonomy. Good signs: it catches loops, wrong-task focus, stale assumptions, or missed escalation moments. Bad signs: it comments constantly, restates obvious facts, invents problems from summaries, or distracts the main agent from object-level work.
+
 ## Capability: peer review and adversarial agents
 
 `pictl spawn`, `clone`, `fork`, and `prompt` can create review agents, including agents forked from earlier context snapshots.
@@ -573,6 +585,22 @@ A workflow that improves apparent diligence but increases user confusion may be 
 - What metrics would show that metacognition helped rather than merely added process?
 - How can humans inspect meta-level activity without being overloaded by it?
 - When should agent-created orchestration scripts be promoted into maintained project infrastructure?
+
+## Final thoughts from the first experiments
+
+The early experiments suggest that the safest useful pattern is not "agents manage themselves freely." It is **bounded meta-work with explicit roles**.
+
+The fresh reviewer experiment worked because the role was narrow: read the artifact, stay critical, report findings, do not edit. The navigation experiments were useful because the human provided continuation summaries and explicitly tracked side effects. The post-mortem idea is promising because it keeps self-improvement proposals reviewable instead of automatically changing skills or tools.
+
+A practical near-term stack could be:
+
+- fresh-context reviewers for blind spots;
+- read-only sidecar overseers for stuck/off-task detection;
+- side-branch post-mortems for skill/tool suggestions;
+- explicit recovery packets for any navigation;
+- human review before suggestions become durable infrastructure.
+
+This stack treats metacognition as scaffolding around the main agent, not as an unlimited recursive control system.
 
 ## Tentative conclusion
 
