@@ -6,9 +6,10 @@ description: Use pictl to coordinate pi agent peers: discover, message, monitor,
 `pictl` controls long-lived pi agents.
 
 Read branch references as needed:
-[orchestration](references/orchestration.md)
-[fresh-context reviewers](references/reviewer.md)
-[RPC gotchas](references/rpc-details.md).
+[orchestration](orchestration.md)
+[fresh-context reviewers](reviewer.md)
+[conversation tree navigation](tree-navigation.md)
+[RPC gotchas](rpc-details.md).
 
 ## Core rules
 
@@ -95,7 +96,7 @@ pictl get-messages -t <agent>
 pictl get-session-stats -t <agent>
 ```
 
-For continuous or crash-resumable scripts, use `pictl tail`; see [references/orchestration.md](references/orchestration.md).
+For continuous or crash-resumable scripts, use `pictl tail`; see [orchestration.md](orchestration.md).
 
 ## Spawn helper agents
 
@@ -104,7 +105,7 @@ worker=$(pictl spawn --tag worker)
 pictl prompt -t "$worker" "You are my worker agent. My agent id is $PI_AGENT_ID. Please ..."
 ```
 
-Use `--tag` to make helpers discoverable. For fresh-context peer review, use the reviewer branch in [references/reviewer.md](references/reviewer.md).
+Use `--tag` to make helpers discoverable. For fresh-context peer review, use [reviewer.md](reviewer.md). For conversation-tree rewinds, use [navigation.md](navigation.md).
 
 ## When you are done with an agent
 
