@@ -6,6 +6,12 @@
   "bin": {
     "pictl": "dist/core/main.js"
   },
+  "exports": {
+    ".": {
+      "types": "./dist/dts/core/index.d.ts",
+      "import": "./dist/core/index.js"
+    }
+  },
   "scripts": {
     "build": "tsc -p tsconfig.build.json && node -e \"require('node:fs').chmodSync('dist/core/main.js', 0o755)\"",
     "check": "tsc --noEmit",

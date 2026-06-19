@@ -1,4 +1,4 @@
-excludes = ["node_modules/**", "dist/**", "package-lock.json"]
+excludes = ["node_modules/**", "dist/**", "package-lock.json", "docs/*.api.md"]
 
 [formatter.prettier]
 command = "node_modules/.bin/prettier"
