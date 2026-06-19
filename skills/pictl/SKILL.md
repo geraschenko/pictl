@@ -1,18 +1,19 @@
 ---
 name: pictl
-description: Use pictl to discover, message, monitor, spawn, suspend, resume, and coordinate pi agent peers. Load this when asked to work with other agents, subagents, supervisors/workers, agent fleets, or pictl orchestration.
+description: Use pictl to discover, message, monitor, spawn, suspend, resume, and coordinate pi agent peers. Load this when asked to work with other agents, peer reviewers, supervisors/workers, agent fleets, or pictl orchestration.
 ---
 
 # pictl
 
 `pictl` controls long-lived pi agents. Use it to discover peers, send them work, monitor progress, and spawn helper agents.
 
-For scripting/orchestration details, read [references/orchestration.md](references/orchestration.md). For RPC command gotchas, read [references/rpc-details.md](references/rpc-details.md).
+For scripting/orchestration details, read [references/orchestration.md](references/orchestration.md). For reviewer agents, read [references/reviewer.md](references/reviewer.md). For RPC command gotchas, read [references/rpc-details.md](references/rpc-details.md).
 
 ## Core rules
 
 - Do **not** purge, force-kill, or take over agents you did not create unless the user explicitly asks.
 - When spawning subagents, give them clear role instructions and tell them relevant agent ids, including your own `$PI_AGENT_ID`.
+- Spawn review agents read-only by default (`-- --approve --tools read,grep,find,ls`) unless tests or edits are explicitly needed.
 - Prefer `pictl prompt -t ... --streaming-behavior ...` over raw `steer`/`follow-up`; it avoids races when the target's streaming state changes.
 - `pictl prompt` streams JSONL by default and emits a final cursor. Use `--type detach` only when you want to send the prompt and return after acceptance without output.
 - Use machine-readable output for scripts (`list --json`, `status --json`, prompt/tail JSONL, RPC command output); do not parse human TUI text.
@@ -102,7 +103,7 @@ worker=$(pictl spawn --tag worker -- --approve)
 pictl prompt -t "$worker" "You are my worker agent. My agent id is $PI_AGENT_ID. Please ..."
 ```
 
-Use `--tag` to make helpers discoverable.
+Use `--tag` to make helpers discoverable. For fresh-context peer review, use the reviewer branch in [references/reviewer.md](references/reviewer.md).
 
 ## When you are done with an agent
 
