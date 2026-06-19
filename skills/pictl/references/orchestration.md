@@ -99,7 +99,7 @@ grep '"type":"pictl_cursor"' "$entries_file" | tail -1 > "$cursor_file"
 
 # Only notify when there were non-cursor entries.
 if grep -v '"type":"pictl_cursor"' "$entries_file" >/dev/null; then
-  pictl prompt "$supervisor" - --and-wait < "$entries_file"
+  pictl prompt "$supervisor" - < "$entries_file"
 fi
 ```
 
@@ -120,7 +120,7 @@ cat > "$state_dir/task.md" <<'EOF'
 Please inspect the latest worker entries and decide what to do next.
 Return either a command for the worker or a short status update.
 EOF
-pictl prompt "$agent" - --and-wait < "$state_dir/task.md"
+pictl prompt "$agent" - < "$state_dir/task.md"
 ```
 
 If the target might already be streaming, avoid check-then-act races by using prompt's streaming behavior:

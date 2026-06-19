@@ -7,7 +7,7 @@ Use this reference when you need exact command behavior beyond the top-level pic
 Prefer `prompt` for most messaging.
 
 ```bash
-pictl prompt <agent> "Do this." --and-wait
+pictl prompt <agent> "Do this."
 ```
 
 When the target may be streaming, use `prompt --streaming-behavior` instead of checking status and then choosing a raw command:
@@ -33,10 +33,10 @@ Use them only when you deliberately want those exact semantics.
 
 ## Waiting after prompting
 
-`pictl prompt --and-wait` waits on the same socket connection used to send the prompt. This is the recommended one-shot form because it avoids subscription races.
+`pictl prompt` waits on the same socket connection used to send the prompt. This is the recommended one-shot form because it avoids subscription races.
 
 ```bash
-pictl prompt <agent> "Do X." --and-wait
+pictl prompt <agent> "Do X."
 ```
 
 Equivalent two-step usage is usually fine too:

@@ -34,13 +34,13 @@ pictl status <agent>        # details for one agent
 Send a normal task and wait for that turn to finish:
 
 ```bash
-pictl prompt <agent> "Please do X and report back." --and-wait
+pictl prompt <agent> "Please do X and report back."
 ```
 
 Read a longer prompt from stdin:
 
 ```bash
-pictl prompt <agent> - --and-wait < task.md
+pictl prompt <agent> - < task.md
 ```
 
 If the peer might be busy, choose what should happen explicitly:
@@ -92,7 +92,7 @@ For continuous or crash-resumable scripts, use `pictl tail`; see [references/orc
 
 ```bash
 worker=$(pictl spawn --tag worker -- --approve)
-pictl prompt "$worker" "You are my worker agent. My agent id is $PI_AGENT_ID. Please ..." --and-wait
+pictl prompt "$worker" "You are my worker agent. My agent id is $PI_AGENT_ID. Please ..."
 ```
 
 Use `--tag` to make helpers discoverable.
