@@ -50,7 +50,7 @@ Read a longer prompt from stdin:
 pictl prompt -t <agent> - < task.md
 ```
 
-If the peer might be busy, choose what should happen explicitly:
+If the peer is busy, `prompt` will return an error by default. If you want to queue the prompt, choose what should happen explicitly:
 
 ```bash
 # Timely correction to the active turn if it is streaming; normal prompt otherwise.
