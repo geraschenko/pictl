@@ -64,7 +64,7 @@ pictl list
 pictl status
 ```
 
-Send a prompt programmatically and wait for the turn to finish:
+Send a prompt programmatically. By default, `pictl prompt` streams messages as they appear and waits for the turn to finish:
 
 ```sh
 pictl prompt "Say hello in one sentence."
@@ -119,13 +119,12 @@ export PICTL_PI_BIN="$PWD/node_modules/.bin/pi"
 export PICTL_TARGET="<agent-id-from-terminal-a>"
 ```
 
-Now send prompts from Terminal B and watch Terminal A update:
+Now send prompts from Terminal B and watch Terminal A update. These prompts can either explain the demo context directly or ask the agent to read the repo docs / pictl skill to understand what pictl is.
 
-TDC: how is the agent going to know what demo is currently happening? If we want the agent to know something about pictl, it needs to learn that information somehow.
 ```sh
-pictl prompt "Explain in one short paragraph what is happening in this demo."
+pictl prompt "You are being controlled through pictl from another terminal while a human watches your live TUI. Explain what this demonstrates in one short paragraph."
 
-pictl prompt "List three things a script can do to this same live agent while a human is attached."
+pictl prompt "Given that context, list three things a script can do to this same live agent while a human remains attached."
 
 pictl get-last-assistant-text
 ```
