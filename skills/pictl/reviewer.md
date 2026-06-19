@@ -37,7 +37,7 @@ Use these when helpful:
 
 ## Critic/advocate loop
 
-For high-stakes reviews, keep roles separate: the reviewer is the critic; the main agent is the advocate/owner. Iterate until you are both satisfied (within reason).
+For high-stakes reviews, keep roles separate: the reviewer is the critic; the main agent is the advocate/owner. Iterate until both approve the final on-disk artifact, or until remaining objections are explicitly deferred.
 
 After edits, ask for an additional pass:
 
@@ -54,6 +54,8 @@ Return only:
 4. Approve, or name the smallest next edit needed for approval.
 EOF
 ```
+
+Any edit invalidates prior approval: re-read the final on-disk artifact before approving.
 
 Archive reviewers you spawned when done:
 

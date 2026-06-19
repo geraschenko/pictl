@@ -105,7 +105,7 @@ worker=$(pictl spawn --tag worker)
 pictl prompt -t "$worker" "You are my worker agent. My agent id is $PI_AGENT_ID. Please ..."
 ```
 
-Use `--tag` to make helpers discoverable. For fresh-context peer review, use [reviewer.md](reviewer.md). For conversation-tree rewinds, use [navigation.md](navigation.md).
+Use `--tag` to make helpers discoverable. For fresh-context peer review, use [reviewer.md](reviewer.md). For conversation-tree rewinds, use [tree-navigation.md](tree-navigation.md).
 
 ## When you are done with an agent
 
