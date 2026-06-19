@@ -24,7 +24,7 @@ Return:
 EOF
 ```
 
-Use read-only reviewers for critique. If a finding needs tests or edits, the main agent should usually perform that follow-up.
+If a finding needs tests or edits, the main agent should perform that follow-up.
 
 ## Prompt knobs
 
@@ -49,6 +49,13 @@ Return only:
 3. The top 3 remaining edits.
 EOF
 ```
+
+TDC: I think it's worth saying something like "iterate back and forth until you and the reviewer are both satisfied". The goal should be to keep the reviewer in a different headspace than the main agent so that they don't simply agree with each other. The review agent can play critic and main agent can play advocate. Consider phrasing like this (this is borrowed from collaborative spec review, but could be adapted to review more generally):
+> You and MUST collaboratively review until BOTH approve the FINAL on-disk version. Apply proof standard — you must prove correctness; probe weaknesses.
+> 
+> **Review Checklist:** (1) Flesh out underspecified details (2) Challenge assumptions (inspect repos, use web search) (3) Check logic correctness/completeness (4) Seek more elegant solutions (5) Ensure spec is standalone
+>
+> Both must read the FINAL on-disk version before approving. Any edit invalidates prior approval — re-read required.
 
 Archive reviewers you spawned when done:
 
