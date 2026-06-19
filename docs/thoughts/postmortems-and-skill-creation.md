@@ -91,9 +91,8 @@ Suggested body:
 Example revival commands:
 
 ```bash
-pictl status -t <agent_id>
-pictl get-tree -t <agent_id>
 pictl navigate-tree -t <agent_id> <entry_id>
+pictl attach -t <agent_id>
 ```
 
 Also note side effects that may no longer match the revived conversation state.
