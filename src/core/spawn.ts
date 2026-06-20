@@ -10,10 +10,11 @@ import {
   closeSync,
   constants as fsConstants,
   openSync,
+  readFileSync,
   statSync,
 } from "node:fs";
 import { mkdir } from "node:fs/promises";
-import { delimiter, isAbsolute, join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import type { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import {
@@ -45,7 +46,13 @@ function isExecutableFile(path: string): boolean {
   }
 }
 
-/** PICTL_PI_BIN wins; otherwise search PATH for `pi`. Returns an absolute path. */
+/**
+ * PICTL_PI_BIN wins; otherwise use the `pi` binary from the bundled
+ * @geraschenko/pi-coding-agent dependency, so pictl runs the pinned pi version
+ * rather than whatever `pi` happens to be on PATH. Resolved through Node's
+ * module resolution (not a hardcoded node_modules/.bin path) so it follows
+ * dependency hoisting. Returns an absolute path.
+ */
 function resolvePiBin(env: NodeJS.ProcessEnv = process.env): string {
   const fromEnv = env.PICTL_PI_BIN;
   if (fromEnv) {
@@ -55,18 +62,17 @@ function resolvePiBin(env: NodeJS.ProcessEnv = process.env): string {
     }
     return absolute;
   }
-  for (const pathDir of (env.PATH ?? "").split(delimiter)) {
-    if (pathDir === "") {
-      continue;
-    }
-    const candidate = join(pathDir, "pi");
-    if (isAbsolute(candidate) && isExecutableFile(candidate)) {
-      return candidate;
-    }
-  }
-  throw new Error(
-    "no `pi` found on PATH (set PICTL_PI_BIN to point at the binary)",
+  const packageRoot = resolve(
+    dirname(fileURLToPath(import.meta.resolve("@geraschenko/pi-coding-agent"))),
+    "..",
   );
+  const { bin } = JSON.parse(
+    readFileSync(join(packageRoot, "package.json"), "utf8"),
+  ) as { bin?: Record<string, string> };
+  if (bin?.pi === undefined) {
+    throw new Error("@geraschenko/pi-coding-agent does not declare a `pi` bin");
+  }
+  return join(packageRoot, bin.pi);
 }
 
 function mainEntryPath(): string {
