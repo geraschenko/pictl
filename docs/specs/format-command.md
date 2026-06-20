@@ -418,7 +418,6 @@ export function parseMessageRecords(input: string): readonly MessageStreamRecord
 
 The `decode*` functions validate unknown input and return typed values. Invalid input throws `UsageError` with a useful message so the command exits non-zero without crashing. `parseEntriesInput` requires every JSONL record to decode as `SessionEntry`; `pictl_cursor` records are invalid for entry formatting.
 
-
 ### `src/format/command.ts`
 
 ```ts
@@ -602,7 +601,31 @@ Flag specs and inferred flag types are intentionally adjacent to their commands,
 - [x] Incorporated user review comments from `3ed6088`: removed `errors` tool-result mode, made failed snippets part of default `summary`, changed entries full output flag to `--full`, removed tree `--current-leaf`, removed parent id from default entry examples, expanded tree branching/cursor example, removed unknown-entry fallback types, removed separate tool-call lookup parameters, replaced assertion functions with decode functions, and specified command flags adjacent to command definitions.
 - [x] Incorporated user review comments from `c5fe426`: documented pi-style non-linear tree indentation, made tree width include the full rendered tree line, removed local absolute pi paths, added removal of trailing entry-mode cursors from `tail`/`prompt`, renamed command symbols to `formatMessages*`/`formatEntries*`/`formatTree*`, and changed numeric placeholders to `num`.
 - [x] Re-ran reviewer after user review comment incorporation and fixed the Stricli optional positional parameter design.
-- [ ] Implement stream type extraction.
-- [ ] Implement formatter modules.
-- [ ] Add `pictl format` route.
-- [ ] Add tests and fixtures.
+- [x] Implement stream type extraction.
+- [x] Add initial `pictl format` route/type skeleton and confirmed type structure compiles before filling formatter behavior.
+- [x] Implement formatter modules.
+- [x] Replace formatter stubs with full behavior.
+- [x] Add tests and fixtures.
+- [x] Add regression coverage for omitted trailing cursors in entry-mode prompt streams.
+- [x] Run `npm run build` successfully.
+- [x] Run `npm run presubmit` successfully.
+
+## Implementation-Time Decisions
+
+### Preserve raw stream final cursor behavior
+
+Decided: only entry-mode `tail`/`prompt` streams omit the trailing `pictl_cursor`; raw and message streams keep their previous cursor behavior.
+
+Rationale: the spec's sole allowed existing-output change is removal of entry-mode trailing cursors. Restricting the condition avoids an accidental raw-stream output change.
+
+### Treat single-object entry input without `entries` as JSONL
+
+Decided: `parseEntriesInput` recognizes get-entries JSON only when the parsed object has an `entries` property; otherwise it parses the input as JSONL session entries.
+
+Rationale: JSONL entry streams are also line-oriented JSON objects and may contain a single entry. A leading `{` alone is not enough to distinguish get-entries JSON from JSONL.
+
+### Tighten decode-time validation without duplicating runtime schemas
+
+Decided: format input decoders validate top-level stream record shape, known session entry types, required entry fields, message roles, and recursive tree node structure, then cast to the pi SDK types.
+
+Rationale: pictl needs useful command errors for bad formatter input, but pi does not export runtime validators for these TypeScript-only types. The local checks avoid accepting obvious non-entries such as `pictl_cursor` while keeping the schema copy small.

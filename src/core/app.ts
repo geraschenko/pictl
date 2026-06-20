@@ -4,6 +4,7 @@ import { type CommandContext } from "./targets.ts";
 import { completionRoute } from "./completion.ts";
 import { internalRoutes } from "./daemon.ts";
 import { listRoute, statusRoute } from "./inspect.ts";
+import { formatRoute } from "../format/command.ts";
 import { gcRoute, lifecycleRoutes } from "./lifecycle.ts";
 import { rpcRoutes } from "./rpc-commands.ts";
 import { spawnRoute } from "./spawn.ts";
@@ -23,6 +24,7 @@ const routes = {
   ...gcRoute,
   ...lifecycleRoutes,
   ...completionRoute,
+  format: formatRoute,
   ...rpcRoutes,
   ...internalRoutes,
 };

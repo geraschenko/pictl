@@ -270,6 +270,26 @@ test("prompt streams assistant response and final cursor after prompt completion
   });
 });
 
+test("prompt entries stream omits trailing pictl cursor", async () => {
+  await withFakeRegistry(async (agentId, agentDir) => {
+    await withFakePiSocket(agentDir, async () => {
+      const process = fakeProcess({ PICTL_TARGET: agentId });
+      await runCliApp(
+        app,
+        ["prompt", "--type", "entries", "What is the name?"],
+        process.proc,
+      );
+
+      assert.equal(process.proc.exitCode, 0);
+      assert.equal(process.stderr, "");
+      assert.deepEqual(
+        jsonlLines(process.stdout).map((record) => record.type),
+        ["message"],
+      );
+    });
+  });
+});
+
 test("streaming flag validation rejects ambiguous or unsupported combinations", async () => {
   await withFakeRegistry(async (agentId) => {
     const followUntil = fakeProcess({ PICTL_TARGET: agentId });

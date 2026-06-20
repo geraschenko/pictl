@@ -1,0 +1,53 @@
+{
+  "entries": [
+    {
+      "type": "message",
+      "id": "79d4e93e",
+      "parentId": null,
+      "timestamp": "2026-01-01T00:00:00.000Z",
+      "message": {
+        "role": "user",
+        "content": [{ "type": "text", "text": "Help me write a script" }],
+        "timestamp": 1
+      }
+    },
+    {
+      "type": "message",
+      "id": "ab4e0c01",
+      "parentId": "79d4e93e",
+      "timestamp": "2026-01-01T00:00:01.000Z",
+      "message": {
+        "role": "assistant",
+        "content": [
+          { "type": "thinking", "thinking": "hidden" },
+          {
+            "type": "toolCall",
+            "id": "call-1",
+            "name": "read",
+            "arguments": { "path": "README.md" }
+          }
+        ],
+        "api": "test",
+        "provider": "test",
+        "model": "test",
+        "usage": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "totalTokens": 0,
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "total": 0
+          }
+        },
+        "stopReason": "toolUse",
+        "timestamp": 2
+      }
+    }
+  ],
+  "leafId": "ab4e0c01"
+}

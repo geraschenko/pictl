@@ -1,4 +1,9 @@
 import type { RpcCommand, RpcResponse } from "@geraschenko/pi-coding-agent";
+import type {
+  AgentMessage,
+  MessageStreamRecord,
+  StreamCursorRecord,
+} from "./stream-types.ts";
 import { oneTarget, type CommandContext } from "./targets.ts";
 import { ensureAgentRunning } from "./lifecycle.ts";
 import { piSocketPath } from "./registry.ts";
@@ -36,36 +41,6 @@ export type PromptType = (typeof PROMPT_TYPES)[number];
 // engine, where "until killed" would just block for pi's death and exit nonzero.
 export type StreamUntil = UntilCondition | { kind: "killed" };
 
-interface StreamCursorRecord {
-  type: "pictl_cursor";
-  sessionId: string | null;
-  entryId: string | null;
-}
-
-interface StreamMessageRecord {
-  type: "message";
-  message: AgentMessage;
-}
-
-type StreamControlKind =
-  | "compaction"
-  | "tree_navigated"
-  | "session_changed"
-  | "queue_update";
-
-interface StreamControlRecord {
-  type: "control";
-  control: {
-    kind: StreamControlKind;
-    event: SocketEvent;
-  };
-}
-
-type MessageStreamRecord =
-  | StreamMessageRecord
-  | StreamControlRecord
-  | StreamCursorRecord;
-
 interface StreamOptions {
   outputType: StreamOutputType;
   since: string | undefined;
@@ -101,12 +76,6 @@ type GetEntriesData = Extract<
   { command: "get_entries"; success: true }
 >["data"];
 
-type GetMessagesData = Extract<
-  RpcResponse,
-  { command: "get_messages"; success: true }
->["data"];
-
-type AgentMessage = GetMessagesData["messages"][number];
 type SessionEntry = GetEntriesData["entries"][number];
 
 class StdoutJsonlWriter implements JsonlWriter {
@@ -531,7 +500,7 @@ export async function streamPrompt(
       throw error;
     }
     await streamPromise;
-    if (isFiniteUntil(options.until)) {
+    if (options.type !== "entries" && isFiniteUntil(options.until)) {
       await writeFinalCursor(client, writer);
     }
   } finally {
@@ -576,7 +545,10 @@ export async function streamTail(
     } else {
       await streamRaw(client, writer, until, options.timeoutMs);
     }
-    if (until === undefined || isFiniteUntil(until)) {
+    if (
+      options.outputType !== "entries" &&
+      (until === undefined || isFiniteUntil(until))
+    ) {
       await writeFinalCursor(client, writer);
     }
   } finally {
