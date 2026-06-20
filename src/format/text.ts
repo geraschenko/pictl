@@ -20,6 +20,7 @@ export function truncateText(text: string, maxChars: number): string {
     return text;
   }
   if (maxChars === 1) {
+    // TDC: this is not necessary; it's covered by the code below, right?
     return "…";
   }
   return `${chars.slice(0, maxChars - 1).join("")}…`;
@@ -27,6 +28,7 @@ export function truncateText(text: string, maxChars: number): string {
 
 export function countLines(text: string): number {
   if (text === "") {
+    // TDC: this is not necessary; it's covered by the code below, right?
     return 0;
   }
   return text.split("\n").length;

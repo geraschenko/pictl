@@ -270,6 +270,7 @@ test("prompt streams assistant response and final cursor after prompt completion
   });
 });
 
+// TDC: this is a bad description for the test. It should be something like "only includes messages", not "omits cursor", right?
 test("prompt entries stream omits trailing pictl cursor", async () => {
   await withFakeRegistry(async (agentId, agentDir) => {
     await withFakePiSocket(agentDir, async () => {

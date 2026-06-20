@@ -42,7 +42,7 @@ function formatToolArguments(args: unknown, maxChars: number): string {
   }
   const preferredKeys = ["path", "file_path", "command", "pattern"];
   const preferred = preferredKeys
-    .filter((key) => typeof args[key] === "string")
+    .filter((key) => typeof args[key] === "string")  // TDC: what's the point of this filter? If pattern is an int for example, who cares?
     .map((key) => `${key}: ${String(args[key])}`);
   const text =
     preferred.length > 0 ? preferred.join(", ") : JSON.stringify(args);
@@ -91,11 +91,11 @@ function formatControl(record: MessageStreamRecord): string | undefined {
         ? "[control: compaction started]"
         : "[control: compaction finished]";
     case "tree_navigated":
-      return "[control: tree navigated]";
+      return "[control: tree navigated]";  // TDC: you *have* to indicate the new leafId when tree_navigated
     case "session_changed":
-      return "[control: session changed]";
+      return "[control: session changed]";  // TDC: you *have* to indicate the new session when session_changed
     case "queue_update":
-      return "[control: queue update]";
+      return "[control: queue update]";  // TDC: is there something we should indicate here as well, like the new queue length? 
   }
 }
 
@@ -185,6 +185,7 @@ export function formatMessageRecord(
   }
   if (record.type === "control") {
     const rendered = formatControl(record);
+    // TDC: what's up with this "noisy control" concept? Why are we bothering with this? Is there any evidence that there are control messages that aren't carrying meaningful information? If we get rid of this, we can eliminate MessageFormatState entirely, which seems elegant to me.
     const noisy =
       record.control.kind === "queue_update" ||
       (record.control.kind === "compaction" &&

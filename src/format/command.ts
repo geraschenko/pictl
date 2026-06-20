@@ -45,7 +45,7 @@ const formatMessagesFlags = {
 };
 type FormatMessagesFlags = InferFlags<typeof formatMessagesFlags>;
 
-export async function formatMessagesCommand(
+export async function formatMessages(
   this: CommandContext,
   flags: FormatMessagesFlags,
   file?: string,
@@ -60,7 +60,7 @@ export async function formatMessagesCommand(
   );
 }
 
-const formatMessagesCommandRoute = commandNoTarget<
+const formatMessagesCommand = commandNoTarget<
   FormatMessagesFlags,
   [string | undefined]
 >({
@@ -75,7 +75,7 @@ const formatMessagesCommandRoute = commandNoTarget<
       ],
     },
   },
-  func: formatMessagesCommand,
+  func: formatMessages,
 });
 
 const formatEntriesFlags = {
@@ -84,7 +84,7 @@ const formatEntriesFlags = {
 };
 type FormatEntriesFlags = InferFlags<typeof formatEntriesFlags>;
 
-export async function formatEntriesCommand(
+export async function formatEntries(
   this: CommandContext,
   flags: FormatEntriesFlags,
   file?: string,
@@ -97,7 +97,7 @@ export async function formatEntriesCommand(
   );
 }
 
-const formatEntriesCommandRoute = commandNoTarget<
+const formatEntriesCommand = commandNoTarget<
   FormatEntriesFlags,
   [string | undefined]
 >({
@@ -112,7 +112,7 @@ const formatEntriesCommandRoute = commandNoTarget<
       ],
     },
   },
-  func: formatEntriesCommand,
+  func: formatEntries,
 });
 
 const formatTreeFlags = {
@@ -128,7 +128,7 @@ const formatTreeFlags = {
 };
 type FormatTreeFlags = InferFlags<typeof formatTreeFlags>;
 
-export async function formatTreeCommand(
+export async function formatTree(
   this: CommandContext,
   flags: FormatTreeFlags,
   file?: string,
@@ -142,7 +142,7 @@ export async function formatTreeCommand(
   );
 }
 
-const formatTreeCommandRoute = commandNoTarget<
+const formatTreeCommand = commandNoTarget<
   FormatTreeFlags,
   [string | undefined]
 >({
@@ -157,7 +157,7 @@ const formatTreeCommandRoute = commandNoTarget<
       ],
     },
   },
-  func: formatTreeCommand,
+  func: formatTree,
 });
 
 export function parsePositiveInteger(input: string): number {
@@ -173,9 +173,9 @@ export const formatRoute: RouteMap<CommandContext> & {
 } = Object.assign(
   buildRouteMap({
     routes: {
-      messages: formatMessagesCommandRoute,
-      entries: formatEntriesCommandRoute,
-      tree: formatTreeCommandRoute,
+      messages: formatMessagesCommand,
+      entries: formatEntriesCommand,
+      tree: formatTreeCommand,
     },
     docs: { brief: "Format raw pictl output" },
   }),

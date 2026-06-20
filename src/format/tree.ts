@@ -45,6 +45,8 @@ interface StackItem {
   readonly isVirtualRootChild: boolean;
 }
 
+// TDC: why do we have so much logic in tree.ts not related to tree formatting? The logic for filtering and rendering of the text should be pretty much entirely shared between tree and entries, so I would expect that tree.ts should only have logic related to the actual rendering of the tree itself, not the text.
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }

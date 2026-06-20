@@ -500,6 +500,7 @@ export async function streamPrompt(
       throw error;
     }
     await streamPromise;
+    // Entries already include entryId, so a cursor is redundant.
     if (options.type !== "entries" && isFiniteUntil(options.until)) {
       await writeFinalCursor(client, writer);
     }
@@ -545,6 +546,7 @@ export async function streamTail(
     } else {
       await streamRaw(client, writer, until, options.timeoutMs);
     }
+    // Entries already include entryId, so a cursor is redundant.
     if (
       options.outputType !== "entries" &&
       (until === undefined || isFiniteUntil(until))

@@ -53,6 +53,7 @@ function isStringOrNull(value: unknown): value is string | null {
   return typeof value === "string" || value === null;
 }
 
+// TDC: in these require* functions, you say "expected X", but don't say what you got. Why not include `got ${typeof record[key]} {record[key]}`, or maybe include the full record?
 function requireString(record: Record<string, unknown>, key: string): void {
   if (typeof record[key] !== "string") {
     throw new UsageError(`invalid session entry: expected string ${key}`);
