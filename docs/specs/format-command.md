@@ -4,7 +4,7 @@
 
 `pictl` exposes useful raw JSON and JSONL outputs, but coding agents often need compact, readable text views of that data. We want a new formatting layer that converts raw pictl output into concise, navigation-friendly text without changing existing pictl command output.
 
-This spec adds `src/format/` and a new `pictl format` command family. It does not change the output of `pictl prompt`, `pictl tail`, `pictl get-entries`, `pictl get-tree`, or any other existing subcommand.
+This spec adds `src/format/` and a new `pictl format` command family. It does not change the output of existing pictl subcommands except for one cleanup: `pictl tail --type entries` and `pictl prompt --type entries` stop emitting a trailing `pictl_cursor` record because entry records already carry the relevant entry ids.
 
 The existing `scripts/pictl-render` jq prototype must remain in place unchanged for now.
 
@@ -22,7 +22,7 @@ The existing `scripts/pictl-render` jq prototype must remain in place unchanged 
 - Entry formatting shows all valid session entries by default, including model changes, thinking level changes, compactions, branch summaries, labels, custom entries, messages, and tool results.
 - Tree formatting defaults to a conversation-oriented view containing only user and assistant message entries.
 - Tree formatting supports pi-aligned filter modes with explicit source comments identifying the pi implementation they are adapted from.
-- No existing pictl subcommand output changes in this spec.
+- No existing pictl subcommand output changes in this spec except removing the trailing `pictl_cursor` from entry-mode `tail` and `prompt` streams.
 - `scripts/pictl-render` remains untouched.
 
 ## CLI design
@@ -73,7 +73,7 @@ Flags:
 
 ```bash
 --filter conversation|pi-default|pi-no-tools|pi-user-only|pi-labeled-only|pi-all
---width <columns>
+--width <num>
 ```
 
 Defaults:
@@ -118,7 +118,6 @@ Entries do not show `parentId` by default. They show the entry id, role/type, an
 
 Tree output shape with branching:
 
-TDC: Note that your tree example was wrong, because it made it so that children are always more deeply indented than their parents. That's bad, because the typical case is that the tree is one long branch. If we render it as you suggested, then the indentation would increase linearly, which would be terrible. The desired behavior is that consecutive nodes at the same level of indentation are in parent-child relationship. Indentation should only ever increase at branch points or root nodes.
 ```text
 79d4e93e user: Help me write a small jq-based script…
 ├─ ab4e0c01 assistant: [thinking] [tool: read]
@@ -134,9 +133,11 @@ The current leaf line is marked with `*`, and tree output ends with a cursor lin
 
 Formatted text ends with exactly one trailing newline when there is at least one output line. Empty formatted output is the empty string.
 
-Truncation uses the single Unicode ellipsis character `…`. Width-limited one-line summaries are truncated to fit within the configured width, including the ellipsis. TDC: the width should also include the tree characters on the left; this means that truncation length of the message must take the indentation level into account.
+Truncation uses the single Unicode ellipsis character `…`. Width-limited one-line summaries are truncated to fit within the configured width, including the ellipsis. For tree output, `--width` applies to the full rendered tree line, including connector/current marker, spaces, entry id, role/type prefix, and summary text. The available summary length therefore decreases as indentation/prefix length increases.
 
 Line counts count newline-separated text lines after joining text content. Byte counts use UTF-8 byte length.
+
+Tree indentation follows pi tree-selector semantics: consecutive visible nodes may remain at the same indentation level even when they are in a parent-child relationship. Indentation increases only at root grouping or branch points so long single-branch sessions do not drift right linearly.
 
 ## Tree filter behavior
 
@@ -152,8 +153,7 @@ Tree filter predicates are normative behavior, not implementation hints.
 The `pi-*` predicates are adapted from pi's TreeSelector implementation. Source references that must appear in implementation comments near copied/adapted logic:
 
 ```text
-repo-relative: packages/coding-agent/src/modes/interactive/components/tree-selector.ts
-local reference: /home/anton/git/earendil-works/pi/packages/coding-agent/src/modes/interactive/components/tree-selector.ts
+pi repo-relative: packages/coding-agent/src/modes/interactive/components/tree-selector.ts
 ```
 
 ## Flag validation
@@ -210,6 +210,10 @@ export type MessageStreamRecord =
 ```
 
 `src/core/streaming.ts` imports these symbols instead of defining local equivalents.
+
+### `src/core/streaming.ts`
+
+Existing `streamTail` and `streamPrompt` behavior changes only for entry-mode streams: `outputType === "entries"` and prompt `type === "entries"` no longer write a trailing `pictl_cursor` record. Message-mode streams keep cursor behavior unchanged.
 
 ### `src/format/types.ts`
 
@@ -376,7 +380,6 @@ export function formatTreeNodeLine(
 
 Any tree flattening, filtering, connector, or entry-summary logic adapted from pi must have explicit comments naming the source file:
 
-TDC: do not include full paths of the local referece. That doesn't make sense to other developers.
 ```text
 pi repo-relative: packages/coding-agent/src/modes/interactive/components/tree-selector.ts
 ```
@@ -385,7 +388,7 @@ pi repo-relative: packages/coding-agent/src/modes/interactive/components/tree-se
 
 ```ts
 import type { SessionEntry } from "@geraschenko/pi-coding-agent";
-import type { MessageStreamRecord, StreamCursorRecord } from "../core/stream-types.ts";
+import type { MessageStreamRecord } from "../core/stream-types.ts";
 import type { CommandContext } from "../core/targets.ts";
 import type { EntriesInput, TreeInput } from "./types.ts";
 
@@ -400,8 +403,6 @@ export function parseJsonlInput(input: string): readonly unknown[];
 
 export function decodeMessageStreamRecord(value: unknown): MessageStreamRecord;
 
-export function decodeStreamCursorRecord(value: unknown): StreamCursorRecord;
-
 export function decodeSessionEntry(value: unknown): SessionEntry;
 
 export function decodeEntriesInput(value: unknown): EntriesInput;
@@ -415,9 +416,8 @@ export function parseTreeInput(input: string): TreeInput;
 export function parseMessageRecords(input: string): readonly MessageStreamRecord[];
 ```
 
-The `decode*` functions validate unknown input and return typed values. Invalid input throws `UsageError` with a useful message so the command exits non-zero without crashing. `parseEntriesInput` accepts and ignores `pictl_cursor` records in JSONL input; non-cursor records must decode as `SessionEntry`.
+The `decode*` functions validate unknown input and return typed values. Invalid input throws `UsageError` with a useful message so the command exits non-zero without crashing. `parseEntriesInput` requires every JSONL record to decode as `SessionEntry`; `pictl_cursor` records are invalid for entry formatting.
 
-TDC: let's make it part of this spec to remove the trailing pictl_cursor from `tail --type entries` and `prompt --type entries`. Then parseEntriesInput should error if it sees non-`SessionEntry`s.
 
 ### `src/format/command.ts`
 
@@ -434,8 +434,7 @@ import {
 import type { CommandContext } from "../core/targets.ts";
 import type { ToolResultDisplayMode, TreeFilterMode } from "./types.ts";
 
-// TDC: why did you call this "messageFormat" instead of "formatMessage"? Let's keep it in the same order as the command please. Also, keep the singular/plural the same as the command name, so "formatMessagesFlags", not "formatMessageFlags".
-const messageFormatFlags = {
+const formatMessagesFlags = {
   toolResults: enumFlag("Tool result display (summary|none|full)", [
     "summary",
     "none",
@@ -452,21 +451,19 @@ const messageFormatFlags = {
     "num",
   ),
 };
-// TDC: same here
-type MessageFormatFlags = InferFlags<typeof messageFormatFlags>;
+type FormatMessagesFlags = InferFlags<typeof formatMessagesFlags>;
 
-// TDC: same here
 export async function formatMessagesCommand(
   this: CommandContext,
-  flags: MessageFormatFlags,
+  flags: FormatMessagesFlags,
   file?: string,
 ): Promise<void>;
 
-const messagesCommand = commandNoTarget<MessageFormatFlags, [string | undefined]>({
+const formatMessagesCommandRoute = commandNoTarget<FormatMessagesFlags, [string | undefined]>({
   common: true,
   docs: { brief: "format pictl message JSONL" },
   parameters: {
-    flags: messageFormatFlags,
+    flags: formatMessagesFlags,
     positional: {
       kind: "tuple",
       parameters: [
@@ -477,26 +474,23 @@ const messagesCommand = commandNoTarget<MessageFormatFlags, [string | undefined]
   func: formatMessagesCommand,
 });
 
-// TDC: same here
-const entryFormatFlags = {
+const formatEntriesFlags = {
   timestamps: booleanFlag("Show timestamps"),
   full: booleanFlag("Show full entry details"),
 };
-// TDC: same here
-type EntryFormatFlags = InferFlags<typeof entryFormatFlags>;
+type FormatEntriesFlags = InferFlags<typeof formatEntriesFlags>;
 
-// TDC: same here
 export async function formatEntriesCommand(
   this: CommandContext,
-  flags: EntryFormatFlags,
+  flags: FormatEntriesFlags,
   file?: string,
 ): Promise<void>;
 
-const entriesCommand = commandNoTarget<EntryFormatFlags, [string | undefined]>({
+const formatEntriesCommandRoute = commandNoTarget<FormatEntriesFlags, [string | undefined]>({
   common: true,
   docs: { brief: "format pictl entries JSON or JSONL" },
   parameters: {
-    flags: entryFormatFlags,
+    flags: formatEntriesFlags,
     positional: {
       kind: "tuple",
       parameters: [
@@ -507,8 +501,7 @@ const entriesCommand = commandNoTarget<EntryFormatFlags, [string | undefined]>({
   func: formatEntriesCommand,
 });
 
-// TDC: same here
-const treeFormatFlags = {
+const formatTreeFlags = {
   filter: enumFlag("Tree filter", [
     "conversation",
     "pi-default",
@@ -517,23 +510,21 @@ const treeFormatFlags = {
     "pi-labeled-only",
     "pi-all",
   ]),
-  width: parsedFlag("Output width", parsePositiveInteger, "columns"),
+  width: parsedFlag("Output width", parsePositiveInteger, "num"),
 };
-// TDC: same here
-type TreeFormatFlags = InferFlags<typeof treeFormatFlags>;
+type FormatTreeFlags = InferFlags<typeof formatTreeFlags>;
 
-// TDC: same here
 export async function formatTreeCommand(
   this: CommandContext,
-  flags: TreeFormatFlags,
+  flags: FormatTreeFlags,
   file?: string,
 ): Promise<void>;
 
-const treeCommand = commandNoTarget<TreeFormatFlags, [string | undefined]>({
+const formatTreeCommandRoute = commandNoTarget<FormatTreeFlags, [string | undefined]>({
   common: true,
   docs: { brief: "format pictl tree JSON" },
   parameters: {
-    flags: treeFormatFlags,
+    flags: formatTreeFlags,
     positional: {
       kind: "tuple",
       parameters: [
@@ -564,9 +555,9 @@ Flag specs and inferred flag types are intentionally adjacent to their commands,
 - Empty input behavior is subcommand-specific: `format messages` treats empty input as an empty JSONL stream and emits empty output; `format entries` treats empty input as an empty JSONL stream and emits empty output; `format tree` requires a JSON object and reports a parse error for empty input.
 - Invalid JSON or JSONL should produce a command error rather than partial misleading output.
 - Unknown message content blocks should not crash formatting; they should render as compact placeholders using `summarizeContentBlock`.
-- Entry input that is not a valid `SessionEntry` is invalid, except for `pictl_cursor` records in entry JSONL. TDC: we should remove this edge case.
 - Message formatting is defined for the stream record types exported from `src/core/stream-types.ts`; invalid or unsupported records should produce a command error rather than misleading output.
-- Entry JSONL input may include `pictl_cursor` records from bounded `pictl tail --type entries`; these cursor records are ignored.
+- Entry input that is not a valid `SessionEntry` is invalid.
+- Entry JSONL input must not include `pictl_cursor` records. Entry-mode `tail` and `prompt` streams no longer emit trailing cursor records.
 - Repeated noisy control records in message streams may be coalesced only for `queue_update` records with identical rendered text and repeated `compaction_start` records. Session changes, tree navigation, and compaction end records are always shown.
 - Tool call arguments may be large and must be truncated according to `maxToolArgChars`.
 - Full successful tool results are printed only when `--tool-results full` is selected.
@@ -574,7 +565,7 @@ Flag specs and inferred flag types are intentionally adjacent to their commands,
 
 ## Non-goals
 
-- Do not change output of existing pictl commands in this spec.
+- Do not change output of existing pictl commands in this spec except removing the trailing `pictl_cursor` from entry-mode `tail` and `prompt` streams.
 - Do not remove or modify `scripts/pictl-render` in this spec.
 - Do not add ANSI styling in this spec.
 - Do not make live daemon calls from `pictl format`.
@@ -590,8 +581,7 @@ Flag specs and inferred flag types are intentionally adjacent to their commands,
 - Use `/tmp/pictl-tail`, `/tmp/pictl-entries`, `/tmp/pictl-tree`, and `/tmp/pi-tree-example` as exploratory examples while designing tests.
 - Add committed test fixtures under an appropriate test fixture directory rather than depending on `/tmp` files.
 - Tree output should prioritize copyable entry ids for `navigate-tree` workflows and for understanding explored branches.
-- Tree formatting should adapt pi's tree selector behavior where useful, but copied/adapted behavior must include explicit comments pointing to the source file:
-  `/home/anton/git/earendil-works/pi/packages/coding-agent/src/modes/interactive/components/tree-selector.ts`.
+- Tree formatting should adapt pi's tree selector behavior where useful, but copied/adapted behavior must include explicit comments pointing to pi repo-relative source file `packages/coding-agent/src/modes/interactive/components/tree-selector.ts`.
 - Pi's tree selector has filter modes `default | no-tools | user-only | labeled-only | all`; pictl exposes pi-aligned versions as `pi-default | pi-no-tools | pi-user-only | pi-labeled-only | pi-all` plus pictl-specific `conversation`.
 - Tree filter predicates are specified normatively in SPEC. Implementation comments near copied/adapted tree behavior must cite pi's TreeSelector source.
 - The current jq prototype is useful for comparing `format messages` output, but remains untouched.
@@ -610,6 +600,7 @@ Flag specs and inferred flag types are intentionally adjacent to their commands,
 - [x] Incorporated reviewer feedback approved by user: context-aware stdin reading, parser validation functions, cursor handling for entry JSONL, exact defaults, exact newline/truncation/counting basics, and explicit app integration.
 - [x] Incorporated second reviewer pass: moved tree filter predicates into SPEC and added positive integer validation.
 - [x] Incorporated user review comments from `3ed6088`: removed `errors` tool-result mode, made failed snippets part of default `summary`, changed entries full output flag to `--full`, removed tree `--current-leaf`, removed parent id from default entry examples, expanded tree branching/cursor example, removed unknown-entry fallback types, removed separate tool-call lookup parameters, replaced assertion functions with decode functions, and specified command flags adjacent to command definitions.
+- [x] Incorporated user review comments from `c5fe426`: documented pi-style non-linear tree indentation, made tree width include the full rendered tree line, removed local absolute pi paths, added removal of trailing entry-mode cursors from `tail`/`prompt`, renamed command symbols to `formatMessages*`/`formatEntries*`/`formatTree*`, and changed numeric placeholders to `num`.
 - [x] Re-ran reviewer after user review comment incorporation and fixed the Stricli optional positional parameter design.
 - [ ] Implement stream type extraction.
 - [ ] Implement formatter modules.
