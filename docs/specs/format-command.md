@@ -41,8 +41,8 @@ Flags:
 
 ```bash
 --tool-results summary|none|full
---max-tool-arg-chars <count>
---max-error-lines <count>
+--max-tool-arg-chars <num>
+--max-error-lines <num>
 ```
 
 Defaults:
@@ -118,20 +118,23 @@ Entries do not show `parentId` by default. They show the entry id, role/type, an
 
 Tree output shape with branching:
 
+TDC: Note that your tree example was wrong, because it made it so that children are always more deeply indented than their parents. That's bad, because the typical case is that the tree is one long branch. If we render it as you suggested, then the indentation would increase linearly, which would be terrible. The desired behavior is that consecutive nodes at the same level of indentation are in parent-child relationship. Indentation should only ever increase at branch points or root nodes.
 ```text
-79d4e93e user: Help me write a small jq-based script...
+79d4e93e user: Help me write a small jq-based script…
 ├─ ab4e0c01 assistant: [thinking] [tool: read]
-│  └─ 0eb932a9 user: What else should this script do?
-└─ d66116fb user: I prefer TypeScript over jq.
-   └─ › ea28b2b5 assistant: Agreed. Let's make this `pictl format`...
+│  ├─ 0eb932a9 user: What else should this script do?
+│  ├─ 932a90eb assistant: maybe a barrel roll
+│  └─ 2a90eb93 user: good idea
+├─ d66116fb user: I prefer TypeScript over jq.
+└─ * ea28b2b5 assistant: Agreed. Let's make this `pictl format`…
 [cursor: ea28b2b5]
 ```
 
-The current leaf line is marked with `›`, and tree output ends with a cursor line containing the input `leafId`.
+The current leaf line is marked with `*`, and tree output ends with a cursor line containing the input `leafId`.
 
 Formatted text ends with exactly one trailing newline when there is at least one output line. Empty formatted output is the empty string.
 
-Truncation uses the single Unicode ellipsis character `…`. Width-limited one-line summaries are truncated to fit within the configured width, including the ellipsis.
+Truncation uses the single Unicode ellipsis character `…`. Width-limited one-line summaries are truncated to fit within the configured width, including the ellipsis. TDC: the width should also include the tree characters on the left; this means that truncation length of the message must take the indentation level into account.
 
 Line counts count newline-separated text lines after joining text content. Byte counts use UTF-8 byte length.
 
@@ -233,8 +236,7 @@ export interface EntryFormatOptions {
  * entries are shown.
  *
  * `pi-*` modes are intentionally aligned with pi's TreeSelector FilterMode from:
- * repo-relative: packages/coding-agent/src/modes/interactive/components/tree-selector.ts
- * local reference: /home/anton/git/earendil-works/pi/packages/coding-agent/src/modes/interactive/components/tree-selector.ts
+ * pi repo-relative: packages/coding-agent/src/modes/interactive/components/tree-selector.ts
  *
  * If pi changes TreeSelector filtering behavior, update these modes to match.
  */
@@ -374,9 +376,9 @@ export function formatTreeNodeLine(
 
 Any tree flattening, filtering, connector, or entry-summary logic adapted from pi must have explicit comments naming the source file:
 
+TDC: do not include full paths of the local referece. That doesn't make sense to other developers.
 ```text
-repo-relative: packages/coding-agent/src/modes/interactive/components/tree-selector.ts
-local reference: /home/anton/git/earendil-works/pi/packages/coding-agent/src/modes/interactive/components/tree-selector.ts
+pi repo-relative: packages/coding-agent/src/modes/interactive/components/tree-selector.ts
 ```
 
 ### `src/format/input.ts`
@@ -415,6 +417,8 @@ export function parseMessageRecords(input: string): readonly MessageStreamRecord
 
 The `decode*` functions validate unknown input and return typed values. Invalid input throws `UsageError` with a useful message so the command exits non-zero without crashing. `parseEntriesInput` accepts and ignores `pictl_cursor` records in JSONL input; non-cursor records must decode as `SessionEntry`.
 
+TDC: let's make it part of this spec to remove the trailing pictl_cursor from `tail --type entries` and `prompt --type entries`. Then parseEntriesInput should error if it sees non-`SessionEntry`s.
+
 ### `src/format/command.ts`
 
 ```ts
@@ -430,6 +434,7 @@ import {
 import type { CommandContext } from "../core/targets.ts";
 import type { ToolResultDisplayMode, TreeFilterMode } from "./types.ts";
 
+// TDC: why did you call this "messageFormat" instead of "formatMessage"? Let's keep it in the same order as the command please. Also, keep the singular/plural the same as the command name, so "formatMessagesFlags", not "formatMessageFlags".
 const messageFormatFlags = {
   toolResults: enumFlag("Tool result display (summary|none|full)", [
     "summary",
@@ -439,16 +444,18 @@ const messageFormatFlags = {
   maxToolArgChars: parsedFlag(
     "Maximum tool argument characters",
     parsePositiveInteger,
-    "count",
+    "num",
   ),
   maxErrorLines: parsedFlag(
     "Maximum failed tool result snippet lines",
     parsePositiveInteger,
-    "count",
+    "num",
   ),
 };
+// TDC: same here
 type MessageFormatFlags = InferFlags<typeof messageFormatFlags>;
 
+// TDC: same here
 export async function formatMessagesCommand(
   this: CommandContext,
   flags: MessageFormatFlags,
@@ -470,12 +477,15 @@ const messagesCommand = commandNoTarget<MessageFormatFlags, [string | undefined]
   func: formatMessagesCommand,
 });
 
+// TDC: same here
 const entryFormatFlags = {
   timestamps: booleanFlag("Show timestamps"),
   full: booleanFlag("Show full entry details"),
 };
+// TDC: same here
 type EntryFormatFlags = InferFlags<typeof entryFormatFlags>;
 
+// TDC: same here
 export async function formatEntriesCommand(
   this: CommandContext,
   flags: EntryFormatFlags,
@@ -497,6 +507,7 @@ const entriesCommand = commandNoTarget<EntryFormatFlags, [string | undefined]>({
   func: formatEntriesCommand,
 });
 
+// TDC: same here
 const treeFormatFlags = {
   filter: enumFlag("Tree filter", [
     "conversation",
@@ -508,8 +519,10 @@ const treeFormatFlags = {
   ]),
   width: parsedFlag("Output width", parsePositiveInteger, "columns"),
 };
+// TDC: same here
 type TreeFormatFlags = InferFlags<typeof treeFormatFlags>;
 
+// TDC: same here
 export async function formatTreeCommand(
   this: CommandContext,
   flags: TreeFormatFlags,
@@ -551,7 +564,7 @@ Flag specs and inferred flag types are intentionally adjacent to their commands,
 - Empty input behavior is subcommand-specific: `format messages` treats empty input as an empty JSONL stream and emits empty output; `format entries` treats empty input as an empty JSONL stream and emits empty output; `format tree` requires a JSON object and reports a parse error for empty input.
 - Invalid JSON or JSONL should produce a command error rather than partial misleading output.
 - Unknown message content blocks should not crash formatting; they should render as compact placeholders using `summarizeContentBlock`.
-- Entry input that is not a valid `SessionEntry` is invalid, except for `pictl_cursor` records in entry JSONL.
+- Entry input that is not a valid `SessionEntry` is invalid, except for `pictl_cursor` records in entry JSONL. TDC: we should remove this edge case.
 - Message formatting is defined for the stream record types exported from `src/core/stream-types.ts`; invalid or unsupported records should produce a command error rather than misleading output.
 - Entry JSONL input may include `pictl_cursor` records from bounded `pictl tail --type entries`; these cursor records are ignored.
 - Repeated noisy control records in message streams may be coalesced only for `queue_update` records with identical rendered text and repeated `compaction_start` records. Session changes, tree navigation, and compaction end records are always shown.
