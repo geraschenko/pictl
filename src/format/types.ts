@@ -2,6 +2,7 @@ import type {
   SessionEntry,
   SessionTreeNode,
 } from "@geraschenko/pi-coding-agent";
+import type { FilterMode } from "./filter.ts";
 
 export type ToolResultDisplayMode = "summary" | "none" | "full";
 
@@ -14,29 +15,12 @@ export interface MessageFormatOptions {
 export interface EntryFormatOptions {
   readonly timestamps: boolean;
   readonly full: boolean;
+  readonly filter: FilterMode | undefined;
+  readonly width: number;
 }
 
-/**
- * Tree filter modes.
- *
- * `conversation` is pictl-specific and means only user and assistant message
- * entries are shown.
- *
- * `pi-*` modes are intentionally aligned with pi's TreeSelector FilterMode from:
- * pi repo-relative: packages/coding-agent/src/modes/interactive/components/tree-selector.ts
- *
- * If pi changes TreeSelector filtering behavior, update these modes to match.
- */
-export type TreeFilterMode =
-  | "conversation"
-  | "pi-default"
-  | "pi-no-tools"
-  | "pi-user-only"
-  | "pi-labeled-only"
-  | "pi-all";
-
 export interface TreeFormatOptions {
-  readonly filter: TreeFilterMode;
+  readonly filter: FilterMode;
   readonly width: number;
 }
 

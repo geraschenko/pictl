@@ -10,6 +10,7 @@ import {
 import type { CommandContext } from "../core/targets.ts";
 import { UsageError } from "../core/util.ts";
 import { formatEntriesInput, formatEntryJsonl } from "./entries.ts";
+import { FILTER_MODES } from "./filter.ts";
 import {
   parseEntriesInput,
   parseMessageRecords,
@@ -81,6 +82,8 @@ const formatMessagesCommand = commandNoTarget<
 const formatEntriesFlags = {
   timestamps: booleanFlag("Show timestamps"),
   full: booleanFlag("Show full entry details"),
+  filter: enumFlag("Entry filter", FILTER_MODES),
+  width: parsedFlag("Output width", parsePositiveInteger, "num"),
 };
 type FormatEntriesFlags = InferFlags<typeof formatEntriesFlags>;
 
@@ -116,14 +119,7 @@ const formatEntriesCommand = commandNoTarget<
 });
 
 const formatTreeFlags = {
-  filter: enumFlag("Tree filter", [
-    "conversation",
-    "pi-default",
-    "pi-no-tools",
-    "pi-user-only",
-    "pi-labeled-only",
-    "pi-all",
-  ]),
+  filter: enumFlag("Tree filter", FILTER_MODES),
   width: parsedFlag("Output width", parsePositiveInteger, "num"),
 };
 type FormatTreeFlags = InferFlags<typeof formatTreeFlags>;

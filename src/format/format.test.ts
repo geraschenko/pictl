@@ -104,6 +104,88 @@ test("format entries supports get-entries JSON", async () => {
   );
 });
 
+test("format entries can use conversation filter", () => {
+  const input = parseEntriesInput(
+    [
+      {
+        type: "message",
+        id: "user0001",
+        parentId: null,
+        timestamp: "2026-01-01T00:00:00.000Z",
+        message: {
+          role: "user",
+          content: [{ type: "text", text: "Run a tool" }],
+          timestamp: 1,
+        },
+      },
+      {
+        type: "message",
+        id: "tool0001",
+        parentId: "user0001",
+        timestamp: "2026-01-01T00:00:01.000Z",
+        message: {
+          role: "assistant",
+          content: [
+            {
+              type: "toolCall",
+              id: "call-1",
+              name: "bash",
+              arguments: { command: "true" },
+            },
+          ],
+          api: "test",
+          provider: "test",
+          model: "test",
+          usage: {
+            input: 0,
+            output: 0,
+            cacheRead: 0,
+            cacheWrite: 0,
+            totalTokens: 0,
+            cost: {
+              input: 0,
+              output: 0,
+              cacheRead: 0,
+              cacheWrite: 0,
+              total: 0,
+            },
+          },
+          stopReason: "toolUse",
+          timestamp: 2,
+        },
+      },
+      {
+        type: "compaction",
+        id: "compact1",
+        parentId: "tool0001",
+        timestamp: "2026-01-01T00:00:02.000Z",
+        summary: "large history",
+        firstKeptEntryId: "user0001",
+        tokensBefore: 110123,
+      },
+    ]
+      .map((record) => JSON.stringify(record))
+      .join("\n"),
+  );
+  assert.equal(
+    isEntriesInput(input)
+      ? ""
+      : formatEntriesInput({ entries: input }, { filter: "conversation" }),
+    "user0001 user       Run a tool\n" +
+      "compact1 compaction [compaction: 110k tokens]\n",
+  );
+});
+
+test("format entries width applies to full rendered line", async () => {
+  const input = parseEntriesInput(await fixture("entries.json"));
+  const output = isEntriesInput(input)
+    ? formatEntriesInput(input, { width: 28 })
+    : "";
+  const lines = output.trimEnd().split("\n");
+  assert.equal(lines[0], "79d4e93e user       Help me…");
+  assert.ok(lines.every((line) => [...line].length <= 28));
+});
+
 test("format entries rejects cursor JSONL records", () => {
   assert.throws(
     () =>

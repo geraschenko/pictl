@@ -2,8 +2,10 @@ import type {
   SessionEntry,
   SessionTreeNode,
 } from "@geraschenko/pi-coding-agent";
-import type { TreeFilterMode, TreeFormatOptions, TreeInput } from "./types.ts";
 import { summarizeEntry } from "./entries.ts";
+import type { FilterMode } from "./filter.ts";
+import { passesFilter } from "./filter.ts";
+import type { TreeFormatOptions, TreeInput } from "./types.ts";
 import { extractTextContent, oneLine, truncateText } from "./text.ts";
 
 export const DEFAULT_TREE_FORMAT_OPTIONS: TreeFormatOptions = {
@@ -46,105 +48,6 @@ interface StackItem {
   readonly isLast: boolean;
   readonly gutters: readonly TreeGutter[];
   readonly isVirtualRootChild: boolean;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
-function hasBlock(content: unknown, type: string): boolean {
-  return Array.isArray(content)
-    ? content.some((block) => isRecord(block) && block.type === type)
-    : false;
-}
-
-function assistantHasText(entry: SessionEntry): boolean {
-  return (
-    entry.type === "message" &&
-    entry.message.role === "assistant" &&
-    extractTextContent(entry.message.content).trim() !== ""
-  );
-}
-
-function assistantToolOnlySuppressed(
-  entry: SessionEntry,
-  currentLeafId: string | null,
-): boolean {
-  if (
-    entry.type !== "message" ||
-    entry.message.role !== "assistant" ||
-    entry.id === currentLeafId
-  ) {
-    return false;
-  }
-  const hasText = assistantHasText(entry);
-  const hasToolCall = hasBlock(entry.message.content, "toolCall");
-  const isErrorOrAborted =
-    entry.message.stopReason !== "stop" &&
-    entry.message.stopReason !== "toolUse";
-  return hasToolCall && !hasText && !isErrorOrAborted;
-}
-
-function passesFilter(
-  flatNode: FlatTreeNodeDraft,
-  currentLeafId: string | null,
-  filter: TreeFilterMode,
-): boolean {
-  const entry = flatNode.node.entry;
-  const isCurrentLeaf = entry.id === currentLeafId;
-
-  // Adapted from pi TreeSelector filtering.
-  // pi repo-relative: packages/coding-agent/src/modes/interactive/components/tree-selector.ts
-  if (
-    filter !== "conversation" &&
-    assistantToolOnlySuppressed(entry, currentLeafId)
-  ) {
-    return false;
-  }
-
-  if (filter === "conversation") {
-    if (entry.type === "compaction") {
-      return true;
-    }
-    if (entry.type !== "message") {
-      return false;
-    }
-    if (entry.message.role === "user") {
-      return true;
-    }
-    if (entry.message.role !== "assistant") {
-      return false;
-    }
-    return (
-      assistantHasText(entry) ||
-      entry.message.stopReason === "aborted" ||
-      entry.message.errorMessage !== undefined ||
-      isCurrentLeaf
-    );
-  }
-
-  const isSettingsEntry =
-    entry.type === "label" ||
-    entry.type === "custom" ||
-    entry.type === "model_change" ||
-    entry.type === "thinking_level_change" ||
-    entry.type === "session_info";
-
-  switch (filter) {
-    case "pi-user-only":
-      return entry.type === "message" && entry.message.role === "user";
-    case "pi-no-tools":
-      return !(
-        isSettingsEntry ||
-        (entry.type === "message" && entry.message.role === "toolResult")
-      );
-    case "pi-labeled-only":
-      return flatNode.node.label !== undefined;
-    case "pi-all":
-      return true;
-    case "pi-default":
-      return !isSettingsEntry;
-  }
 }
 
 function buildActivePath(
@@ -485,12 +388,16 @@ export function formatTreeInput(
 export function flattenTreeForFormat(
   roots: readonly SessionTreeNode[],
   currentLeafId: string | null,
-  filter: TreeFilterMode,
+  filter: FilterMode,
 ): readonly FlatTreeNode[] {
   const flatNodes = flattenAll(roots, currentLeafId);
   const activePath = buildActivePath(flatNodes, currentLeafId);
   const filtered = flatNodes.filter((node) =>
-    passesFilter(node, currentLeafId, filter),
+    passesFilter(
+      { entry: node.node.entry, label: node.node.label },
+      currentLeafId,
+      filter,
+    ),
   );
   return recalculateVisibleStructure(
     filtered,

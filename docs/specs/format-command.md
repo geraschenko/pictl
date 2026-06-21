@@ -60,12 +60,16 @@ Flags:
 ```bash
 --timestamps
 --full
+--filter conversation|pi-default|pi-no-tools|pi-user-only|pi-labeled-only|pi-all
+--width <num>
 ```
 
 Defaults:
 
 - timestamps hidden unless `--timestamps` is passed
 - entries are shown as summaries unless `--full` is passed
+- entries are unfiltered unless `--filter` is passed
+- `--width 120`
 
 ### `pictl format tree`
 
@@ -139,9 +143,9 @@ Line counts count newline-separated text lines after joining text content. Byte 
 
 Tree indentation follows pi tree-selector semantics: consecutive visible nodes may remain at the same indentation level even when they are in a parent-child relationship. Indentation increases only at root grouping or branch points so long single-branch sessions do not drift right linearly.
 
-## Tree filter behavior
+## Filter behavior
 
-Tree filter predicates are normative behavior, not implementation hints.
+Filter predicates are normative behavior for both `format entries --filter` and `format tree --filter`, not implementation hints.
 
 - `conversation`: show message entries whose role is `user` or `assistant`, plus compaction entries. User messages are always shown. Assistant messages are shown when they have text content, have `stopReason === "aborted"`, have an error message, or are the current leaf. Thinking-only and tool-only assistant messages are hidden unless they satisfy one of those conditions. Compaction entries are shown as `[compaction: <num>k tokens]` using `tokensBefore`, matching pi's tree view.
 - `pi-default`: mirror pi TreeSelector `default`: hide settings/bookkeeping entries (`label`, `custom`, `model_change`, `thinking_level_change`, `session_info`); hide assistant messages with only tool calls and no text unless current/error/aborted; otherwise show entries.
@@ -228,32 +232,17 @@ export interface MessageFormatOptions {
   readonly maxErrorLines: number;
 }
 
+import type { FilterMode } from "./filter.ts";
+
 export interface EntryFormatOptions {
   readonly timestamps: boolean;
   readonly full: boolean;
+  readonly filter: FilterMode | undefined;
+  readonly width: number;
 }
 
-/**
- * Tree filter modes.
- *
- * `conversation` is pictl-specific and means only user and assistant message
- * entries are shown.
- *
- * `pi-*` modes are intentionally aligned with pi's TreeSelector FilterMode from:
- * pi repo-relative: packages/coding-agent/src/modes/interactive/components/tree-selector.ts
- *
- * If pi changes TreeSelector filtering behavior, update these modes to match.
- */
-export type TreeFilterMode =
-  | "conversation"
-  | "pi-default"
-  | "pi-no-tools"
-  | "pi-user-only"
-  | "pi-labeled-only"
-  | "pi-all";
-
 export interface TreeFormatOptions {
-  readonly filter: TreeFilterMode;
+  readonly filter: FilterMode;
   readonly width: number;
 }
 
@@ -267,6 +256,36 @@ export interface TreeInput {
   readonly leafId: string | null;
 }
 ```
+
+### `src/format/filter.ts`
+
+```ts
+import type { SessionEntry } from "@geraschenko/pi-coding-agent";
+
+export const FILTER_MODES: readonly [
+  "conversation",
+  "pi-default",
+  "pi-no-tools",
+  "pi-user-only",
+  "pi-labeled-only",
+  "pi-all",
+];
+
+export type FilterMode = (typeof FILTER_MODES)[number];
+
+export interface FilterNode {
+  readonly entry: SessionEntry;
+  readonly label?: string;
+}
+
+export function passesFilter(
+  node: FilterNode,
+  currentLeafId: string | null,
+  filter: FilterMode,
+): boolean;
+```
+
+`passesFilter` contains shared filter behavior for `format entries` and `format tree`. Pi-adapted filtering logic must keep the pi TreeSelector source comment near the implementation.
 
 ### `src/format/text.ts`
 
@@ -327,6 +346,11 @@ export function formatEntry(
   entry: SessionEntry,
   options: EntryFormatOptions,
 ): string;
+
+export function summarizeEntry(
+  entry: SessionEntry,
+  maxChars?: number,
+): string;
 ```
 
 `formatEntriesInput` and `formatEntryJsonl` call `formatEntry` for each entry in input order.
@@ -335,7 +359,8 @@ export function formatEntry(
 
 ```ts
 import type { SessionTreeNode } from "@geraschenko/pi-coding-agent";
-import type { TreeFilterMode, TreeFormatOptions, TreeInput } from "./types.ts";
+import type { FilterMode } from "./filter.ts";
+import type { TreeFormatOptions, TreeInput } from "./types.ts";
 
 export const DEFAULT_TREE_FORMAT_OPTIONS: TreeFormatOptions;
 
@@ -363,7 +388,7 @@ export function formatTreeInput(
 export function flattenTreeForFormat(
   roots: readonly SessionTreeNode[],
   currentLeafId: string | null,
-  filter: TreeFilterMode,
+  filter: FilterMode,
 ): readonly FlatTreeNode[];
 
 export function formatTreeNodeLine(
@@ -427,7 +452,8 @@ import {
   type InferFlags,
 } from "../core/cli.ts";
 import type { CommandContext } from "../core/targets.ts";
-import type { ToolResultDisplayMode, TreeFilterMode } from "./types.ts";
+import { FILTER_MODES } from "./filter.ts";
+import type { ToolResultDisplayMode } from "./types.ts";
 
 const formatMessagesFlags = {
   toolResults: enumFlag("Tool result display (summary|none|full)", [
@@ -472,6 +498,8 @@ const formatMessagesCommand = commandNoTarget<FormatMessagesFlags, [string | und
 const formatEntriesFlags = {
   timestamps: booleanFlag("Show timestamps"),
   full: booleanFlag("Show full entry details"),
+  filter: enumFlag("Entry filter", FILTER_MODES),
+  width: parsedFlag("Output width", parsePositiveInteger, "num"),
 };
 type FormatEntriesFlags = InferFlags<typeof formatEntriesFlags>;
 
@@ -497,14 +525,7 @@ const formatEntriesCommand = commandNoTarget<FormatEntriesFlags, [string | undef
 });
 
 const formatTreeFlags = {
-  filter: enumFlag("Tree filter", [
-    "conversation",
-    "pi-default",
-    "pi-no-tools",
-    "pi-user-only",
-    "pi-labeled-only",
-    "pi-all",
-  ]),
+  filter: enumFlag("Tree filter", FILTER_MODES),
   width: parsedFlag("Output width", parsePositiveInteger, "num"),
 };
 type FormatTreeFlags = InferFlags<typeof formatTreeFlags>;
@@ -655,3 +676,15 @@ Rationale: pi's `/tree` view includes these token-boundary markers, and they are
 Decided: message control formatting uses `tree_navigated.oldLeafId/newLeafId`, `session_changed.sessionId/sessionFile`, and `queue_update.steering/followUp` from pi's event types. Removed `MessageFormatState` because control coalescing was removed.
 
 Rationale: made-up fallback fields were misleading, and once every control record is rendered individually there is no formatter state to maintain.
+
+### Share filter predicates between entries and tree
+
+Decided: move filter modes and `passesFilter` into `src/format/filter.ts`, rename `TreeFilterMode` to `FilterMode`, and have both `format entries --filter` and `format tree --filter` use the same predicates.
+
+Rationale: the filter semantics should not drift between entry-list and tree views. Entries remain unfiltered by default to preserve the existing “show all entries” behavior, but `--filter` lets users request the same filtered views as tree formatting.
+
+### Add width limiting to entries
+
+Decided: `format entries --width` limits the full rendered entry line and defaults to 120 columns.
+
+Rationale: entry output now has the same copyable compactness control as tree output; width applies to id/type/timestamp/full suffix as well as summary text.
