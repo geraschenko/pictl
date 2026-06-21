@@ -106,6 +106,7 @@ export function summarizeEntry(
   entry: SessionEntry,
   maxChars = DEFAULT_ENTRY_WIDTH,
 ): string {
+  // TDC: each branch has a truncateText. It would be clearer to have the switch statement return the full string, and then truncate and return. Same for summarizeMessage above.
   switch (entry.type) {
     case "message":
       return summarizeMessage(entry.message, maxChars);
