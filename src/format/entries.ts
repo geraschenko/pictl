@@ -57,82 +57,75 @@ function entryFormatOptions(
 }
 
 function summarizeMessage(message: AgentMessage, maxChars: number): string {
-  switch (message.role) {
-    case "user":
-      return truncateText(
-        oneLine(extractTextContent(message.content)),
-        maxChars,
-      );
-    case "assistant": {
-      const text = extractTextContent(message.content);
-      const parts: string[] = [];
-      if (hasContentBlock(message.content, "thinking")) {
-        parts.push("[thinking]");
-      }
-      for (const block of contentBlocks(message.content)) {
-        if (isRecord(block) && block.type === "toolCall") {
-          parts.push(formatToolCall(block));
+  const summary = (() => {
+    switch (message.role) {
+      case "user":
+        return oneLine(extractTextContent(message.content));
+      case "assistant": {
+        const text = extractTextContent(message.content);
+        const parts: string[] = [];
+        if (hasContentBlock(message.content, "thinking")) {
+          parts.push("[thinking]");
         }
+        for (const block of contentBlocks(message.content)) {
+          if (isRecord(block) && block.type === "toolCall") {
+            parts.push(formatToolCall(block));
+          }
+        }
+        if (text.trim() !== "") {
+          parts.push(oneLine(text));
+        } else if (message.stopReason === "aborted") {
+          parts.push("(aborted)");
+        } else if (message.errorMessage !== undefined) {
+          parts.push(oneLine(message.errorMessage));
+        }
+        return parts.join(" ") || "(no content)";
       }
-      if (text.trim() !== "") {
-        parts.push(truncateText(oneLine(text), maxChars));
-      } else if (message.stopReason === "aborted") {
-        parts.push("(aborted)");
-      } else if (message.errorMessage !== undefined) {
-        parts.push(truncateText(oneLine(message.errorMessage), maxChars));
+      case "toolResult": {
+        const text = extractTextContent(message.content);
+        const status = message.isError ? "error" : "ok";
+        return `${message.toolName} ${status}, ${countLines(text)} lines, ${Buffer.byteLength(text, "utf8")} bytes`;
       }
-      return truncateText(parts.join(" ") || "(no content)", maxChars);
+      case "bashExecution":
+        return `[bash] ${oneLine(message.command)}`;
+      case "custom":
+        return `[custom:${message.customType}] ${oneLine(extractTextContent(message.content))}`;
+      case "branchSummary":
+        return oneLine(message.summary);
+      case "compactionSummary":
+        return oneLine(message.summary);
     }
-    case "toolResult": {
-      const text = extractTextContent(message.content);
-      const status = message.isError ? "error" : "ok";
-      return truncateText(
-        `${message.toolName} ${status}, ${countLines(text)} lines, ${Buffer.byteLength(text, "utf8")} bytes`,
-        maxChars,
-      );
-    }
-    case "bashExecution":
-      return `[bash] ${truncateText(oneLine(message.command), maxChars)}`;
-    case "custom":
-      return `[custom:${message.customType}] ${truncateText(oneLine(extractTextContent(message.content)), maxChars)}`;
-    case "branchSummary":
-      return truncateText(oneLine(message.summary), maxChars);
-    case "compactionSummary":
-      return truncateText(oneLine(message.summary), maxChars);
-  }
+  })();
+  return truncateText(summary, maxChars);
 }
 
 export function summarizeEntry(
   entry: SessionEntry,
   maxChars = DEFAULT_ENTRY_WIDTH,
 ): string {
-  // TDC: each branch has a truncateText. It would be clearer to have the switch statement return the full string, and then truncate and return. Same for summarizeMessage above.
-  switch (entry.type) {
-    case "message":
-      return summarizeMessage(entry.message, maxChars);
-    case "thinking_level_change":
-      return truncateText(entry.thinkingLevel, maxChars);
-    case "model_change":
-      return truncateText(`${entry.provider}/${entry.modelId}`, maxChars);
-    case "compaction":
-      return truncateText(
-        `[compaction: ${Math.round(entry.tokensBefore / 1000)}k tokens]`,
-        maxChars,
-      );
-    case "branch_summary":
-      return `${entry.fromId}: ${truncateText(oneLine(entry.summary), maxChars)}`;
-    case "custom":
-      return `${entry.customType}${entry.data === undefined ? "" : ` ${summarizeUnknown(entry.data, maxChars)}`}`;
-    case "custom_message":
-      return `[${entry.customType}] ${truncateText(oneLine(extractTextContent(entry.content)), maxChars)}`;
-    case "label":
-      return truncateText(
-        `${entry.targetId}: ${entry.label ?? "(cleared)"}`,
-        maxChars,
-      );
-    case "session_info":
-      return truncateText(entry.name ?? "(empty title)", maxChars);
-  }
+  const summary = (() => {
+    switch (entry.type) {
+      case "message":
+        return summarizeMessage(entry.message, maxChars);
+      case "thinking_level_change":
+        return entry.thinkingLevel;
+      case "model_change":
+        return `${entry.provider}/${entry.modelId}`;
+      case "compaction":
+        return `[compaction: ${Math.round(entry.tokensBefore / 1000)}k tokens]`;
+      case "branch_summary":
+        return `${entry.fromId}: ${oneLine(entry.summary)}`;
+      case "custom":
+        return `${entry.customType}${entry.data === undefined ? "" : ` ${summarizeUnknown(entry.data, maxChars)}`}`;
+      case "custom_message":
+        return `[${entry.customType}] ${oneLine(extractTextContent(entry.content))}`;
+      case "label":
+        return `${entry.targetId}: ${entry.label ?? "(cleared)"}`;
+      case "session_info":
+        return entry.name ?? "(empty title)";
+    }
+  })();
+  return truncateText(summary, maxChars);
 }
 
 export function formatEntriesInput(
