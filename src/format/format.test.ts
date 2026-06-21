@@ -68,10 +68,78 @@ test("format tree renders conversation branches with current leaf marker", async
   const output = formatTreeInput(parseTreeInput(await fixture("tree.json")));
   assert.equal(
     output,
-    "79d4e93e user: Start\n" +
+    "• 79d4e93e user: Start\n" +
       "├─ * ea28b2b5 assistant: Second branch\n" +
       "└─ ab4e0c01 assistant: First branch\n" +
       "[cursor: ea28b2b5]\n",
+  );
+});
+
+test("format tree conversation hides tool-only assistant messages", () => {
+  const input = parseTreeInput(
+    JSON.stringify({
+      tree: [
+        {
+          entry: {
+            type: "message",
+            id: "user0001",
+            parentId: null,
+            timestamp: "2026-01-01T00:00:00.000Z",
+            message: {
+              role: "user",
+              content: [{ type: "text", text: "Run a tool" }],
+              timestamp: 1,
+            },
+          },
+          children: [
+            {
+              entry: {
+                type: "message",
+                id: "tool0001",
+                parentId: "user0001",
+                timestamp: "2026-01-01T00:00:01.000Z",
+                message: {
+                  role: "assistant",
+                  content: [
+                    {
+                      type: "toolCall",
+                      id: "call-1",
+                      name: "bash",
+                      arguments: { command: "true" },
+                    },
+                  ],
+                  api: "test",
+                  provider: "test",
+                  model: "test",
+                  usage: {
+                    input: 0,
+                    output: 0,
+                    cacheRead: 0,
+                    cacheWrite: 0,
+                    totalTokens: 0,
+                    cost: {
+                      input: 0,
+                      output: 0,
+                      cacheRead: 0,
+                      cacheWrite: 0,
+                      total: 0,
+                    },
+                  },
+                  stopReason: "toolUse",
+                  timestamp: 2,
+                },
+              },
+              children: [],
+            },
+          ],
+        },
+      ],
+      leafId: "user0001",
+    }),
+  );
+  assert.equal(
+    formatTreeInput(input),
+    "* user0001 user: Run a tool\n[cursor: user0001]\n",
   );
 });
 

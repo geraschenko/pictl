@@ -85,7 +85,7 @@ function summarizeMessage(message: AgentMessage): string {
   }
 }
 
-function summarizeEntry(entry: SessionEntry): string {
+export function summarizeEntry(entry: SessionEntry): string {
   switch (entry.type) {
     case "message":
       return summarizeMessage(entry.message);

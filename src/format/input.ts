@@ -53,22 +53,32 @@ function isStringOrNull(value: unknown): value is string | null {
   return typeof value === "string" || value === null;
 }
 
-// TDC: in these require* functions, you say "expected X", but don't say what you got. Why not include `got ${typeof record[key]} {record[key]}`, or maybe include the full record?
+function describeValue(value: unknown): string {
+  const json = JSON.stringify(value);
+  return `${typeof value}${json === undefined ? "" : ` ${json}`}`;
+}
+
 function requireString(record: Record<string, unknown>, key: string): void {
   if (typeof record[key] !== "string") {
-    throw new UsageError(`invalid session entry: expected string ${key}`);
+    throw new UsageError(
+      `invalid session entry: expected string ${key}, got ${describeValue(record[key])}`,
+    );
   }
 }
 
 function requireNumber(record: Record<string, unknown>, key: string): void {
   if (typeof record[key] !== "number") {
-    throw new UsageError(`invalid session entry: expected number ${key}`);
+    throw new UsageError(
+      `invalid session entry: expected number ${key}, got ${describeValue(record[key])}`,
+    );
   }
 }
 
 function requireBoolean(record: Record<string, unknown>, key: string): void {
   if (typeof record[key] !== "boolean") {
-    throw new UsageError(`invalid session entry: expected boolean ${key}`);
+    throw new UsageError(
+      `invalid session entry: expected boolean ${key}, got ${describeValue(record[key])}`,
+    );
   }
 }
 

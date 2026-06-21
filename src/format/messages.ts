@@ -42,7 +42,7 @@ function formatToolArguments(args: unknown, maxChars: number): string {
   }
   const preferredKeys = ["path", "file_path", "command", "pattern"];
   const preferred = preferredKeys
-    .filter((key) => typeof args[key] === "string")  // TDC: what's the point of this filter? If pattern is an int for example, who cares?
+    .filter((key) => args[key] !== undefined)
     .map((key) => `${key}: ${String(args[key])}`);
   const text =
     preferred.length > 0 ? preferred.join(", ") : JSON.stringify(args);
@@ -80,6 +80,16 @@ function formatToolResultText(
   return snippet === "" ? summary : `${summary}\n${snippet}`;
 }
 
+function eventField(event: unknown, field: string): string | undefined {
+  if (!isRecord(event)) {
+    return undefined;
+  }
+  const value = event[field];
+  return typeof value === "string" || typeof value === "number"
+    ? String(value)
+    : undefined;
+}
+
 function formatControl(record: MessageStreamRecord): string | undefined {
   if (record.type !== "control") {
     return undefined;
@@ -90,12 +100,22 @@ function formatControl(record: MessageStreamRecord): string | undefined {
       return event.type === "compaction_start"
         ? "[control: compaction started]"
         : "[control: compaction finished]";
-    case "tree_navigated":
-      return "[control: tree navigated]";  // TDC: you *have* to indicate the new leafId when tree_navigated
-    case "session_changed":
-      return "[control: session changed]";  // TDC: you *have* to indicate the new session when session_changed
-    case "queue_update":
-      return "[control: queue update]";  // TDC: is there something we should indicate here as well, like the new queue length? 
+    case "tree_navigated": {
+      const leafId =
+        eventField(event, "leafId") ?? eventField(event, "entryId");
+      return `[control: tree navigated${leafId === undefined ? "" : ` to ${leafId}`}]`;
+    }
+    case "session_changed": {
+      const sessionId = eventField(event, "sessionId");
+      return `[control: session changed${sessionId === undefined ? "" : ` to ${sessionId}`}]`;
+    }
+    case "queue_update": {
+      const length =
+        eventField(event, "queueLength") ??
+        eventField(event, "pendingMessageCount") ??
+        eventField(event, "length");
+      return `[control: queue update${length === undefined ? "" : ` ${length} pending`}]`;
+    }
   }
 }
 
@@ -184,17 +204,8 @@ export function formatMessageRecord(
     return `[cursor: ${record.entryId ?? "null"}]`;
   }
   if (record.type === "control") {
-    const rendered = formatControl(record);
-    // TDC: what's up with this "noisy control" concept? Why are we bothering with this? Is there any evidence that there are control messages that aren't carrying meaningful information? If we get rid of this, we can eliminate MessageFormatState entirely, which seems elegant to me.
-    const noisy =
-      record.control.kind === "queue_update" ||
-      (record.control.kind === "compaction" &&
-        record.control.event.type === "compaction_start");
-    if (noisy && rendered === state.lastNoisyControl) {
-      return undefined;
-    }
-    state.lastNoisyControl = noisy ? rendered : undefined;
-    return rendered;
+    state.lastNoisyControl = undefined;
+    return formatControl(record);
   }
   state.lastNoisyControl = undefined;
   return formatMessage(record.message, options);

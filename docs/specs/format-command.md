@@ -129,7 +129,7 @@ Tree output shape with branching:
 [cursor: ea28b2b5]
 ```
 
-The current leaf line is marked with `*`, and tree output ends with a cursor line containing the input `leafId`.
+The current leaf line is marked with `*`. Other visible entries on the active path are marked with `•`. Tree output ends with a cursor line containing the input `leafId`.
 
 Formatted text ends with exactly one trailing newline when there is at least one output line. Empty formatted output is the empty string.
 
@@ -143,7 +143,7 @@ Tree indentation follows pi tree-selector semantics: consecutive visible nodes m
 
 Tree filter predicates are normative behavior, not implementation hints.
 
-- `conversation`: show only message entries whose role is `user` or `assistant`. User messages are always shown. Assistant messages are shown when they have text content, contain at least one `toolCall` content block, have `stopReason === "aborted"`, have an error message, or are the current leaf. Thinking-only assistant messages are hidden unless they satisfy one of those conditions.
+- `conversation`: show only message entries whose role is `user` or `assistant`. User messages are always shown. Assistant messages are shown when they have text content, have `stopReason === "aborted"`, have an error message, or are the current leaf. Thinking-only and tool-only assistant messages are hidden unless they satisfy one of those conditions.
 - `pi-default`: mirror pi TreeSelector `default`: hide settings/bookkeeping entries (`label`, `custom`, `model_change`, `thinking_level_change`, `session_info`); hide assistant messages with only tool calls and no text unless current/error/aborted; otherwise show entries.
 - `pi-no-tools`: mirror pi TreeSelector `no-tools`: apply `pi-default`, then also hide tool result messages.
 - `pi-user-only`: mirror pi TreeSelector `user-only`: show only user message entries.
@@ -357,6 +357,7 @@ export interface FlatTreeNode {
   readonly gutters: readonly TreeGutter[];
   readonly isVirtualRootChild: boolean;
   readonly isOnActivePath: boolean;
+  readonly isCurrentLeaf: boolean;
 }
 
 export function formatTreeInput(
@@ -452,13 +453,13 @@ const formatMessagesFlags = {
 };
 type FormatMessagesFlags = InferFlags<typeof formatMessagesFlags>;
 
-export async function formatMessagesCommand(
+export async function formatMessages(
   this: CommandContext,
   flags: FormatMessagesFlags,
   file?: string,
 ): Promise<void>;
 
-const formatMessagesCommandRoute = commandNoTarget<FormatMessagesFlags, [string | undefined]>({
+const formatMessagesCommand = commandNoTarget<FormatMessagesFlags, [string | undefined]>({
   common: true,
   docs: { brief: "format pictl message JSONL" },
   parameters: {
@@ -470,7 +471,7 @@ const formatMessagesCommandRoute = commandNoTarget<FormatMessagesFlags, [string 
       ],
     },
   },
-  func: formatMessagesCommand,
+  func: formatMessages,
 });
 
 const formatEntriesFlags = {
@@ -479,13 +480,13 @@ const formatEntriesFlags = {
 };
 type FormatEntriesFlags = InferFlags<typeof formatEntriesFlags>;
 
-export async function formatEntriesCommand(
+export async function formatEntries(
   this: CommandContext,
   flags: FormatEntriesFlags,
   file?: string,
 ): Promise<void>;
 
-const formatEntriesCommandRoute = commandNoTarget<FormatEntriesFlags, [string | undefined]>({
+const formatEntriesCommand = commandNoTarget<FormatEntriesFlags, [string | undefined]>({
   common: true,
   docs: { brief: "format pictl entries JSON or JSONL" },
   parameters: {
@@ -497,7 +498,7 @@ const formatEntriesCommandRoute = commandNoTarget<FormatEntriesFlags, [string | 
       ],
     },
   },
-  func: formatEntriesCommand,
+  func: formatEntries,
 });
 
 const formatTreeFlags = {
@@ -513,13 +514,13 @@ const formatTreeFlags = {
 };
 type FormatTreeFlags = InferFlags<typeof formatTreeFlags>;
 
-export async function formatTreeCommand(
+export async function formatTree(
   this: CommandContext,
   flags: FormatTreeFlags,
   file?: string,
 ): Promise<void>;
 
-const formatTreeCommandRoute = commandNoTarget<FormatTreeFlags, [string | undefined]>({
+const formatTreeCommand = commandNoTarget<FormatTreeFlags, [string | undefined]>({
   common: true,
   docs: { brief: "format pictl tree JSON" },
   parameters: {
@@ -531,7 +532,7 @@ const formatTreeCommandRoute = commandNoTarget<FormatTreeFlags, [string | undefi
       ],
     },
   },
-  func: formatTreeCommand,
+  func: formatTree,
 });
 
 export function parsePositiveInteger(input: string): number;
@@ -541,11 +542,11 @@ export const formatRoute: RouteMap<CommandContext>;
 
 Flag specs and inferred flag types are intentionally adjacent to their commands, following the existing repo convention.
 
-`formatMessagesCommand` calls `readInputFile`, `parseMessageRecords`, and `formatMessageRecords`.
+`formatMessages` calls `readInputFile`, `parseMessageRecords`, and `formatMessageRecords`.
 
-`formatEntriesCommand` calls `readInputFile`, `parseEntriesInput`, and either `formatEntriesInput` or `formatEntryJsonl` depending on parsed shape.
+`formatEntries` calls `readInputFile`, `parseEntriesInput`, and either `formatEntriesInput` or `formatEntryJsonl` depending on parsed shape.
 
-`formatTreeCommand` calls `readInputFile`, `parseTreeInput`, and `formatTreeInput`.
+`formatTree` calls `readInputFile`, `parseTreeInput`, and `formatTreeInput`.
 
 `formatRoute` is a no-target route map with subcommands `messages`, `entries`, and `tree`. `src/core/app.ts` imports `formatRoute` from `../format/command.ts` and includes it in the top-level routes as `format: formatRoute`.
 
@@ -629,3 +630,21 @@ Rationale: JSONL entry streams are also line-oriented JSON objects and may conta
 Decided: format input decoders validate top-level stream record shape, known session entry types, required entry fields, message roles, and recursive tree node structure, then cast to the pi SDK types.
 
 Rationale: pictl needs useful command errors for bad formatter input, but pi does not export runtime validators for these TypeScript-only types. The local checks avoid accepting obvious non-entries such as `pictl_cursor` while keeping the schema copy small.
+
+### Conversation tree hides tool-only assistant nodes
+
+Decided: `--filter conversation` hides tool-only and thinking-only assistant messages unless they are the current leaf, aborted, or errored.
+
+Rationale: the pi `/tree` view is meant to show conversation structure, not every assistant tool-dispatch step. Showing tool-only assistant nodes produced long runs of low-value rows and `(no content)` summaries.
+
+### Tree connector recalculation uses the full flattened tree
+
+Decided: filtered tree connector recalculation uses the full flattened tree for parent lookup and only the filtered tree for visible ids.
+
+Rationale: using only filtered nodes made hidden intermediate entries look like roots, which removed or misaligned branch connectors.
+
+### Mark active path entries
+
+Decided: formatted tree output marks non-current visible active-path entries with `•` and the current leaf with `*`.
+
+Rationale: this mirrors the useful orientation signal from pi's interactive `/tree` view while preserving the spec's copy-friendly current-leaf marker.

@@ -3,6 +3,7 @@ import type {
   SessionTreeNode,
 } from "@geraschenko/pi-coding-agent";
 import type { TreeFilterMode, TreeFormatOptions, TreeInput } from "./types.ts";
+import { summarizeEntry } from "./entries.ts";
 import { extractTextContent, oneLine, truncateText } from "./text.ts";
 
 export const DEFAULT_TREE_FORMAT_OPTIONS: TreeFormatOptions = {
@@ -23,6 +24,7 @@ export interface FlatTreeNode {
   readonly gutters: readonly TreeGutter[];
   readonly isVirtualRootChild: boolean;
   readonly isOnActivePath: boolean;
+  readonly isCurrentLeaf: boolean;
 }
 
 interface FlatTreeNodeDraft {
@@ -33,6 +35,7 @@ interface FlatTreeNodeDraft {
   gutters: readonly TreeGutter[];
   isVirtualRootChild: boolean;
   isOnActivePath: boolean;
+  isCurrentLeaf: boolean;
 }
 
 interface StackItem {
@@ -44,8 +47,6 @@ interface StackItem {
   readonly gutters: readonly TreeGutter[];
   readonly isVirtualRootChild: boolean;
 }
-
-// TDC: why do we have so much logic in tree.ts not related to tree formatting? The logic for filtering and rendering of the text should be pretty much entirely shared between tree and entries, so I would expect that tree.ts should only have logic related to the actual rendering of the tree itself, not the text.
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -113,7 +114,6 @@ function passesFilter(
     }
     return (
       assistantHasText(entry) ||
-      hasBlock(entry.message.content, "toolCall") ||
       entry.message.stopReason === "aborted" ||
       entry.message.errorMessage !== undefined ||
       isCurrentLeaf
@@ -145,10 +145,20 @@ function passesFilter(
 }
 
 function buildActivePath(
-  _flatNodes: readonly FlatTreeNodeDraft[],
+  flatNodes: readonly FlatTreeNodeDraft[],
   currentLeafId: string | null,
 ): Set<string> {
-  return currentLeafId === null ? new Set<string>() : new Set([currentLeafId]);
+  const path = new Set<string>();
+  if (currentLeafId === null) {
+    return path;
+  }
+  const byId = new Map(flatNodes.map((node) => [node.node.entry.id, node]));
+  let currentId: string | null = currentLeafId;
+  while (currentId !== null) {
+    path.add(currentId);
+    currentId = byId.get(currentId)?.node.entry.parentId ?? null;
+  }
+  return path;
 }
 
 function computeContainsActive(
@@ -222,7 +232,7 @@ function flattenAll(
     if (item === undefined) {
       continue;
     }
-    result.push({ ...item, isOnActivePath: false });
+    result.push({ ...item, isOnActivePath: false, isCurrentLeaf: false });
 
     const multipleChildren = item.node.children.length > 1;
     const orderedChildren: SessionTreeNode[] = [];
@@ -271,15 +281,21 @@ function flattenAll(
 }
 
 function recalculateVisibleStructure(
-  flatNodes: readonly FlatTreeNodeDraft[],
+  visibleFlatNodes: readonly FlatTreeNodeDraft[],
+  allFlatNodes: readonly FlatTreeNodeDraft[],
   activePath: ReadonlySet<string>,
+  currentLeafId: string | null,
 ): readonly FlatTreeNode[] {
-  const visibleIds = new Set(flatNodes.map((node) => node.node.entry.id));
-  const allById = new Map(flatNodes.map((node) => [node.node.entry.id, node]));
+  const visibleIds = new Set(
+    visibleFlatNodes.map((node) => node.node.entry.id),
+  );
+  const allById = new Map(
+    allFlatNodes.map((node) => [node.node.entry.id, node]),
+  );
   const visibleChildren = new Map<string | null, string[]>();
   visibleChildren.set(null, []);
 
-  for (const flatNode of flatNodes) {
+  for (const flatNode of visibleFlatNodes) {
     let parentId = flatNode.node.entry.parentId;
     while (parentId !== null && !visibleIds.has(parentId)) {
       parentId = allById.get(parentId)?.node.entry.parentId ?? null;
@@ -290,7 +306,9 @@ function recalculateVisibleStructure(
   }
 
   const multipleRoots = (visibleChildren.get(null) ?? []).length > 1;
-  const byId = new Map(flatNodes.map((node) => [node.node.entry.id, node]));
+  const byId = new Map(
+    visibleFlatNodes.map((node) => [node.node.entry.id, node]),
+  );
   const result: FlatTreeNode[] = [];
   const stack: Array<{
     readonly nodeId: string;
@@ -337,6 +355,7 @@ function recalculateVisibleStructure(
       gutters: item.gutters,
       isVirtualRootChild: item.isVirtualRootChild,
       isOnActivePath: activePath.has(item.nodeId),
+      isCurrentLeaf: item.nodeId === currentLeafId,
     });
 
     const children = visibleChildren.get(item.nodeId) ?? [];
@@ -378,19 +397,8 @@ function entrySummary(entry: SessionEntry): string {
     switch (entry.message.role) {
       case "user":
         return `user: ${oneLine(extractTextContent(entry.message.content))}`;
-      case "assistant": {
-        const text = oneLine(extractTextContent(entry.message.content));
-        if (text !== "") {
-          return `assistant: ${text}`;
-        }
-        if (entry.message.stopReason === "aborted") {
-          return "assistant: (aborted)";
-        }
-        if (entry.message.errorMessage !== undefined) {
-          return `assistant: ${oneLine(entry.message.errorMessage)}`;
-        }
-        return "assistant: (no content)";
-      }
+      case "assistant":
+        return `assistant: ${summarizeEntry(entry)}`;
       case "toolResult":
         return `${entry.message.toolName}: ${entry.message.isError ? "error" : "ok"}`;
       case "bashExecution":
@@ -481,14 +489,23 @@ export function flattenTreeForFormat(
   const filtered = flatNodes.filter((node) =>
     passesFilter(node, currentLeafId, filter),
   );
-  return recalculateVisibleStructure(filtered, activePath);
+  return recalculateVisibleStructure(
+    filtered,
+    flatNodes,
+    activePath,
+    currentLeafId,
+  );
 }
 
 export function formatTreeNodeLine(
   flatNode: FlatTreeNode,
   options: TreeFormatOptions,
 ): string {
-  const marker = flatNode.isOnActivePath ? "* " : "";
+  const marker = flatNode.isCurrentLeaf
+    ? "* "
+    : flatNode.isOnActivePath
+      ? "• "
+      : "";
   const prefix = `${treePrefix(flatNode)}${marker}${flatNode.node.entry.id} `;
   const availableSummary = Math.max(0, options.width - [...prefix].length);
   return `${prefix}${truncateText(entrySummary(flatNode.node.entry), availableSummary)}`.trimEnd();
