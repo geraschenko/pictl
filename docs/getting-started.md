@@ -1,6 +1,6 @@
 # getting started
 
-Purpose: practical alpha setup and first-use examples for pictl. This document assumes you are working from a cloned pictl repo. It will need to change once pictl has a packaged install path.
+Purpose: practical alpha setup and first-use examples for pictl. This document assumes the current GitHub install path for the v0.1.0 alpha. It will need to change once pictl has a normal package release.
 
 Question answered: **what do I need to do to use pictl?**
 
@@ -8,22 +8,22 @@ Question answered: **what do I need to do to use pictl?**
 
 For now:
 
-- build pictl from this repo;
-- use the forked pi package installed in `node_modules`;
+- install pictl from GitHub;
 - do **not** replace your normal `pi` binary;
-- point pictl at the fork with `PICTL_PI_BIN`;
+- let pictl use the forked pi package it depends on by default;
 - use the normal pictl registry under `PICTL_DIR`.
 
 The default `PICTL_DIR` is under your pi state directory. Agents you spawn during the demo will show up in normal `pictl list` output until you archive or purge them.
 
-## Install pictl locally
+## Install pictl
 
-From the pictl repo:
+Install the alpha from GitHub:
 
 ```sh
-npm install
-npm run build
-npm link
+mkdir pictl-alpha
+cd pictl-alpha
+npm install github:geraschenko/pictl#v0.1.0
+export PATH="$PWD/node_modules/.bin:$PATH"
 ```
 
 Check that `pictl` is now on your `PATH`:
@@ -32,21 +32,7 @@ Check that `pictl` is now on your `PATH`:
 pictl --version
 ```
 
-## Use the bundled forked pi
-
-`npm install` installs the forked pi package that pictl currently depends on. Use that binary explicitly:
-
-```sh
-export PICTL_PI_BIN="$PWD/node_modules/.bin/pi"
-```
-
-Confirm it is the forked binary:
-
-```sh
-"$PICTL_PI_BIN" --version
-```
-
-This lets you keep any normal `pi` installation on `PATH` unchanged. pictl will use `PICTL_PI_BIN` whenever it spawns or revives an agent.
+pictl defaults to the forked pi binary from its `@geraschenko/pi-coding-agent` dependency, so you do not need to set `PICTL_PI_BIN` for normal alpha use. If you already have stock pi installed, leave it alone; pictl will not use it unless you explicitly override the binary.
 
 ## Demo 1: try pictl in one terminal
 
@@ -99,10 +85,10 @@ This is the more visual demo: one terminal is attached to the pi TUI while anoth
 
 ### Terminal A: spawn and attach
 
-From the pictl repo:
+From the directory where you installed pictl:
 
 ```sh
-export PICTL_PI_BIN="$PWD/node_modules/.bin/pi"
+export PATH="$PWD/node_modules/.bin:$PATH"
 export PICTL_TARGET="$(pictl spawn)"
 echo "$PICTL_TARGET"
 pictl attach
@@ -112,10 +98,10 @@ Leave Terminal A attached.
 
 ### Terminal B: control the attached agent
 
-From the same pictl repo, paste the agent id printed by Terminal A:
+From the same install directory, paste the agent id printed by Terminal A:
 
 ```sh
-export PICTL_PI_BIN="$PWD/node_modules/.bin/pi"
+export PATH="$PWD/node_modules/.bin:$PATH"
 export PICTL_TARGET="<agent-id-from-terminal-a>"
 ```
 
@@ -148,6 +134,7 @@ pictl purge
 ## Notes
 
 - `PICTL_TARGET` is just an ergonomic default. Any command can still use `--target <agent-id-or-prefix>` explicitly.
+- `PICTL_PI_BIN` is optional. Set it only if you want pictl to spawn a different pi binary than the bundled fork.
 - `pictl spawn` prints the agent id and returns only once the agent is reachable.
 - `pictl attach` requires a real terminal.
 - `pictl archive` hides an agent from normal `pictl list` output but keeps it resumable.
