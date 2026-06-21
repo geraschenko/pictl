@@ -143,7 +143,7 @@ Tree indentation follows pi tree-selector semantics: consecutive visible nodes m
 
 Tree filter predicates are normative behavior, not implementation hints.
 
-- `conversation`: show only message entries whose role is `user` or `assistant`. User messages are always shown. Assistant messages are shown when they have text content, have `stopReason === "aborted"`, have an error message, or are the current leaf. Thinking-only and tool-only assistant messages are hidden unless they satisfy one of those conditions.
+- `conversation`: show message entries whose role is `user` or `assistant`, plus compaction entries. User messages are always shown. Assistant messages are shown when they have text content, have `stopReason === "aborted"`, have an error message, or are the current leaf. Thinking-only and tool-only assistant messages are hidden unless they satisfy one of those conditions. Compaction entries are shown as `[compaction: <num>k tokens]` using `tokensBefore`, matching pi's tree view.
 - `pi-default`: mirror pi TreeSelector `default`: hide settings/bookkeeping entries (`label`, `custom`, `model_change`, `thinking_level_change`, `session_info`); hide assistant messages with only tool calls and no text unless current/error/aborted; otherwise show entries.
 - `pi-no-tools`: mirror pi TreeSelector `no-tools`: apply `pi-default`, then also hide tool result messages.
 - `pi-user-only`: mirror pi TreeSelector `user-only`: show only user message entries.
@@ -292,10 +292,6 @@ import type { MessageFormatOptions } from "./types.ts";
 
 export const DEFAULT_MESSAGE_FORMAT_OPTIONS: MessageFormatOptions;
 
-export interface MessageFormatState {
-  lastNoisyControl: string | undefined;
-}
-
 export function formatMessageRecords(
   records: Iterable<MessageStreamRecord>,
   options?: Partial<MessageFormatOptions>,
@@ -304,7 +300,6 @@ export function formatMessageRecords(
 export function formatMessageRecord(
   record: MessageStreamRecord,
   options: MessageFormatOptions,
-  state: MessageFormatState,
 ): string | undefined;
 ```
 
@@ -558,7 +553,7 @@ Flag specs and inferred flag types are intentionally adjacent to their commands,
 - Message formatting is defined for the stream record types exported from `src/core/stream-types.ts`; invalid or unsupported records should produce a command error rather than misleading output.
 - Entry input that is not a valid `SessionEntry` is invalid.
 - Entry JSONL input must not include `pictl_cursor` records. Entry-mode `tail` and `prompt` streams no longer emit trailing cursor records.
-- Repeated noisy control records in message streams may be coalesced only for `queue_update` records with identical rendered text and repeated `compaction_start` records. Session changes, tree navigation, and compaction end records are always shown.
+- Control records in message streams are rendered individually. Tree navigation controls show old and new leaf ids; session changes show session id and session file when present; queue updates show steering and follow-up queue lengths from the actual pi event fields.
 - Tool call arguments may be large and must be truncated according to `maxToolArgChars`.
 - Full successful tool results are printed only when `--tool-results full` is selected.
 - Failed tool result snippets are printed in `summary` mode and in `full` mode; `none` mode suppresses all tool results.
@@ -648,3 +643,15 @@ Rationale: using only filtered nodes made hidden intermediate entries look like 
 Decided: formatted tree output marks non-current visible active-path entries with `•` and the current leaf with `*`.
 
 Rationale: this mirrors the useful orientation signal from pi's interactive `/tree` view while preserving the spec's copy-friendly current-leaf marker.
+
+### Include compaction token boundaries in conversation trees
+
+Decided: `conversation` and `pi-default` tree views include compaction entries rendered as `[compaction: <num>k tokens]` from `tokensBefore`.
+
+Rationale: pi's `/tree` view includes these token-boundary markers, and they are important context when reading a compacted conversation branch.
+
+### Use actual pi event fields for control records
+
+Decided: message control formatting uses `tree_navigated.oldLeafId/newLeafId`, `session_changed.sessionId/sessionFile`, and `queue_update.steering/followUp` from pi's event types. Removed `MessageFormatState` because control coalescing was removed.
+
+Rationale: made-up fallback fields were misleading, and once every control record is rendered individually there is no formatter state to maintain.

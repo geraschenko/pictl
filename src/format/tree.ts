@@ -103,6 +103,9 @@ function passesFilter(
   }
 
   if (filter === "conversation") {
+    if (entry.type === "compaction") {
+      return true;
+    }
     if (entry.type !== "message") {
       return false;
     }
@@ -417,7 +420,7 @@ function entrySummary(entry: SessionEntry): string {
     case "model_change":
       return `model: ${entry.modelId}`;
     case "compaction":
-      return `compaction: ${oneLine(entry.summary)}`;
+      return `[compaction: ${Math.round(entry.tokensBefore / 1000)}k tokens]`;
     case "branch_summary":
       return `branch summary: ${oneLine(entry.summary)}`;
     case "custom":

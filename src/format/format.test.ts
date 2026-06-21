@@ -35,6 +35,56 @@ test("format messages renders text, compact tool calls, summaries, and cursor", 
   );
 });
 
+test("format messages renders control event details from real pi event fields", () => {
+  const output = formatMessageRecords(
+    parseMessageRecords(
+      [
+        {
+          type: "control",
+          control: {
+            kind: "tree_navigated",
+            event: {
+              type: "tree_navigated",
+              oldLeafId: "old12345",
+              newLeafId: "new12345",
+            },
+          },
+        },
+        {
+          type: "control",
+          control: {
+            kind: "session_changed",
+            event: {
+              type: "session_changed",
+              sessionId: "session-1",
+              sessionFile: "/tmp/session.jsonl",
+            },
+          },
+        },
+        {
+          type: "control",
+          control: {
+            kind: "queue_update",
+            event: {
+              type: "queue_update",
+              steering: ["a"],
+              followUp: ["b", "c"],
+            },
+          },
+        },
+      ]
+        .map((record) => JSON.stringify(record))
+        .join("\n"),
+    ),
+  );
+  assert.equal(
+    output,
+    "[control: tree navigated old12345 -> new12345]\n\n" +
+      "[control: session changed to session-1 /tmp/session.jsonl]\n\n" +
+      "[control: queue update steering=1 follow-up=2]\n",
+  );
+});
+
 test("format messages includes failed result snippets in summary mode", () => {
   const output = formatMessageRecords(
     parseMessageRecords(
@@ -72,6 +122,49 @@ test("format tree renders conversation branches with current leaf marker", async
       "├─ * ea28b2b5 assistant: Second branch\n" +
       "└─ ab4e0c01 assistant: First branch\n" +
       "[cursor: ea28b2b5]\n",
+  );
+});
+
+test("format tree conversation includes compaction token boundary", () => {
+  const input = parseTreeInput(
+    JSON.stringify({
+      tree: [
+        {
+          entry: {
+            type: "message",
+            id: "user0001",
+            parentId: null,
+            timestamp: "2026-01-01T00:00:00.000Z",
+            message: {
+              role: "user",
+              content: [{ type: "text", text: "Before compaction" }],
+              timestamp: 1,
+            },
+          },
+          children: [
+            {
+              entry: {
+                type: "compaction",
+                id: "compact1",
+                parentId: "user0001",
+                timestamp: "2026-01-01T00:00:01.000Z",
+                summary: "large history",
+                firstKeptEntryId: "user0001",
+                tokensBefore: 110123,
+              },
+              children: [],
+            },
+          ],
+        },
+      ],
+      leafId: "compact1",
+    }),
+  );
+  assert.equal(
+    formatTreeInput(input),
+    "• user0001 user: Before compaction\n" +
+      "* compact1 [compaction: 110k tokens]\n" +
+      "[cursor: compact1]\n",
   );
 });
 

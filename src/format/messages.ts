@@ -18,10 +18,6 @@ export const DEFAULT_MESSAGE_FORMAT_OPTIONS: MessageFormatOptions = {
   maxErrorLines: 10,
 };
 
-export interface MessageFormatState {
-  lastNoisyControl: string | undefined;
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
@@ -80,8 +76,10 @@ function formatToolResultText(
   return snippet === "" ? summary : `${summary}\n${snippet}`;
 }
 
-// TDC: this is a bad name for the function. It doesn't indicate that it returns undefined if the event is not a record or if the value is the wrong type. Somebody reading code using this function will be confused.
-function eventField(event: unknown, field: string): string | undefined {
+function optionalStringOrNumberField(
+  event: unknown,
+  field: string,
+): string | undefined {
   if (!isRecord(event)) {
     return undefined;
   }
@@ -89,6 +87,17 @@ function eventField(event: unknown, field: string): string | undefined {
   return typeof value === "string" || typeof value === "number"
     ? String(value)
     : undefined;
+}
+
+function stringListField(event: unknown, field: string): readonly string[] {
+  if (!isRecord(event)) {
+    return [];
+  }
+  const value = event[field];
+  return Array.isArray(value) &&
+    value.every((item): item is string => typeof item === "string")
+    ? value
+    : [];
 }
 
 function formatControl(record: MessageStreamRecord): string | undefined {
@@ -102,23 +111,21 @@ function formatControl(record: MessageStreamRecord): string | undefined {
         ? "[control: compaction started]"
         : "[control: compaction finished]";
     case "tree_navigated": {
-      // TDC: WTF? If you know it's a tree_navigated event, then it definitely has oldLeafId and newLeafId and does *not* have either leafId or entryId. This message should indicate both the old and new leaf.
-      const leafId =
-        eventField(event, "leafId") ?? eventField(event, "entryId");
-      return `[control: tree navigated${leafId === undefined ? "" : ` to ${leafId}`}]`;
+      const oldLeafId =
+        optionalStringOrNumberField(event, "oldLeafId") ?? "null";
+      const newLeafId =
+        optionalStringOrNumberField(event, "newLeafId") ?? "null";
+      return `[control: tree navigated ${oldLeafId} -> ${newLeafId}]`;
     }
     case "session_changed": {
-      // TDC: session_changed messages have sessionId and sessionFile: packages/coding-agent/src/modes/rpc/rpc-types.ts in the pi repo.
-      const sessionId = eventField(event, "sessionId");
-      return `[control: session changed${sessionId === undefined ? "" : ` to ${sessionId}`}]`;
+      const sessionId = optionalStringOrNumberField(event, "sessionId");
+      const sessionFile = optionalStringOrNumberField(event, "sessionFile");
+      return `[control: session changed${sessionId === undefined ? "" : ` to ${sessionId}`}${sessionFile === undefined ? "" : ` ${sessionFile}`}]`;
     }
     case "queue_update": {
-      const length =
-        // TDC: queue_update messages don't have a queue length. I need you not to make up bullshit. Look at the actual messages emited by pi; see packages/coding-agent/src/core/agent-session.ts in the pi repo.
-        eventField(event, "queueLength") ??
-        eventField(event, "pendingMessageCount") ??
-        eventField(event, "length");
-      return `[control: queue update${length === undefined ? "" : ` ${length} pending`}]`;
+      const steeringCount = stringListField(event, "steering").length;
+      const followUpCount = stringListField(event, "followUp").length;
+      return `[control: queue update steering=${steeringCount} follow-up=${followUpCount}]`;
     }
   }
 }
@@ -191,9 +198,8 @@ export function formatMessageRecords(
     maxErrorLines:
       options?.maxErrorLines ?? DEFAULT_MESSAGE_FORMAT_OPTIONS.maxErrorLines,
   };
-  const state: MessageFormatState = { lastNoisyControl: undefined };
   const chunks = Array.from(records)
-    .map((record) => formatMessageRecord(record, fullOptions, state))
+    .map((record) => formatMessageRecord(record, fullOptions))
     .filter((chunk) => chunk !== undefined && chunk !== "");
   return chunks.length === 0 ? "" : `${chunks.join("\n\n")}\n`;
 }
@@ -201,17 +207,12 @@ export function formatMessageRecords(
 export function formatMessageRecord(
   record: MessageStreamRecord,
   options: MessageFormatOptions,
-  state: MessageFormatState,
 ): string | undefined {
   if (record.type === "pictl_cursor") {
-    state.lastNoisyControl = undefined;
     return `[cursor: ${record.entryId ?? "null"}]`;
   }
   if (record.type === "control") {
-    // TDC: why do we still have state at all any more? It only has one field, which never gets set to anything other then undefined. Let's get rid of state entirely.
-    state.lastNoisyControl = undefined;
     return formatControl(record);
   }
-  state.lastNoisyControl = undefined;
   return formatMessage(record.message, options);
 }
