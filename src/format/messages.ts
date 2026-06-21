@@ -80,6 +80,7 @@ function formatToolResultText(
   return snippet === "" ? summary : `${summary}\n${snippet}`;
 }
 
+// TDC: this is a bad name for the function. It doesn't indicate that it returns undefined if the event is not a record or if the value is the wrong type. Somebody reading code using this function will be confused.
 function eventField(event: unknown, field: string): string | undefined {
   if (!isRecord(event)) {
     return undefined;
@@ -101,16 +102,19 @@ function formatControl(record: MessageStreamRecord): string | undefined {
         ? "[control: compaction started]"
         : "[control: compaction finished]";
     case "tree_navigated": {
+      // TDC: WTF? If you know it's a tree_navigated event, then it definitely has oldLeafId and newLeafId and does *not* have either leafId or entryId. This message should indicate both the old and new leaf.
       const leafId =
         eventField(event, "leafId") ?? eventField(event, "entryId");
       return `[control: tree navigated${leafId === undefined ? "" : ` to ${leafId}`}]`;
     }
     case "session_changed": {
+      // TDC: session_changed messages have sessionId and sessionFile: packages/coding-agent/src/modes/rpc/rpc-types.ts in the pi repo.
       const sessionId = eventField(event, "sessionId");
       return `[control: session changed${sessionId === undefined ? "" : ` to ${sessionId}`}]`;
     }
     case "queue_update": {
       const length =
+        // TDC: queue_update messages don't have a queue length. I need you not to make up bullshit. Look at the actual messages emited by pi; see packages/coding-agent/src/core/agent-session.ts in the pi repo.
         eventField(event, "queueLength") ??
         eventField(event, "pendingMessageCount") ??
         eventField(event, "length");
@@ -204,6 +208,7 @@ export function formatMessageRecord(
     return `[cursor: ${record.entryId ?? "null"}]`;
   }
   if (record.type === "control") {
+    // TDC: why do we still have state at all any more? It only has one field, which never gets set to anything other then undefined. Let's get rid of state entirely.
     state.lastNoisyControl = undefined;
     return formatControl(record);
   }
