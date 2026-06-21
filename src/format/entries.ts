@@ -56,76 +56,74 @@ function entryFormatOptions(
   };
 }
 
-function summarizeMessage(message: AgentMessage, maxChars: number): string {
-  const summary = (() => {
-    switch (message.role) {
-      case "user":
-        return oneLine(extractTextContent(message.content));
-      case "assistant": {
-        const text = extractTextContent(message.content);
-        const parts: string[] = [];
-        if (hasContentBlock(message.content, "thinking")) {
-          parts.push("[thinking]");
-        }
-        for (const block of contentBlocks(message.content)) {
-          if (isRecord(block) && block.type === "toolCall") {
-            parts.push(formatToolCall(block));
-          }
-        }
-        if (text.trim() !== "") {
-          parts.push(oneLine(text));
-        } else if (message.stopReason === "aborted") {
-          parts.push("(aborted)");
-        } else if (message.errorMessage !== undefined) {
-          parts.push(oneLine(message.errorMessage));
-        }
-        return parts.join(" ") || "(no content)";
+function rawMessageSummary(message: AgentMessage): string {
+  switch (message.role) {
+    case "user":
+      return oneLine(extractTextContent(message.content));
+    case "assistant": {
+      const text = extractTextContent(message.content);
+      const parts: string[] = [];
+      if (hasContentBlock(message.content, "thinking")) {
+        parts.push("[thinking]");
       }
-      case "toolResult": {
-        const text = extractTextContent(message.content);
-        const status = message.isError ? "error" : "ok";
-        return `${message.toolName} ${status}, ${countLines(text)} lines, ${Buffer.byteLength(text, "utf8")} bytes`;
+      for (const block of contentBlocks(message.content)) {
+        if (isRecord(block) && block.type === "toolCall") {
+          parts.push(formatToolCall(block));
+        }
       }
-      case "bashExecution":
-        return `[bash] ${oneLine(message.command)}`;
-      case "custom":
-        return `[custom:${message.customType}] ${oneLine(extractTextContent(message.content))}`;
-      case "branchSummary":
-        return oneLine(message.summary);
-      case "compactionSummary":
-        return oneLine(message.summary);
+      if (text.trim() !== "") {
+        parts.push(oneLine(text));
+      } else if (message.stopReason === "aborted") {
+        parts.push("(aborted)");
+      } else if (message.errorMessage !== undefined) {
+        parts.push(oneLine(message.errorMessage));
+      }
+      return parts.join(" ") || "(no content)";
     }
-  })();
-  return truncateText(summary, maxChars);
+    case "toolResult": {
+      const text = extractTextContent(message.content);
+      const status = message.isError ? "error" : "ok";
+      return `${message.toolName} ${status}, ${countLines(text)} lines, ${Buffer.byteLength(text, "utf8")} bytes`;
+    }
+    case "bashExecution":
+      return `[bash] ${oneLine(message.command)}`;
+    case "custom":
+      return `[custom:${message.customType}] ${oneLine(extractTextContent(message.content))}`;
+    case "branchSummary":
+      return oneLine(message.summary);
+    case "compactionSummary":
+      return oneLine(message.summary);
+  }
+}
+
+function rawEntrySummary(entry: SessionEntry, maxChars: number): string {
+  switch (entry.type) {
+    case "message":
+      return rawMessageSummary(entry.message);
+    case "thinking_level_change":
+      return entry.thinkingLevel;
+    case "model_change":
+      return `${entry.provider}/${entry.modelId}`;
+    case "compaction":
+      return `[compaction: ${Math.round(entry.tokensBefore / 1000)}k tokens]`;
+    case "branch_summary":
+      return `${entry.fromId}: ${oneLine(entry.summary)}`;
+    case "custom":
+      return `${entry.customType}${entry.data === undefined ? "" : ` ${summarizeUnknown(entry.data, maxChars)}`}`;
+    case "custom_message":
+      return `[${entry.customType}] ${oneLine(extractTextContent(entry.content))}`;
+    case "label":
+      return `${entry.targetId}: ${entry.label ?? "(cleared)"}`;
+    case "session_info":
+      return entry.name ?? "(empty title)";
+  }
 }
 
 export function summarizeEntry(
   entry: SessionEntry,
   maxChars = DEFAULT_ENTRY_WIDTH,
 ): string {
-  const summary = (() => {
-    switch (entry.type) {
-      case "message":
-        return summarizeMessage(entry.message, maxChars);
-      case "thinking_level_change":
-        return entry.thinkingLevel;
-      case "model_change":
-        return `${entry.provider}/${entry.modelId}`;
-      case "compaction":
-        return `[compaction: ${Math.round(entry.tokensBefore / 1000)}k tokens]`;
-      case "branch_summary":
-        return `${entry.fromId}: ${oneLine(entry.summary)}`;
-      case "custom":
-        return `${entry.customType}${entry.data === undefined ? "" : ` ${summarizeUnknown(entry.data, maxChars)}`}`;
-      case "custom_message":
-        return `[${entry.customType}] ${oneLine(extractTextContent(entry.content))}`;
-      case "label":
-        return `${entry.targetId}: ${entry.label ?? "(cleared)"}`;
-      case "session_info":
-        return entry.name ?? "(empty title)";
-    }
-  })();
-  return truncateText(summary, maxChars);
+  return truncateText(rawEntrySummary(entry, maxChars), maxChars);
 }
 
 export function formatEntriesInput(
@@ -151,16 +149,14 @@ export function formatEntryJsonl(
 ): string {
   const fullOptions = entryFormatOptions(options);
   const inputEntries = Array.from(entriesInput);
-  const entries = (() => {
-    if (fullOptions.filter === undefined) {
-      return inputEntries;
-    }
+  if (fullOptions.filter !== undefined) {
     const filter = fullOptions.filter;
-    return inputEntries.filter((entry) =>
-      passesFilter({ entry }, null, filter),
-    );
-  })();
-  const lines = entries.map((entry) => formatEntry(entry, fullOptions));
+    const lines = inputEntries
+      .filter((entry) => passesFilter({ entry }, null, filter))
+      .map((entry) => formatEntry(entry, fullOptions));
+    return lines.length === 0 ? "" : `${lines.join("\n")}\n`;
+  }
+  const lines = inputEntries.map((entry) => formatEntry(entry, fullOptions));
   return lines.length === 0 ? "" : `${lines.join("\n")}\n`;
 }
 
