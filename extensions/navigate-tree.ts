@@ -7,8 +7,6 @@
  * command that is accepted inline during streaming, returns immediately (so the
  * turn can finish), and detaches a task that waits for the run to settle, then
  * navigates, then optionally sends a continuation prompt on the new branch.
- *
- * See docs/specs/self-navigation-extension.md.
  */
 
 import { readFile } from "node:fs/promises";
@@ -47,6 +45,8 @@ const FLAG_CONTINUE_FILE = "--continue-file";
  * handler after reading the file.)
  */
 function parseNavigateArgs(raw: string): NavigateArgs {
+  // TDC: is there really not a better way to do this? I'm surprised that we have to split on whitespace manually.
+
   let targetId: string | undefined;
   let label: string | undefined;
   let continuation: string | undefined;
@@ -118,7 +118,7 @@ export default function navigateTreeExtension(pi: ExtensionAPI): void {
     handler: async (raw: string, ctx: ExtensionCommandContext): Promise<void> => {
       const { targetId, label, continuation: parsedContinuation, continuationFile } = parseNavigateArgs(raw);
 
-      let continuation = parsedContinuation;
+      let continuation = parsedContinuation; // TDC: why don't we just call it continuation from the start?
       if (continuation === undefined && continuationFile !== undefined) {
         const text = await readFile(continuationFile, "utf8");
         if (text.trim() === "") {
