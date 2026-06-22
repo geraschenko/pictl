@@ -45,9 +45,9 @@ we do **not** add any deferral/continuation parameters to that RPC.
    runs `pictl prompt "/navigate-tree …"`, its own turn is streaming. Extension
    commands invoked via `prompt` execute **inline even during streaming**: pi's
    `AgentSession.prompt` runs `_tryExecuteExtensionCommand` *before* the
-   `isStreaming` queue check (`agent-session.ts:1011` before `:1047`), so the
-   command handler runs immediately. A direct `navigate_tree` RPC would instead be
-   rejected by the streaming guard.
+   `isStreaming` queue check (`core/agent-session.ts:1011-1015` before `:1048`), so
+   the command handler runs immediately. A direct `navigate_tree` RPC would instead
+   be rejected by the streaming guard.
 
 2. **The handler must return immediately, and the actual navigation must wait for
    the run to finish.** The handler runs inside `prompt()`, which is what the
@@ -68,17 +68,23 @@ we do **not** add any deferral/continuation parameters to that RPC.
   `pictl get-entries`. Semantics are inherited from `navigateTree`: a user /
   custom message target rewinds to *before* it; any other entry becomes the new
   leaf.
-- `--label <str>`: label to attach to the target (new-leaf) entry. Maps to
-  `navigateTree`'s `label`; with no summary entry, `navigateTree` applies the label
-  to the target entry directly (`agent-session.ts`: "Attach label to target entry
-  when not summarizing").
+- `--label <str>`: label passed through to `navigateTree`'s `label`. **Note:** with
+  no summary entry, `navigateTree` applies the label to `targetId` itself
+  (`core/agent-session.ts:2889`: "Attach label to target entry when not
+  summarizing"), **not** to the resulting leaf. For a non-user/custom target these
+  coincide (`newLeafId === targetId`); for a user/custom-message target the new leaf
+  is the target's *parent*, so the label lands on the rewound-before message, not
+  the leaf.
 - `--continue <rest-of-line>`: after a successful (non-cancelled) navigation, send
-  this as a user message to start a fresh turn on the new branch. Consumes the
-  **entire remaining argument string** (so the continuation text needs no inner
-  quoting). Optional — omit it to rewind and go idle.
+  this as a user message to start a fresh turn on the new branch. The **first
+  standalone `--continue` token** ends flag parsing and consumes the **entire raw
+  remainder** of the argument string verbatim — including any later text that looks
+  like a flag (so the continuation needs no inner quoting). Optional — omit it to
+  rewind and go idle.
 - `--continue-file <path>`: alternative to `--continue`; the file's contents are
-  used as the continuation text. At most one of `--continue` / `--continue-file`
-  may be given.
+  used as the continuation text. `--continue` and `--continue-file` are mutually
+  exclusive — supplying both (i.e. a `--continue-file` token *before* a `--continue`
+  token) is a parse error.
 
 `navOptions` passed to `ctx.navigateTree` is exactly `{ label }` (omitted when no
 `--label` is given).
@@ -90,18 +96,30 @@ later if needed — see Non-goals and IMPLEMENTATION IDEAS.)
 
 ## Behavior contract
 
-- The command is accepted immediately: the handler returns **before** navigating,
-  so the agent's `pictl prompt` call sees success as soon as the request is queued,
-  not when navigation completes.
-- Navigation fires once the agent's run has finished streaming. Any follow-ups that
-  were queued meanwhile run first (on the old branch) and are then rewound away —
-  same as a human `/tree` superseding queued input.
+- The command is accepted immediately: the handler returns **before** navigating.
+  Because pi treats a handled extension command as a successful prompt, the agent's
+  `pictl prompt` call reports success as soon as the command is accepted — *not*
+  when navigation completes, and (see Error reporting) *regardless of* whether the
+  handler later detects an error.
+- Navigation fires once the agent's run has finished streaming.
+- **Under `waitForSettled` (the eventual target):** any follow-ups queued meanwhile
+  run first (on the old branch) and are then rewound away — same as a human `/tree`
+  superseding queued input. **Under the initial `waitForIdle` implementation this
+  ordering is NOT guaranteed:** `waitForIdle` can resolve during retry backoff or
+  before compaction / queued-continuation drives, so navigation may race that
+  pending work. This is the known limitation the `waitForSettled` swap resolves; see
+  IMPLEMENTATION IDEAS.
 - The continuation (`--continue` / `--continue-file`) is sent only if navigation
   was **not cancelled**, and starts a fresh turn on the new branch.
 - The detached task **never throws out**; errors are reported via the extension's
-  notify channel (`ctx.ui.notify(..., "error")`).
+  notify channel (`ctx.ui.notify(..., "error")`) — out of band (see Error reporting).
 - The handler does not block the turn: it must not `await` quiescence inline before
   returning.
+- **Best-effort lifecycle.** The detached task is a free-floating promise tied to
+  the live process. If the pi process exits, the daemon shuts down, or the session
+  is replaced (`newSession`/`fork`/`switchSession`/`reload`) before it reaches
+  navigation, the navigation simply does not happen. There is no persistence or
+  resume; self-navigation is best-effort within the lifetime of the current run.
 
 ## Type Design
 
@@ -114,7 +132,7 @@ import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-c
 interface NavigateArgs {
   /** Required positional entry id. */
   targetId: string;
-  /** --label value; labels the target (new-leaf) entry. */
+  /** --label value; passed to navigateTree, which labels targetId (see surface note). */
   label?: string;
   /** Verbatim continuation text from --continue (rest-of-line). */
   continuation?: string;
@@ -125,8 +143,10 @@ interface NavigateArgs {
 /**
  * Parse the raw argument string (everything after "/navigate-tree ").
  * `--continue` consumes the rest of the line; `--label` / `--continue-file`
- * take a single following token. Throws on a missing targetId or when both
- * `--continue` and `--continue-file` are supplied.
+ * take a single following token. Throws on: a missing targetId; both
+ * `--continue` and `--continue-file` supplied; an empty/whitespace-only
+ * `--continue`. (Empty `--continue-file` contents are rejected by the handler
+ * after reading the file.)
  */
 function parseNavigateArgs(raw: string): NavigateArgs;
 
@@ -134,9 +154,11 @@ export default function navigateTreeExtension(pi: ExtensionAPI): void {
   pi.registerCommand("navigate-tree", {
     description: "Navigate the agent's own conversation tree after the current run settles.",
     // handler:
-    //   1. parsed = parseNavigateArgs(raw)
+    //   1. parsed = parseNavigateArgs(raw)  (throws on empty --continue, etc.)
     //   2. continuation = parsed.continuation ?? (parsed.continuationFile
     //        ? await readFile(parsed.continuationFile, "utf8") : undefined)
+    //      then: if a continuation flag was given but the text is empty/whitespace
+    //      after trimming, throw (the empty --continue-file case).
     //   3. detach: settle → navigate → continue (see detached-task skeleton)
     //   4. return (synchronously, before navigation)
     handler: async (raw: string, ctx: ExtensionCommandContext): Promise<void> => {
@@ -196,12 +218,19 @@ sendUserMessage(content: string | (TextContent | ImageContent)[], options?: { de
    user turn on the new branch.
 5. **Rewind-and-idle.** With no continuation flag, navigation rewinds and the
    session goes idle; nothing further is sent.
-6. **Label applied.** With `--label`, the target (new-leaf) entry carries the label.
+6. **Label applied.** With `--label`, the target entry (`targetId`) carries the
+   label (the new leaf for a non-user/custom target; the rewound-before message for
+   a user/custom target).
 7. **`--continue-file` resolution.** The file's contents are used as the
-   continuation text.
-8. **Robust detached task.** A failure during the detached settle/navigate/continue
-   sequence is surfaced via `ctx.ui.notify(..., "error")` and never throws out of
-   the detached task.
+   continuation text; an empty/whitespace-only file is an error (no navigation).
+8. **Empty continuation rejected.** A continuation flag with empty/whitespace-only
+   text is an error (handler throws, no navigation), distinct from omitting the flag
+   (criterion 5).
+9. **Robust detached task.** A failure during the detached wait/navigation, or a
+   synchronous throw from calling `ctx.sendUserMessage`, is surfaced via
+   `ctx.ui.notify(..., "error")` and never throws out of the detached task. (Async
+   continuation-delivery failures are emitted separately by the runtime as
+   `extension_error` and are not observable by the task — see Error reporting #3.)
 
 ## Edge cases
 
@@ -209,17 +238,24 @@ sendUserMessage(content: string | (TextContent | ImageContent)[], options?: { de
   `{ cancelled: false }`; a supplied continuation is still sent (no-op rewind, then
   a fresh turn). Acceptable.
 - **Navigation cancelled** (`result.cancelled === true`): no continuation is sent.
-- **Both `--continue` and `--continue-file`:** `parseNavigateArgs` throws; the
-  command surfaces the error and does nothing.
-- **`--continue-file` path unreadable:** the file is read in the handler **before
-  detaching**, so a bad path makes the handler reject — a normal command failure,
-  surfaced inline to the agent's `pictl prompt` call. Navigation never starts.
-- **Parse errors** (missing `targetId`, both continue flags): `parseNavigateArgs`
-  throws in the handler, so they surface inline the same way — before any detached
-  work.
-- **Follow-ups queued during the wait:** they run on the old branch and are then
-  rewound away by the navigation — same as a human `/tree` superseding queued
-  input.
+- **Parse errors** (missing `targetId`; a `--continue-file` token before a
+  `--continue` token) and an **unreadable `--continue-file`**: detected in the
+  handler **before detaching**, so navigation never starts. The handler throws; pi
+  catches it in `_tryExecuteExtensionCommand` and emits an extension *command-error*
+  event (`core/agent-session.ts:1176-1181`) — it does **not** fail the agent's
+  `pictl prompt` call, which still reports success. Reading `--continue-file` in the
+  handler (not the detached task) keeps these failures pre-navigation and surfaced
+  promptly, even though they are out of band (see Error reporting).
+- **Empty / whitespace-only continuation** (`--continue` with no following text, or
+  a `--continue-file` whose contents are blank after trimming): **error.** A
+  continuation flag with no text is treated as a malformed command, not as "omit the
+  continuation" — the handler throws (→ command-error event) and **navigation does
+  not happen**. (Omitting the continuation entirely — no flag at all — remains the
+  valid rewind-and-idle path.)
+- **Follow-ups queued during the wait:** under `waitForSettled` they run on the old
+  branch and are then rewound away by the navigation (same as a human `/tree`
+  superseding queued input); under the initial `waitForIdle` impl this ordering is
+  not guaranteed (see Behavior contract).
 
 ## Non-goals
 
@@ -246,22 +282,38 @@ sendUserMessage(content: string | (TextContent | ImageContent)[], options?: { de
 
 ## Verified pi internals (load-bearing)
 
-- **Inline-during-streaming is real.** `agent-session.ts:1011` runs
-  `_tryExecuteExtensionCommand` before the `isStreaming` queue check (`:1047`). The
+All line numbers are in `packages/coding-agent/src/` of the pi repo.
+
+- **Inline-during-streaming is real.** `core/agent-session.ts:1011-1015` runs
+  `_tryExecuteExtensionCommand` before the `isStreaming` queue check (`:1048`). The
   slash command is accepted while streaming; the `navigate_tree` RPC is not.
-- **ctx stays valid after the handler returns.** `runner.ts`'s `assertActive()`
-  throws only once `staleMessage` is set, and that happens **only** on session
-  *replacement/dispose* (`newSession` / `fork` / `switchSession` / `reload`;
-  `agent-session.ts:745`). `navigateTree` does **not** invalidate the ctx, so the
-  detached `navigateTree` → `sendUserMessage` chain is safe. We do not need to
-  register an `agent_end`-triggered action instead of a free-floating promise.
+- **Handler errors are caught, not propagated.** `_tryExecuteExtensionCommand`
+  wraps `await command.handler(...)` in `try { … return true } catch { emitError;
+  return true }` (`core/agent-session.ts:1170-1182`), so a throwing handler is
+  reported as a command extension-error event and the prompt is still treated as
+  handled/successful. There is no inline-to-`pictl-prompt` failure path; all errors
+  are out of band.
+- **ctx stays valid after the handler returns.** `core/extensions/runner.ts`'s
+  `assertActive()` (`:510-519`) throws only once `staleMessage` is set, and that
+  happens **only** on session *replacement/dispose* (`newSession` / `fork` /
+  `switchSession` / `reload`; runner/loader invalidation, `core/extensions/loader.ts:129`).
+  `navigateTree` does **not** invalidate the ctx, so the detached `navigateTree` →
+  `sendUserMessage` chain is safe. We do not need to register an
+  `agent_end`-triggered action instead of a free-floating promise.
 - **`ctx.sendUserMessage` is verbatim.** It calls `AgentSession.sendUserMessage` →
   `prompt(text, { expandPromptTemplates: false, source: "extension" })`
-  (`agent-session.ts:1384`). Returns `void` and reports its own errors via
-  `emitError`. This is the chosen continuation transport (Option C).
-- **`--label` works without summarize.** `navigateTree` applies `label` to the
-  target entry when there is no summary entry (`agent-session.ts`: "Attach label to
-  target entry when not summarizing").
+  (`core/agent-session.ts:1360+`, expansion-disabled at `:1384`). The extension-ctx
+  method is typed `void` (not awaitable); its async failures are caught by the
+  runtime and emitted as `extension_error` (`core/agent-session.ts:2227-2230`), so
+  the detached task cannot observe a continuation-delivery failure. This is the
+  chosen continuation transport (Option C).
+- **`--label` applies without summarize, but to `targetId`.** `navigateTree`
+  attaches `label` to `targetId` when there is no summary entry
+  (`core/agent-session.ts:2889`: "Attach label to target entry when not
+  summarizing"). For user/custom-message targets the new leaf is `targetId`'s parent
+  (`:2844-2860`), so the label is not on the resulting leaf.
+- **rpc-mode `notify` emits.** In rpc mode `notify` writes an `extension_ui_request`
+  to the rpc output stream (`modes/rpc/rpc-mode.ts:130-138`).
 
 ## `waitForIdle` now, `waitForSettled` later
 
@@ -282,36 +334,56 @@ consumer for `waitForSettled`.
 
 ## Arg parsing
 
-`parseNavigateArgs(raw)` operates on the full string after `/navigate-tree `:
+`parseNavigateArgs(raw)` operates on the full string after `/navigate-tree `, with
+**token-level** (not substring) recognition:
 
-1. If `--continue ` appears, split there: everything after it (rest-of-line) is the
-   verbatim `continuation`; the prefix is the "head". (`--continue` must therefore
-   be the last flag.)
-2. Tokenize the head on whitespace. The first non-flag token is `targetId`
-   (required). `--label <token>` and `--continue-file <token>` each consume the
-   next single token.
-3. Reject if `targetId` is missing, or if both `continuation` and
-   `continuationFile` are set.
+1. Scan tokens left-to-right. The **first standalone `--continue` token** ends flag
+   parsing: the raw remainder after it (skipping one separating space) becomes the
+   verbatim `continuation` — embedded spaces, quotes, slashes, and flag-looking text
+   are all literal. `--continue` is therefore necessarily the last flag.
+2. Before that point, recognized flags are `--label <token>` and
+   `--continue-file <token>` (each consuming one following token); the first bare
+   (non-flag) token is `targetId`.
+3. Errors (handler throws `Error`, caught by pi → command-error event):
+   - `targetId` missing;
+   - both a `--continue-file` token and a `--continue` token present;
+   - a continuation flag present but its text empty/whitespace-only after trimming.
 
-`--continue-file` is resolved to text by the handler via `node:fs/promises`
-`readFile` **before detaching**, so a bad path fails fast and the captured text is
-immune to later filesystem changes. Labels containing spaces are an edge case not
-covered by the single-token rule; if that proves limiting, prefer `--label` before
-`--continue` and revisit quoting.
+The empty-continuation check has two sites: `parseNavigateArgs` rejects an empty
+`--continue` directly; the handler rejects an empty `--continue-file` *after* reading
+it. Both are pre-navigation (the handler reads the file before detaching) and throw,
+so navigation never starts. `--continue-file` is read via `node:fs/promises`
+`readFile`, so a bad path is caught pre-navigation too and the captured text is
+immune to later filesystem changes.
+
+Known limits of this grammar: `--label` / `--continue-file` values are single
+whitespace-delimited tokens (no spaces); a value with spaces is not expressible.
+This is acceptable for ids and labels; if it bites, revisit quoting.
 
 ## Error reporting
 
-The detached task is fire-and-forget; it must not throw. Failures *inside* it
-(navigation errors) are reported via `ctx.ui.notify(message, "error")`. In rpc mode
-(how pictl runs pi) `notify` emits an `extension_ui_request` on the rpc output
-stream (`rpc-mode.ts:130`), so the error is surfaced rather than swallowed.
+There are three distinct error paths, and **all are out of band** — none fails the
+agent's `pictl prompt` call or returns into the agent's conversation:
 
-**Known limitation:** a detached-task failure is reported *out of band* (rpc
-output / attached human), **not** back into the requesting agent's context — by the
-time it fires, the requesting turn is long over, so there is no clean channel into
-the agent's conversation. Failures that can be detected *before* detaching (parse
-errors, an unreadable `--continue-file`) are kept in the handler precisely so they
-surface inline to the agent's `pictl prompt` call instead.
+1. **Pre-detach (handler) errors** — parse errors, unreadable `--continue-file`. The
+   handler throws; pi catches it and emits a command extension-error event
+   (`core/agent-session.ts:1176-1181`). Kept in the handler so they fire *before*
+   any navigation and surface promptly.
+2. **Detached navigation errors** — `ctx.navigateTree` rejecting. Caught by the
+   detached task's `try/catch` and reported via `ctx.ui.notify(message, "error")`,
+   which in rpc mode emits an `extension_ui_request` on the rpc output stream
+   (`modes/rpc/rpc-mode.ts:130-138`). The task never throws out.
+3. **Continuation-delivery errors** — `ctx.sendUserMessage` is typed `void` and
+   fire-and-forget; its async failures are caught by the runtime and emitted as
+   `extension_error` (`core/agent-session.ts:2227-2230`). The detached task cannot
+   observe them.
+
+**Known limitation:** because the requesting turn is long over by the time the
+detached task runs, there is no clean channel to deliver any of these errors back
+into the requesting agent's context — only out-of-band (rpc output / attached
+human). An agent that needs to confirm a self-navigation succeeded must observe its
+own tree (e.g. `pictl get-tree`) on the next turn rather than rely on an error
+surfacing.
 
 ## Where the extension lives / loading
 
@@ -360,11 +432,13 @@ focus on omissions, unsafe failure modes, and overconfident claims, then iterate
       `ctx.waitForIdle` with the `waitForSettled` TODO).
 - [ ] `parseNavigateArgs` unit tests: targetId required; `--label`; `--continue`
       rest-of-line (incl. embedded spaces/quotes/slashes); `--continue-file`;
-      both-continue-flags error.
+      both-continue-flags error; empty/whitespace `--continue` error.
 - [ ] Behavior verification: accepted mid-turn; handler returns before navigation;
       navigation after the run; continuation on the new branch; rewind-and-idle;
       label applied; cancelled → no continuation; detached task never throws.
-- [ ] Fresh-context blind-spot review per `skills/pictl/reviewer.md`; iterate.
+- [x] Fresh-context blind-spot review per `skills/pictl/reviewer.md`; findings
+      applied (see below).
+- [x] Decide empty/whitespace-only continuation behavior → **error** (see Decisions).
 - [ ] (Gated on pi) swap `ctx.waitForIdle` → `ctx.waitForSettled` when it lands.
 
 ## Decisions
@@ -377,6 +451,11 @@ focus on omissions, unsafe failure modes, and overconfident claims, then iterate
   the agent's summary, so pi's auto branch-summary is not exposed.
 - **`--continue` is rest-of-line**, with `--continue-file <path>` as an optional
   alternative (avoids quoting fragility).
+- **Empty/whitespace-only continuation is an error**, not a silent omit. A
+  continuation flag with no text is almost always a malformed command (e.g. an
+  empty shell-variable expansion); failing closed (no navigation) is safer than
+  navigating and silently discarding the intended summary. Omitting the flag
+  entirely remains the valid rewind-and-idle path.
 - **Standalone extension in `extensions/`.** No pictl CLI / daemon / install
   integration in this spec; that is a follow-up spec.
 - **Start on `waitForIdle`, upgrade to `waitForSettled`.** The race-free primitive
@@ -385,5 +464,32 @@ focus on omissions, unsafe failure modes, and overconfident claims, then iterate
 - **Detached free-floating promise is safe** (not an `agent_end`-registered
   action): `assertActive()` only fails after session replacement, which
   self-navigation does not trigger.
+
+## Review findings (fresh-context reviewer, applied)
+
+- **Error visibility corrected (high-confidence).** `_tryExecuteExtensionCommand`
+  catches handler throws and still reports the prompt as handled
+  (`core/agent-session.ts:1170-1182`), so there is **no** inline-to-`pictl-prompt`
+  failure path. Rewrote Behavior contract / Edge cases / Error reporting: all error
+  paths are out of band. Pre-detach detection is still kept in the handler (fails
+  before navigation, surfaces promptly), but as a command-error event, not a prompt
+  failure.
+- **`--label` semantics corrected (high-confidence).** `navigateTree` labels
+  `targetId`, not the new leaf (`:2889`); for user/custom-message targets the leaf
+  is the parent. Fixed all "new-leaf" wording.
+- **Queued-follow-up ordering downgraded (high-confidence).** That ordering holds
+  only under `waitForSettled`; the initial `waitForIdle` impl does not guarantee it.
+  Marked as a known limitation in the contract.
+- **Detached-task lifecycle made explicit (high-confidence).** Added a best-effort
+  caveat: the free-floating promise is lost on process exit / daemon shutdown /
+  session replacement before navigation; no persistence/resume.
+- **Arg grammar tightened (speculative).** Switched from substring `--continue `
+  detection to token-level recognition; defined the `--continue`/`--continue-file`
+  conflict precisely; flagged empty-continuation as an open item.
+- **Stale pi paths fixed.** All references now use the real `core/…` / `modes/…`
+  paths and verified line numbers.
+- Reviewer **confirmed** the load-bearing claims: inline-before-streaming-queue,
+  `assertActive` (safe post-handler), verbatim `sendUserMessage`, label-without-
+  summarize, rpc-mode `notify` emits.
 
 *Work log entries go here*
