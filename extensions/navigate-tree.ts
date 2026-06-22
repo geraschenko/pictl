@@ -45,32 +45,27 @@ const FLAG_CONTINUE_FILE = "--continue-file";
  * handler after reading the file.)
  */
 function parseNavigateArgs(raw: string): NavigateArgs {
-  // TDC: is there really not a better way to do this? I'm surprised that we have to split on whitespace manually.
-
   let targetId: string | undefined;
   let label: string | undefined;
   let continuation: string | undefined;
   let continuationFile: string | undefined;
 
-  const isSpace = (index: number): boolean => /\s/.test(raw[index]);
-
-  let i = 0;
-  const n = raw.length;
-  while (i < n) {
-    while (i < n && isSpace(i)) i++;
-    if (i >= n) break;
-
-    const tokenStart = i;
-    while (i < n && !isSpace(i)) i++;
-    const token = raw.slice(tokenStart, i);
+  // We scan tokens left-to-right rather than using an off-the-shelf arg parser
+  // because `--continue` consumes the rest of the line *verbatim* (no parser has a
+  // "raw remainder" mode), and a token's role is position-dependent (`--continue`
+  // as a `--label` value is literal, so a regex pre-split would be wrong). matchAll
+  // does the whitespace tokenization; each match's `.index` lets us slice the
+  // original string for the one verbatim case.
+  const tokens = [...raw.matchAll(/\S+/g)];
+  for (let t = 0; t < tokens.length; t++) {
+    const token = tokens[t][0];
 
     if (token === FLAG_CONTINUE) {
       if (continuationFile !== undefined) {
         throw new Error("--continue and --continue-file are mutually exclusive");
       }
-      // Consume the raw remainder verbatim, skipping one separating whitespace char.
-      const restStart = i < n ? i + 1 : i;
-      continuation = raw.slice(restStart);
+      const offset = (tokens[t].index ?? 0) + token.length;
+      continuation = raw.slice(offset).replace(/^\s/, ""); // drop one separating space
       if (continuation.trim() === "") {
         throw new Error("--continue requires non-empty continuation text");
       }
@@ -78,13 +73,10 @@ function parseNavigateArgs(raw: string): NavigateArgs {
     }
 
     if (token === FLAG_LABEL || token === FLAG_CONTINUE_FILE) {
-      while (i < n && isSpace(i)) i++;
-      if (i >= n) {
+      const value = tokens[++t]?.[0];
+      if (value === undefined) {
         throw new Error(`${token} requires a value`);
       }
-      const valueStart = i;
-      while (i < n && !isSpace(i)) i++;
-      const value = raw.slice(valueStart, i);
       if (token === FLAG_LABEL) {
         if (label !== undefined) throw new Error("--label given more than once");
         label = value;
@@ -116,9 +108,10 @@ export default function navigateTreeExtension(pi: ExtensionAPI): void {
   pi.registerCommand("navigate-tree", {
     description: "Navigate the agent's own conversation tree after the current run settles.",
     handler: async (raw: string, ctx: ExtensionCommandContext): Promise<void> => {
-      const { targetId, label, continuation: parsedContinuation, continuationFile } = parseNavigateArgs(raw);
+      const parsed = parseNavigateArgs(raw);
+      const { targetId, label, continuationFile } = parsed;
 
-      let continuation = parsedContinuation; // TDC: why don't we just call it continuation from the start?
+      let continuation = parsed.continuation;
       if (continuation === undefined && continuationFile !== undefined) {
         const text = await readFile(continuationFile, "utf8");
         if (text.trim() === "") {
