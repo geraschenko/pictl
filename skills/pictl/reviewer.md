@@ -61,7 +61,7 @@ I addressed your concern about the parser contract by adding explicit assertion 
 
 I intentionally did not add a fallback for malformed known types because that would hide schema drift.
 
-Can you re-read the spec and tell me whether this resolves your blocker? If not, name the smallest remaining edit needed for approval.
+Re-read the spec and tell me whether this resolves your blocker. If not, name the smallest remaining edit needed for approval.
 EOF
 ```
 
