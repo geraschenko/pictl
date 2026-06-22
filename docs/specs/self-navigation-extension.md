@@ -111,6 +111,13 @@ later if needed — see Non-goals and IMPLEMENTATION IDEAS.)
   IMPLEMENTATION IDEAS.
 - The continuation (`--continue` / `--continue-file`) is sent only if navigation
   was **not cancelled**, and starts a fresh turn on the new branch.
+- **The input box is left as it was.** In interactive (TUI) mode, `navigateTree`
+  drops the target message's text into an empty input box — appropriate when a human
+  picks a node to edit and resend, confusing when an extension navigates. The
+  detached task captures the editor contents immediately before navigating and
+  restores them after, so programmatic navigation does not surprise the user with
+  the target message's text. In rpc mode (pictl-spawned agents) there is no input
+  box, `navigateTree` does not touch the editor, and this restore is a no-op.
 - The detached task **never throws out**; errors are reported via the extension's
   notify channel (`ctx.ui.notify(..., "error")`) — out of band (see Error reporting).
 - The handler does not block the turn: it must not `await` quiescence inline before
@@ -335,6 +342,15 @@ All line numbers are in `packages/coding-agent/src/` of the pi repo.
   (`:2844-2860`), so the label is not on the resulting leaf.
 - **rpc-mode `notify` emits.** In rpc mode `notify` writes an `extension_ui_request`
   to the rpc output stream (`modes/rpc/rpc-mode.ts:130-138`).
+- **The input-box population is interactive-mode-only.** `AgentSession.navigateTree`
+  returns `editorText` (the target user/custom message's text) but does not set any
+  editor. The **interactive** mode's `navigateTree` wrapper injects it into an empty
+  box — `if (result.editorText && !this.editor.getText().trim()) this.editor.setText(...)`
+  (`dist/modes/interactive/interactive-mode.js:1195-1196`). The **rpc** wrapper
+  (`dist/modes/rpc/rpc-mode.js:231-238`) ignores `editorText` entirely; its
+  `getEditorText()` always returns `""` and `setEditorText()` fires a
+  `set_editor_text` `extension_ui_request` (`:151-159`). So the editor-restore guard
+  (`getEditorText() !== before → setEditorText(before)`) self-disables in rpc mode.
 
 ## `waitForIdle` now, `waitForSettled` later
 
@@ -509,6 +525,17 @@ focus on omissions, unsafe failure modes, and overconfident claims, then iterate
   receiver changed. Spec Type Design / IMPLEMENTATION IDEAS / Error reporting updated.
 - **Import path is `@geraschenko/pi-coding-agent`** (the fork actually depended on),
   not the upstream `@earendil-works/pi-coding-agent` the spec drafted against.
+- **Editor contents are captured and restored around navigation** (interactive
+  testing finding). `ctx.navigateTree` has no option to suppress the input-box
+  injection — it is hardcoded in the interactive-mode wrapper, gated only on the box
+  being empty. So instead of suppressing it, the detached task captures
+  `ctx.ui.getEditorText()` immediately before navigating and, if navigation changed
+  it, calls `ctx.ui.setEditorText(before)` to restore. The `!== before` guard means
+  this only fires when the injection actually happened, and self-disables in rpc
+  mode (where `getEditorText()` is always `""` and `navigateTree` leaves the editor
+  untouched), so it issues no spurious `set_editor_text` request to pictl. Considered
+  and rejected: a pi change to add a suppress flag to `navigateTree` (out of scope —
+  no pi changes in this spec).
 - **Error reporter is guarded against a stale `ctx`** (review finding). `ctx.ui` is
   a getter that calls `assertActive()` (runner.js:415-417), so after a session
   replacement the detached task's `catch` would itself throw when it tried to

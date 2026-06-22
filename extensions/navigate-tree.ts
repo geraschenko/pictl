@@ -128,7 +128,16 @@ export default function navigateTreeExtension(pi: ExtensionAPI): void {
           // resolves at the end of a single run and races auto-retry/compaction;
           // waitForSettled resolves only at full session quiescence.
           await ctx.waitForIdle();
+          // In interactive mode, navigateTree drops the target message's text into
+          // an empty input box (good when a human picks a node to edit, confusing
+          // when an extension navigates). Restore the pre-navigation editor
+          // contents. In rpc mode getEditorText() is always "" and navigateTree
+          // leaves the editor untouched, so this is a no-op there.
+          const editorTextBeforeNav = ctx.ui.getEditorText();
           const result = await ctx.navigateTree(targetId, navOptions);
+          if (ctx.ui.getEditorText() !== editorTextBeforeNav) {
+            ctx.ui.setEditorText(editorTextBeforeNav);
+          }
           if (continuation !== undefined && !result.cancelled) {
             pi.sendUserMessage(continuation); // verbatim; void; reports its own async errors
           }
