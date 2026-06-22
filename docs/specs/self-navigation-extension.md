@@ -118,15 +118,19 @@ later if needed — see Non-goals and IMPLEMENTATION IDEAS.)
 - **Best-effort lifecycle.** The detached task is a free-floating promise tied to
   the live process. If the pi process exits, the daemon shuts down, or the session
   is replaced (`newSession`/`fork`/`switchSession`/`reload`) before it reaches
-  navigation, the navigation simply does not happen. There is no persistence or
-  resume; self-navigation is best-effort within the lifetime of the current run.
+  navigation, the navigation simply does not happen. Concretely, after a session
+  replacement the `ctx` methods throw `assertActive` (`ctx.ui` is itself a guarded
+  getter, runner.js:415-417), so the task's `try/catch` swallows the navigation
+  error and the error-report path is itself guarded so the task never throws out
+  (see Error reporting / criterion 9). There is no persistence or resume;
+  self-navigation is best-effort within the lifetime of the current run.
 
 ## Type Design
 
 A single standalone pi extension file in `extensions/`. New symbols:
 
 ```ts
-import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionCommandContext } from "@geraschenko/pi-coding-agent";
 
 /** Parsed form of the /navigate-tree argument string. */
 interface NavigateArgs {
@@ -181,10 +185,15 @@ void (async () => {
     await ctx.waitForIdle();
     const result = await ctx.navigateTree(targetId, navOptions);
     if (continuation !== undefined && !result.cancelled) {
-      ctx.sendUserMessage(continuation); // verbatim; returns void, reports its own errors
+      pi.sendUserMessage(continuation); // verbatim; returns void, reports its own errors
     }
   } catch (err) {
-    ctx.ui.notify(`navigate-tree failed: ${err instanceof Error ? err.message : String(err)}`, "error");
+    // ctx.ui is a getter that asserts the session is still active, so guard the
+    // report too: if the session was replaced, drop it silently rather than
+    // escaping as an unhandled rejection (criterion 9 / best-effort lifecycle).
+    try {
+      ctx.ui.notify(`navigate-tree failed: ${err instanceof Error ? err.message : String(err)}`, "error");
+    } catch { /* session no longer active */ }
   }
 })();
 ```
@@ -198,6 +207,10 @@ navigateTree(
   options?: { summarize?: boolean; customInstructions?: string; replaceInstructions?: boolean; label?: string },
 ): Promise<{ cancelled: boolean }>;
 waitForIdle(): Promise<void>;
+// pi: ExtensionAPI (NOT ExtensionCommandContext) — sendUserMessage lives on the `pi`
+// object, not `ctx`. The command-context type has no sendUserMessage; only
+// ExtensionAPI and the post-switch ReplacedSessionContext do. Both route to the
+// same verbatim AgentSession.sendUserMessage (expandPromptTemplates: false).
 sendUserMessage(content: string | (TextContent | ImageContent)[], options?: { deliverAs?: "steer" | "followUp" }): void;
 // pi: registerCommand(name, { description?, getArgumentCompletions?, handler })
 //   handler: (args: string, ctx: ExtensionCommandContext) => Promise<void>
@@ -228,7 +241,9 @@ sendUserMessage(content: string | (TextContent | ImageContent)[], options?: { de
    (criterion 5).
 9. **Robust detached task.** A failure during the detached wait/navigation, or a
    synchronous throw from calling `ctx.sendUserMessage`, is surfaced via
-   `ctx.ui.notify(..., "error")` and never throws out of the detached task. (Async
+   `ctx.ui.notify(..., "error")` and never throws out of the detached task — even
+   when the session has been replaced and `ctx` is stale, since the `notify` call is
+   itself guarded (see Error reporting / Implementation-Time Decisions). (Async
    continuation-delivery failures are emitted separately by the runtime as
    `extension_error` and are not observable by the task — see Error reporting #3.)
 
@@ -300,13 +315,19 @@ All line numbers are in `packages/coding-agent/src/` of the pi repo.
   `navigateTree` does **not** invalidate the ctx, so the detached `navigateTree` →
   `sendUserMessage` chain is safe. We do not need to register an
   `agent_end`-triggered action instead of a free-floating promise.
-- **`ctx.sendUserMessage` is verbatim.** It calls `AgentSession.sendUserMessage` →
-  `prompt(text, { expandPromptTemplates: false, source: "extension" })`
-  (`core/agent-session.ts:1360+`, expansion-disabled at `:1384`). The extension-ctx
-  method is typed `void` (not awaitable); its async failures are caught by the
-  runtime and emitted as `extension_error` (`core/agent-session.ts:2227-2230`), so
-  the detached task cannot observe a continuation-delivery failure. This is the
-  chosen continuation transport (Option C).
+- **`pi.sendUserMessage` is verbatim, and lives on `pi`, not `ctx`.** In the pinned
+  pi (`@geraschenko/pi-coding-agent` 0.79.8-fork.0) the command context
+  (`ExtensionCommandContext`) has **no** `sendUserMessage`; it is exposed on the
+  `ExtensionAPI` object (the `pi` factory arg) and, separately, on the post-switch
+  `ReplacedSessionContext`. Both route to `AgentSession.sendUserMessage`, which calls
+  `prompt(text, { expandPromptTemplates: false })`
+  (`dist/core/agent-session.js:1020-1043`, expansion-disabled at `:1043`) — verbatim.
+  The `pi.sendUserMessage` action is wired void/fire-and-forget with a `.catch` that
+  emits an extension error event `send_user_message`
+  (`dist/core/agent-session.js:1750-1758`), so the detached task cannot observe a
+  continuation-delivery failure. This is the chosen continuation transport
+  (Option C). The handler closes over `pi`, so the detached task calls
+  `pi.sendUserMessage` directly.
 - **`--label` applies without summarize, but to `targetId`.** `navigateTree`
   attaches `label` to `targetId` when there is no summary entry
   (`core/agent-session.ts:2889`: "Attach label to target entry when not
@@ -335,7 +356,11 @@ consumer for `waitForSettled`.
 ## Arg parsing
 
 `parseNavigateArgs(raw)` operates on the full string after `/navigate-tree `, with
-**token-level** (not substring) recognition:
+**token-level** (not substring) recognition. The `raw` it receives is verbatim:
+`_tryExecuteExtensionCommand` slices `text.slice(spaceIndex + 1)` and does **not**
+trim it for extension commands (`dist/core/agent-session.js:842-843`; skill commands
+trim at `:873`, extension commands do not), so embedded/leading whitespace in the
+continuation survives to the parser.
 
 1. Scan tokens left-to-right. The **first standalone `--continue` token** ends flag
    parsing: the raw remainder after it (skipping one separating space) becomes the
@@ -373,10 +398,10 @@ agent's `pictl prompt` call or returns into the agent's conversation:
    detached task's `try/catch` and reported via `ctx.ui.notify(message, "error")`,
    which in rpc mode emits an `extension_ui_request` on the rpc output stream
    (`modes/rpc/rpc-mode.ts:130-138`). The task never throws out.
-3. **Continuation-delivery errors** — `ctx.sendUserMessage` is typed `void` and
-   fire-and-forget; its async failures are caught by the runtime and emitted as
-   `extension_error` (`core/agent-session.ts:2227-2230`). The detached task cannot
-   observe them.
+3. **Continuation-delivery errors** — `pi.sendUserMessage` is typed `void` and
+   fire-and-forget; its async failures are caught by the runtime and emitted as an
+   extension error event (`send_user_message`, `dist/core/agent-session.js:1750-1758`).
+   The detached task cannot observe them.
 
 **Known limitation:** because the requesting turn is long over by the time the
 detached task runs, there is no clean channel to deliver any of these errors back
@@ -427,12 +452,17 @@ focus on omissions, unsafe failure modes, and overconfident claims, then iterate
 
 ## Tasks
 
-- [ ] Implement `extensions/navigate-tree.ts`: `parseNavigateArgs`, the command
+- [x] Implement `extensions/navigate-tree.ts`: `parseNavigateArgs`, the command
       registration, and the detached settle→navigate→continue task (using
-      `ctx.waitForIdle` with the `waitForSettled` TODO).
-- [ ] `parseNavigateArgs` unit tests: targetId required; `--label`; `--continue`
-      rest-of-line (incl. embedded spaces/quotes/slashes); `--continue-file`;
-      both-continue-flags error; empty/whitespace `--continue` error.
+      `ctx.waitForIdle` with the `waitForSettled` TODO). Typechecks clean
+      (`tsc --noEmit --strict` against the file).
+- [x] `parseNavigateArgs` unit tests (`extensions/navigate-tree.test.ts`, 16 tests
+      passing): targetId required; `--label` (before/after targetId); `--continue`
+      rest-of-line (incl. embedded spaces/quotes/slashes, one-separator skip,
+      flag-looking text); `--continue-file`; both-continue-flags conflict (and the
+      after-`--continue` non-conflict); empty/whitespace `--continue` error; plus the
+      fail-closed completeness cases (unknown flag, missing value, duplicate flag,
+      extra positional).
 - [ ] Behavior verification: accepted mid-turn; handler returns before navigation;
       navigation after the run; continuation on the new branch; rewind-and-idle;
       label applied; cancelled → no continuation; detached task never throws.
@@ -464,6 +494,46 @@ focus on omissions, unsafe failure modes, and overconfident claims, then iterate
 - **Detached free-floating promise is safe** (not an `agent_end`-registered
   action): `assertActive()` only fails after session replacement, which
   self-navigation does not trigger.
+
+## Implementation-Time Decisions
+
+- **Continuation transport is `pi.sendUserMessage`, not `ctx.sendUserMessage`**
+  (forced; behavior-identical). The approved Type Design called `ctx.sendUserMessage`,
+  but in the pinned pi (`@geraschenko/pi-coding-agent` 0.79.8-fork.0) the command
+  context has no such method — it lives on the `ExtensionAPI` (`pi`) object. The
+  handler closes over `pi`, so the detached task calls `pi.sendUserMessage`. Both
+  the `pi` action and the (absent-here) ctx method route to the same verbatim
+  `AgentSession.sendUserMessage` (`expandPromptTemplates: false`), and the `pi`
+  action is the same void/fire-and-forget shape (errors → `send_user_message`
+  extension error event). Option C and all error-path claims are unchanged; only the
+  receiver changed. Spec Type Design / IMPLEMENTATION IDEAS / Error reporting updated.
+- **Import path is `@geraschenko/pi-coding-agent`** (the fork actually depended on),
+  not the upstream `@earendil-works/pi-coding-agent` the spec drafted against.
+- **Error reporter is guarded against a stale `ctx`** (review finding). `ctx.ui` is
+  a getter that calls `assertActive()` (runner.js:415-417), so after a session
+  replacement the detached task's `catch` would itself throw when it tried to
+  `notify`, producing an unhandled rejection and violating criterion 9. The `notify`
+  call is wrapped in its own `try/catch`; on a stale ctx the report is dropped
+  silently — matching the best-effort lifecycle (navigation "simply does not
+  happen"). Updated Type Design skeleton, Behavior contract lifecycle note.
+- **Parser fails closed beyond the spec's three explicit throws.** The spec's error
+  contract names: missing `targetId`, both continue flags, empty `--continue`. A
+  total parser must also define behavior for the remaining malformed inputs; per the
+  spec's own fail-closed philosophy (see the empty-continuation Decision) each
+  **throws** rather than silently dropping input: an unknown `--flag`, a flag missing
+  its value (`--label`/`--continue-file` at end of input), a duplicate
+  `--label`/`--continue-file`, and a second bare positional argument. These are
+  command-error events like the other parse errors (out of band). Flagged for owner
+  review — easy to relax to last-wins/ignore if any prove too strict.
+- **`parseNavigateArgs` and `NavigateArgs` are exported** (the spec drafted them as
+  module-private). Needed so the spec-mandated unit tests can import them; no runtime
+  effect.
+- **`extensions/` is outside the project's `tsc`/test globs** (`tsconfig.json`
+  includes only `src`; `npm test` globs `src/**/*.test.ts`). The extension is
+  typechecked ad hoc (`npx tsc --noEmit --strict … extensions/navigate-tree.ts`) and
+  its test run directly (`node --test extensions/navigate-tree.test.ts`). Wiring
+  `extensions/` into the build/test harness belongs with the deferred pictl-integration
+  follow-up spec, not here.
 
 ## Review findings (fresh-context reviewer, applied)
 
