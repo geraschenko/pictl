@@ -18,7 +18,7 @@ Spawn a read-only reviewer:
 
 ```bash
 reviewer=$(pictl spawn --tag reviewer -- --tools read,grep,find,ls)
-pictl prompt -t "$reviewer" - <<EOF | ./scripts/pictl-render
+pictl prompt -t "$reviewer" - <<EOF | pictl format messages
 You are a fresh-context reviewer. Be critical and look for blind spots.
 
 Context:
@@ -56,7 +56,7 @@ After edits, talk to the reviewer directly. Summarize what changed and why. Invi
 Example:
 
 ```bash
-pictl prompt -t "$reviewer" - <<'EOF' | ./scripts/pictl-render
+pictl prompt -t "$reviewer" - <<'EOF' | pictl format messages
 I addressed your concern about the parser contract by adding explicit assertion functions and defining malformed known-type entries as invalid input.
 
 I intentionally did not add a fallback for malformed known types because that would hide schema drift.
