@@ -180,6 +180,8 @@ The provenance fields are important because summaries become memory. A branch su
 - A durable local state file consumed by a daemon-like workflow runner.
 - A `navigate-tree` API extension that atomically carries a continuation message.
 
+The last option is **implemented**: the `/navigate-tree` pi extension (`extensions/navigate-tree.ts`; spec: `docs/specs/self-navigation-extension.md`). It exists because `pictl -t $PI_AGENT_ID navigate-tree` cannot work from inside a turn — that command runs while the agent is streaming, and `navigate_tree` is rejected during streaming. Instead the agent runs `pictl prompt "/navigate-tree <entry> --continue <summary and next action>"`; the slash command is accepted inline, returns immediately, defers navigation until the run settles, and then sends the continuation on the new branch. Whether to bundle the extension into pictl-spawned agents is still open.
+
 The important invariant: continuation should be explicit, durable, and inspectable before the context surgery happens.
 
 ### If this became normal
@@ -569,7 +571,7 @@ A workflow that improves apparent diligence but increases user confusion may be 
 
 ## Open questions
 
-- Should `navigate-tree` support an atomic continuation prompt?
+- ~~Should `navigate-tree` support an atomic continuation prompt?~~ Answered: realized as the `/navigate-tree` extension (deferred navigation + continuation) rather than as a parameter on the `navigate_tree` RPC. Open follow-on: should pictl bundle it into spawned agents?
 - Should self-navigation require confirmation by default when a human is attached?
 - How can an agent reliably identify the entry id to return to?
 - What summary schema is sufficient for safe context surgery?

@@ -16,7 +16,9 @@ pictl navigate-tree -t <agent> <target-id> && \
   pictl prompt -t <agent> --type detach '<summary and continuation>'
 ```
 
-For self-navigation, prefer the second pattern when you can supply the recovery summary in the post-navigation prompt: it is explicit, visible, and carries the next action. It also avoids relying on pi's default branch-summary prompt.
+Both patterns require the target to be **idle**: `navigate_tree` is rejected while the target is streaming. They are for a script, peer, or human navigating an idle agent. An agent navigating **itself** from inside its own turn is streaming, so it cannot use these — see [Self-navigation](#self-navigation) below.
+
+When the target is idle and you can supply the recovery summary in the post-navigation prompt, prefer the second pattern: it is explicit, visible, and carries the next action. It also avoids relying on pi's default branch-summary prompt.
 
 ## Custom summary instructions
 
@@ -54,9 +56,21 @@ The summarizer sees only that `<conversation>` block plus the summary instructio
 
 Labels are metadata for tree display and do not change LLM context.
 
-## Self-navigation safety
+## Self-navigation
 
-Before an agent navigates itself, prepare a recovery packet somewhere durable or in the post-navigation prompt:
+An agent **cannot** navigate its own tree with `pictl navigate-tree -t $PI_AGENT_ID ...`: that command runs while the agent's turn is streaming, and `navigate_tree` is rejected during streaming. The `/navigate-tree` pi extension (`extensions/navigate-tree.ts`) exists for this case. The agent runs:
+
+```bash
+pictl prompt "/navigate-tree <target-id> --continue <recovery summary and next action>"
+```
+
+The slash command is accepted inline during streaming, returns immediately, and defers the navigation until the run settles — then optionally sends the `--continue` text as a fresh prompt on the new branch. See `docs/specs/self-navigation-extension.md`.
+
+The extension is standalone; it must be loaded by the agent's pi for `/navigate-tree` to exist. Whether pictl bundles it into spawned agents is not yet decided.
+
+### Recovery packet
+
+The `--continue` text becomes the agent's memory of the abandoned branch, so it should carry a recovery packet:
 
 - target entry id;
 - why navigation is happening;
