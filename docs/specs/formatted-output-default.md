@@ -487,5 +487,3 @@ from the `format` surface.
 - [ ] Tests: update changed-default tests; add formatted/detach/parity tests.
 - [ ] Docs: README section; briefs; `--type` help string.
 - [ ] `npm run check && npm run lint && npm test` green.
-</content>
-</invoke>
