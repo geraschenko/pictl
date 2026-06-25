@@ -55,7 +55,7 @@ Daemon/CLI version skew is acceptable: the sockets carry stable protocols, so a 
 
 No central index file or registry daemon (lock-contention and staleness magnets). Convention:
 
-- Root: `$PICTL_DIR`, defaulting to `~/.pi/agents/` (nests under pi's existing `~/.pi/`).
+- Root: `$PICTL_DIR`, defaulting to the per-OS user data directory (via `env-paths`): `~/.local/share/pictl` on Linux. This is registry data (restore-worthy: session ids survive a copy to another machine), so it belongs in the data dir, not config or state.
 - Per agent: `$PICTL_DIR/<agent-id>/` containing:
   - `agent.json` — see authority split below;
   - `pi.sock` — pi's RPC socket;

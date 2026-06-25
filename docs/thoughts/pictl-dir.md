@@ -1,1 +1,0 @@
-PICTL_DIR should default to ~/.config/pictl or something like that. Figure out what the standard place to put stuff like this is.

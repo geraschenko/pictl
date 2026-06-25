@@ -5,8 +5,8 @@
  */
 
 import { open, readdir, readFile, rename } from "node:fs/promises";
-import { homedir } from "node:os";
 import { join } from "node:path";
+import envPaths from "env-paths";
 import { fileExists } from "./util.ts";
 
 /**
@@ -38,7 +38,10 @@ export interface AgentRecord {
 }
 
 export function pictlBaseDir(): string {
-  return process.env.PICTL_DIR ?? join(homedir(), ".config", "pictl");
+  // env-paths picks the per-OS user data dir (~/.local/share/pictl on Linux,
+  // ~/Library/Application Support/pictl on macOS, %LOCALAPPDATA%\pictl on
+  // Windows). suffix:"" suppresses its default "-nodejs" project-name suffix.
+  return process.env.PICTL_DIR ?? envPaths("pictl", { suffix: "" }).data;
 }
 
 /** The agent's own directory within the registry. */

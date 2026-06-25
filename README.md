@@ -64,7 +64,7 @@ pictl purge -t <PREFIX_OF_PICTL_TARGET>
 ```
 
 * The actual session messages live in your `~/.pi` as usual.
-* `pictl`'s agent registry lives in files in `~/.config/pictl`
+* `pictl`'s agent registry lives in your per-OS user data dir (`~/.local/share/pictl` on Linux), or wherever `$PICTL_DIR` points if you set it.
 
 **Setup tab completion** with `pictl completion install` (bash only).
 
