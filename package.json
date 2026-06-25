@@ -22,7 +22,7 @@
     "presubmit": "npm run check && npm run lint && treefmt --fail-on-change && npm test"
   },
   "dependencies": {
-    "@geraschenko/pi-coding-agent": "0.80.2-fork.0",
+    "@geraschenko/pi-coding-agent": "^0.80.2-fork.2",
     "@stricli/auto-complete": "1.2.7",
     "@stricli/core": "1.2.7",
     "@xterm/addon-serialize": "^0.14.0",
