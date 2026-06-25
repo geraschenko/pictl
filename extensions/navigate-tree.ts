@@ -10,7 +10,10 @@
  */
 
 import { readFile } from "node:fs/promises";
-import type { ExtensionAPI, ExtensionCommandContext } from "@geraschenko/pi-coding-agent";
+import type {
+  ExtensionAPI,
+  ExtensionCommandContext,
+} from "@geraschenko/pi-coding-agent";
 
 /** Parsed form of the /navigate-tree argument string. */
 interface NavigateArgs {
@@ -62,7 +65,9 @@ function parseNavigateArgs(raw: string): NavigateArgs {
 
     if (token === FLAG_CONTINUE) {
       if (continuationFile !== undefined) {
-        throw new Error("--continue and --continue-file are mutually exclusive");
+        throw new Error(
+          "--continue and --continue-file are mutually exclusive",
+        );
       }
       const offset = (tokens[t].index ?? 0) + token.length;
       continuation = raw.slice(offset).replace(/^\s/, ""); // drop one separating space
@@ -78,10 +83,12 @@ function parseNavigateArgs(raw: string): NavigateArgs {
         throw new Error(`${token} requires a value`);
       }
       if (token === FLAG_LABEL) {
-        if (label !== undefined) throw new Error("--label given more than once");
+        if (label !== undefined)
+          throw new Error("--label given more than once");
         label = value;
       } else {
-        if (continuationFile !== undefined) throw new Error("--continue-file given more than once");
+        if (continuationFile !== undefined)
+          throw new Error("--continue-file given more than once");
         continuationFile = value;
       }
       continue;
@@ -106,8 +113,12 @@ function parseNavigateArgs(raw: string): NavigateArgs {
 
 export default function navigateTreeExtension(pi: ExtensionAPI): void {
   pi.registerCommand("navigate-tree", {
-    description: "Navigate the agent's own conversation tree after the current run settles.",
-    handler: async (raw: string, ctx: ExtensionCommandContext): Promise<void> => {
+    description:
+      "Navigate the agent's own conversation tree after the current run settles.",
+    handler: async (
+      raw: string,
+      ctx: ExtensionCommandContext,
+    ): Promise<void> => {
       const parsed = parseNavigateArgs(raw);
       const { targetId, label, continuationFile } = parsed;
 
@@ -147,7 +158,10 @@ export default function navigateTreeExtension(pi: ExtensionAPI): void {
           // was replaced (the best-effort lifecycle case) the report is silently
           // dropped rather than escaping as an unhandled rejection.
           try {
-            ctx.ui.notify(`navigate-tree failed: ${err instanceof Error ? err.message : String(err)}`, "error");
+            ctx.ui.notify(
+              `navigate-tree failed: ${err instanceof Error ? err.message : String(err)}`,
+              "error",
+            );
           } catch {
             // Session no longer active; nothing left to report to.
           }

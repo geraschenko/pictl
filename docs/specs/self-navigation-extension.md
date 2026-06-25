@@ -44,7 +44,7 @@ we do **not** add any deferral/continuation parameters to that RPC.
 1. **The request must be accepted while the agent is mid-turn.** When the agent
    runs `pictl prompt "/navigate-tree …"`, its own turn is streaming. Extension
    commands invoked via `prompt` execute **inline even during streaming**: pi's
-   `AgentSession.prompt` runs `_tryExecuteExtensionCommand` *before* the
+   `AgentSession.prompt` runs `_tryExecuteExtensionCommand` _before_ the
    `isStreaming` queue check (`core/agent-session.ts:1011-1015` before `:1048`), so
    the command handler runs immediately. A direct `navigate_tree` RPC would instead
    be rejected by the streaming guard.
@@ -66,14 +66,14 @@ we do **not** add any deferral/continuation parameters to that RPC.
 
 - `targetId` (positional, required): an entry id from `pictl get-tree` /
   `pictl get-entries`. Semantics are inherited from `navigateTree`: a user /
-  custom message target rewinds to *before* it; any other entry becomes the new
+  custom message target rewinds to _before_ it; any other entry becomes the new
   leaf.
 - `--label <str>`: label passed through to `navigateTree`'s `label`. **Note:** with
   no summary entry, `navigateTree` applies the label to `targetId` itself
   (`core/agent-session.ts:2889`: "Attach label to target entry when not
   summarizing"), **not** to the resulting leaf. For a non-user/custom target these
   coincide (`newLeafId === targetId`); for a user/custom-message target the new leaf
-  is the target's *parent*, so the label lands on the rewound-before message, not
+  is the target's _parent_, so the label lands on the rewound-before message, not
   the leaf.
 - `--continue <rest-of-line>`: after a successful (non-cancelled) navigation, send
   this as a user message to start a fresh turn on the new branch. The **first
@@ -83,7 +83,7 @@ we do **not** add any deferral/continuation parameters to that RPC.
   rewind and go idle.
 - `--continue-file <path>`: alternative to `--continue`; the file's contents are
   used as the continuation text. `--continue` and `--continue-file` are mutually
-  exclusive — supplying both (i.e. a `--continue-file` token *before* a `--continue`
+  exclusive — supplying both (i.e. a `--continue-file` token _before_ a `--continue`
   token) is a parse error.
 
 `navOptions` passed to `ctx.navigateTree` is exactly `{ label }` (omitted when no
@@ -98,8 +98,8 @@ later if needed — see Non-goals and IMPLEMENTATION IDEAS.)
 
 - The command is accepted immediately: the handler returns **before** navigating.
   Because pi treats a handled extension command as a successful prompt, the agent's
-  `pictl prompt` call reports success as soon as the command is accepted — *not*
-  when navigation completes, and (see Error reporting) *regardless of* whether the
+  `pictl prompt` call reports success as soon as the command is accepted — _not_
+  when navigation completes, and (see Error reporting) _regardless of_ whether the
   handler later detects an error.
 - Navigation fires once the agent's run has finished streaming.
 - **Under `waitForSettled` (the eventual target):** any follow-ups queued meanwhile
@@ -263,7 +263,7 @@ sendUserMessage(content: string | (TextContent | ImageContent)[], options?: { de
 - **Parse errors** (missing `targetId`; a `--continue-file` token before a
   `--continue` token) and an **unreadable `--continue-file`**: detected in the
   handler **before detaching**, so navigation never starts. The handler throws; pi
-  catches it in `_tryExecuteExtensionCommand` and emits an extension *command-error*
+  catches it in `_tryExecuteExtensionCommand` and emits an extension _command-error_
   event (`core/agent-session.ts:1176-1181`) — it does **not** fail the agent's
   `pictl prompt` call, which still reports success. Reading `--continue-file` in the
   handler (not the detached task) keeps these failures pre-navigation and surfaced
@@ -291,7 +291,7 @@ sendUserMessage(content: string | (TextContent | ImageContent)[], options?: { de
   `pictl prompt` (slash/skill/template expansion, `source: "rpc"`) is explicitly
   out of scope for this spec.
 - **No `--summarize` / `--custom-instructions` / `--replace-instructions`.** The
-  continuation message *is* the agent's summary, so pi's auto branch-summary is not
+  continuation message _is_ the agent's summary, so pi's auto branch-summary is not
   exposed by this command. (Only `--label` of the `navigateTree` option family is
   surfaced.)
 - **No guardrail policy** (e.g. requiring a note before self-navigation). The
@@ -317,7 +317,7 @@ All line numbers are in `packages/coding-agent/src/` of the pi repo.
   are out of band.
 - **ctx stays valid after the handler returns.** `core/extensions/runner.ts`'s
   `assertActive()` (`:510-519`) throws only once `staleMessage` is set, and that
-  happens **only** on session *replacement/dispose* (`newSession` / `fork` /
+  happens **only** on session _replacement/dispose_ (`newSession` / `fork` /
   `switchSession` / `reload`; runner/loader invalidation, `core/extensions/loader.ts:129`).
   `navigateTree` does **not** invalidate the ctx, so the detached `navigateTree` →
   `sendUserMessage` chain is safe. We do not need to register an
@@ -355,7 +355,7 @@ All line numbers are in `packages/coding-agent/src/` of the pi repo.
 ## `waitForIdle` now, `waitForSettled` later
 
 `ctx.waitForIdle()` resolves at the end of a **single** agent run. During an
-auto-retry it resolves *during the exponential backoff*, before the retry runs, and
+auto-retry it resolves _during the exponential backoff_, before the retry runs, and
 during auto-compaction / queued-continuation drives it can resolve before the
 session is truly done. Navigating there races the session's continuation and can
 corrupt state. The correct signal is `ctx.waitForSettled()`, which resolves only
@@ -371,7 +371,7 @@ consumer for `waitForSettled`.
 
 ## Arg parsing
 
-`parseNavigateArgs(raw)` operates on the full string after `/navigate-tree `, with
+`parseNavigateArgs(raw)` operates on the full string after `/navigate-tree`, with
 **token-level** (not substring) recognition. The `raw` it receives is verbatim:
 `_tryExecuteExtensionCommand` slices `text.slice(spaceIndex + 1)` and does **not**
 trim it for extension commands (`dist/core/agent-session.js:842-843`; skill commands
@@ -391,7 +391,7 @@ continuation survives to the parser.
    - a continuation flag present but its text empty/whitespace-only after trimming.
 
 The empty-continuation check has two sites: `parseNavigateArgs` rejects an empty
-`--continue` directly; the handler rejects an empty `--continue-file` *after* reading
+`--continue` directly; the handler rejects an empty `--continue-file` _after_ reading
 it. Both are pre-navigation (the handler reads the file before detaching) and throw,
 so navigation never starts. `--continue-file` is read via `node:fs/promises`
 `readFile`, so a bad path is caught pre-navigation too and the captured text is
@@ -408,7 +408,7 @@ agent's `pictl prompt` call or returns into the agent's conversation:
 
 1. **Pre-detach (handler) errors** — parse errors, unreadable `--continue-file`. The
    handler throws; pi catches it and emits a command extension-error event
-   (`core/agent-session.ts:1176-1181`). Kept in the handler so they fire *before*
+   (`core/agent-session.ts:1176-1181`). Kept in the handler so they fire _before_
    any navigation and surface promptly.
 2. **Detached navigation errors** — `ctx.navigateTree` rejecting. Caught by the
    detached task's `try/catch` and reported via `ctx.ui.notify(message, "error")`,
@@ -437,7 +437,7 @@ Auto-installing it into pictl-spawned agents is deferred to a follow-up spec.
 
 ## Recovery-packet / provenance discipline (agent-facing guidance, not extension logic)
 
-`navigate-tree` rolls back only the *conversation* branch, not the filesystem, git,
+`navigate-tree` rolls back only the _conversation_ branch, not the filesystem, git,
 processes, or external effects (see `docs/thoughts/metacognition-with-pictl.md`).
 The continuation becomes the agent's memory, so before a high-risk self-navigation
 the agent should record a recovery packet (entry to return to, user
@@ -493,7 +493,7 @@ focus on omissions, unsafe failure modes, and overconfident claims, then iterate
   `ctx.sendUserMessage` (verbatim, no expansion). Simplest correct option;
   full-expansion can be revisited later if needed.
 - **Command surface trimmed.** Keep `--label`; drop `--summarize`,
-  `--custom-instructions`, `--replace-instructions` — the continuation message *is*
+  `--custom-instructions`, `--replace-instructions` — the continuation message _is_
   the agent's summary, so pi's auto branch-summary is not exposed.
 - **`--continue` is rest-of-line**, with `--continue-file <path>` as an optional
   alternative (avoids quoting fragility).
@@ -580,7 +580,7 @@ focus on omissions, unsafe failure modes, and overconfident claims, then iterate
 - **Detached-task lifecycle made explicit (high-confidence).** Added a best-effort
   caveat: the free-floating promise is lost on process exit / daemon shutdown /
   session replacement before navigation; no persistence/resume.
-- **Arg grammar tightened (speculative).** Switched from substring `--continue `
+- **Arg grammar tightened (speculative).** Switched from substring `--continue`
   detection to token-level recognition; defined the `--continue`/`--continue-file`
   conflict precisely; flagged empty-continuation as an open item.
 - **Stale pi paths fixed.** All references now use the real `core/…` / `modes/…`
@@ -589,4 +589,4 @@ focus on omissions, unsafe failure modes, and overconfident claims, then iterate
   `assertActive` (safe post-handler), verbatim `sendUserMessage`, label-without-
   summarize, rpc-mode `notify` emits.
 
-*Work log entries go here*
+_Work log entries go here_

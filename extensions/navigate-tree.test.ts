@@ -30,15 +30,25 @@ test("--label before targetId", () => {
 });
 
 test("--continue consumes the rest of the line verbatim", () => {
-  const parsed = parseNavigateArgs("abc --continue Resume implementing X using the summary above.");
+  const parsed = parseNavigateArgs(
+    "abc --continue Resume implementing X using the summary above.",
+  );
   assert.equal(parsed.targetId, "abc");
-  assert.equal(parsed.continuation, "Resume implementing X using the summary above.");
+  assert.equal(
+    parsed.continuation,
+    "Resume implementing X using the summary above.",
+  );
 });
 
 test("--continue preserves embedded spaces, quotes, and flag-looking text", () => {
-  const parsed = parseNavigateArgs(`abc --continue use "quoted" text /slash --label not-a-flag`);
+  const parsed = parseNavigateArgs(
+    `abc --continue use "quoted" text /slash --label not-a-flag`,
+  );
   assert.equal(parsed.targetId, "abc");
-  assert.equal(parsed.continuation, `use "quoted" text /slash --label not-a-flag`);
+  assert.equal(
+    parsed.continuation,
+    `use "quoted" text /slash --label not-a-flag`,
+  );
   assert.equal(parsed.label, undefined);
 });
 
@@ -74,21 +84,39 @@ test("--continue-file after --continue is literal continuation text, not a flag"
 });
 
 test("empty / whitespace-only --continue is an error", () => {
-  assert.throws(() => parseNavigateArgs("abc --continue"), /non-empty continuation/);
-  assert.throws(() => parseNavigateArgs("abc --continue    "), /non-empty continuation/);
+  assert.throws(
+    () => parseNavigateArgs("abc --continue"),
+    /non-empty continuation/,
+  );
+  assert.throws(
+    () => parseNavigateArgs("abc --continue    "),
+    /non-empty continuation/,
+  );
 });
 
 test("unknown flag fails closed", () => {
-  assert.throws(() => parseNavigateArgs("abc --summarize"), /unknown flag: --summarize/);
+  assert.throws(
+    () => parseNavigateArgs("abc --summarize"),
+    /unknown flag: --summarize/,
+  );
 });
 
 test("flag missing its value fails closed", () => {
-  assert.throws(() => parseNavigateArgs("abc --label"), /--label requires a value/);
-  assert.throws(() => parseNavigateArgs("abc --continue-file"), /--continue-file requires a value/);
+  assert.throws(
+    () => parseNavigateArgs("abc --label"),
+    /--label requires a value/,
+  );
+  assert.throws(
+    () => parseNavigateArgs("abc --continue-file"),
+    /--continue-file requires a value/,
+  );
 });
 
 test("duplicate flag fails closed", () => {
-  assert.throws(() => parseNavigateArgs("abc --label a --label b"), /--label given more than once/);
+  assert.throws(
+    () => parseNavigateArgs("abc --label a --label b"),
+    /--label given more than once/,
+  );
 });
 
 test("a second positional argument fails closed", () => {
