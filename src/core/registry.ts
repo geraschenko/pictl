@@ -38,7 +38,7 @@ export interface AgentRecord {
 }
 
 export function pictlBaseDir(): string {
-  return process.env.PICTL_DIR ?? join(homedir(), ".pi", "agents");
+  return process.env.PICTL_DIR ?? join(homedir(), ".config", "pictl");
 }
 
 /** The agent's own directory within the registry. */

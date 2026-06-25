@@ -1,3 +1,7 @@
+I (human Anton) think the contents of this doc are correct, but it's bot-generated, pretty long, and I've only given it a cursory review, so watch out. You probably don't care to read this, except to know that `pictl` uses a tweaked version of pi that supports multiple simultaneous connections to the same session.
+
+---
+
 # pi modifications
 
 Purpose: explain the temporary pi fork changes that pictl depends on. This document is for future pictl contributors and for possible upstream pi review. It is **not** normal pictl user documentation.
@@ -184,6 +188,8 @@ Why pictl cares:
 - the TUI remains the single place where rich extension UI is displayed and answered.
 
 ## Durable session visibility: `get_entries` and `get_tree`
+
+(Upstream PR: https://github.com/earendil-works/pi/pull/6078)
 
 Existing RPC commands exposed current conversation messages, but not the underlying session entry tree.
 

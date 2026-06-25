@@ -21,39 +21,14 @@ There is no central pictl daemon. Each agent has its own daemon process.
 
 ## Spawn flow
 
-At a high level, `pictl spawn` does this:
+`pictl spawn` runs a daemon process which does these things:
+* creates `$PICTL_DIR/<agent-id>/`, the "registry entry" for this agent
+* runs `pi --rpc-socket <agent-dir>/pi.sock` inside a PTY
+* serves `<agent-dir>/tty.sock`, which allows interactive attaching with `pictl attach`
+* maintains terminal screen state for the PTY (resizes to the minimim dimensions of all attached clients)
+* owns all metadata in `<agent-dir>/agent.json`, keeping it up to date (this is mainly just the mapping between agent id and pi session id, and the PIDs of pi and the daemon itself)
 
-```text
-pictl spawn
-  -> create $PICTL_DIR/<agent-id>/
-  -> launch pictl _daemon for that agent
-       -> allocate a PTY
-       -> run pi --rpc-socket <agent-dir>/pi.sock inside the PTY
-       -> maintain terminal screen state
-       -> serve <agent-dir>/tty.sock
-       -> write daemon-owned metadata to agent.json
-```
-
-The user sees only the agent id. The implementation detail is that the agent is not just a pi process: it is a pi process plus a daemon that owns the PTY and attach machinery.
-
-## Why the daemon exists
-
-pi itself owns the interactive TUI and the semantic RPC protocol. That is not enough for detached, reattachable operation.
-
-The daemon exists because someone must hold the PTY master while no human terminal is attached. Without that process, the interactive pi TUI would be tied to the terminal that launched it. The daemon also needs to keep enough terminal state to let a later `pictl attach` render the current screen instead of starting from a blank terminal.
-
-Daemon responsibilities:
-
-- allocate and hold the PTY master;
-- run pi in that PTY;
-- pass `--rpc-socket <agent-dir>/pi.sock` to pi;
-- keep a headless terminal model of the PTY output;
-- serve attach clients on `tty.sock`;
-- manage terminal resizing across attach clients;
-- write daemon-owned lifecycle metadata to `agent.json`;
-- clean up sockets on shutdown.
-
-This is roughly the same category of problem solved by tmux or persistent IDE terminals: a background process owns the terminal session, and frontends can connect and disconnect.
+The daemon is solving roughly the same category of problem as tmux or persistent IDE terminals: a background process owns the terminal session, and frontends can connect and disconnect.
 
 ## The two sockets
 
@@ -92,17 +67,15 @@ The intention is that `pi.sock` and `tty.sock` are the stable integration points
 The project is still early, so details may change, but the architectural direction is:
 
 - for semantic control over agents, prefer `pictl` as the shell SDK over `pi.sock`;
-- for terminal attach, clients that need native terminal integration should speak `tty.sock` directly.
+- for terminal attach, clients that need native terminal integration should speak to `tty.sock` directly.
 
-The distinction matters. pictl is meant to expose the full useful interface of `pi.sock` while centralizing registry lookup, daemon spawning, dormant-agent revival, conversion from events to durable session-entry streams, and wait/stop-condition logic. Other language SDKs for semantic agent control may simply wrap pictl to get a native feel in that language.
+pictl is meant to expose the full useful interface of `pi.sock` while centralizing registry lookup, daemon spawning, dormant-agent revival, conversion from events to durable session-entry streams, and wait/stop-condition logic. Other language SDKs for semantic agent control may simply wrap pictl to get a native feel in that language.
 
-By contrast, a rich terminal client cannot faithfully treat `pictl attach` as a reusable bidirectional byte-stream API. `pictl attach` assumes it owns a real local TTY: it switches raw mode, renders to stdout, handles resize signals, implements a detach key, restores terminal state, and exits the process on completion. A client could spawn it inside a PTY, but that is controlling another terminal frontend, not speaking the attach protocol. Native terminal clients should use `tty.sock`.
+However, a rich terminal client cannot faithfully treat `pictl attach` as a reusable bidirectional byte-stream API. `pictl attach` assumes it owns a real local TTY: it switches raw mode, renders to stdout, handles resize signals, implements a detach key, restores terminal state, and exits the process on completion. A client could spawn it inside a PTY, but that is controlling another terminal frontend, not speaking the attach protocol. Native terminal clients should use `tty.sock`.
 
 ## `PICTL_DIR` as the registry
 
-pictl persists agent state under `PICTL_DIR`, defaulting to a directory under the user's pi state directory.
-
-The registry is the directory tree itself:
+pictl persists agent state under `PICTL_DIR`, defaulting to `~/.config/pictl`. The registry is the directory tree itself:
 
 ```text
 $PICTL_DIR/
@@ -135,36 +108,28 @@ An agent is more than a running process. It is the agent directory plus its reco
 
 Important states:
 
-- **running**: daemon and pi process exist; sockets should be reachable;
-- **dormant**: agent directory exists, but the daemon/pi process is gone;
-- **archived**: dormant or stopped agent hidden from normal `pictl list`;
+- **idle/streaming**: daemon and pi processes are running; sockets should be reachable.
+- **dormant**: agent directory exists, but the daemon/pi processes are gone.
+- **archived**: dormant and hidden from normal `pictl list` (but visible with `--all`). 
 - **purged**: agent directory removed permanently.
 
-Commands that need `pi.sock` can revive a dormant agent by launching a new daemon using the metadata in `agent.json`. Inspection commands such as `list`, `status`, and `gc` should not revive agents as a side effect.
-
-Revival is serialized per agent so two clients do not race to start separate daemons for the same directory.
+For dormant/archived agents, running any command that requires interacting with `pi.sock` or `tty.sock` will automatically respawn the pi and daemon processes, returning them to idle/streaming status. Revival is serialized per agent so two clients do not race to start separate daemons for the same directory. Same for archiving and purging.
 
 ## pictl as the shell SDK
 
-pictl is not just an end-user CLI. It is also the language-neutral shell interface to the agent system.
+pictl is meant to be the language-neutral shell interface to this system.
 
-That means:
-
-- humans can use it directly;
-- scripts can shell out to it;
-- agents can learn it as a tool;
+- humans can use it directly
+- scripts can use it
+- agents can use it to spawn or discover other agents, communicate with them, and send RPC commands. There's a draft skill in [skills/pictl](../skills/pictl/). Note that allowing and agent to call `navigate-tree` on _itself_ requires special attention; see [extensions/navigate-tree.ts](../extensions/navigate-tree.ts) if you want to do that.
 - richer SDKs can be layered on top later;
-- direct `tty.sock` clients can bypass it when they need native terminal integration.
+- direct `tty.sock` clients can bypass it when they need native terminal integration. I have a ratatui-based TUI app that I'd like to use pictl, so expect a rust client for `tty.sock` soon.
 
-The design goal is that anything a human can do by hand should have a corresponding scriptable operation, without making the underlying agent less interactive or less attachable.
+The design goal is that anything a human can do by hand should have a corresponding scriptable operation, without making the underlying agent less interactive or less attachable. Absolutely every pi RPC command has a corresponding pictl subcommand.
 
-## Open questions / future reference material
-
-This document should eventually link to more specific references rather than contain every detail itself:
+## Reference material
 
 - exact `tty.sock` frame protocol: [`src/core/tty-protocol.ts`](../src/core/tty-protocol.ts);
 - exact `agent.json` schema: [`src/core/registry.ts`](../src/core/registry.ts);
 - pi RPC command reference: [`rpc-types.ts`](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/src/modes/rpc/rpc-types.ts);
 - session-entry cursor semantics: entry ids within append-only pi session files are suitable durable cursors;
-- examples of direct `tty.sock` clients;
-- how version compatibility is negotiated or checked.

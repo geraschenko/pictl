@@ -2,7 +2,7 @@
  * `pictl _daemon` — the per-agent daemon. One per agent. It owns the PTY that pi
  * runs in, maintains detached screen state via @xterm/headless, and is the
  * sole writer of agent.json. It connects to its own pi.sock as a client to
- * track session replacements (never polling get_state per event).
+ * track session replacements.
  */
 
 import { closeSync, writeSync } from "node:fs";
