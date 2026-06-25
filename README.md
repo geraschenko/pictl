@@ -22,8 +22,9 @@ pictl --version
 export PICTL_TARGET="$(pictl spawn)"
 echo "$PICTL_TARGET"
 ```
-* If you don't set `$PICTL_TARGET`, commands that require a target need `--target PREFIX` or `-t PREFIX`. Any unique prefix of the agent id is accepted.
-* If you want to pass extra args to `pi`, put them after `--` when you spawn the agent, like this: `pictl spawn -- -e my_extension.ts`
+
+- If you don't set `$PICTL_TARGET`, commands that require a target need `--target PREFIX` or `-t PREFIX`. Any unique prefix of the agent id is accepted.
+- If you want to pass extra args to `pi`, put them after `--` when you spawn the agent, like this: `pictl spawn -- -e my_extension.ts`
 
 **Attach to the TUI** in another terminal if you want to follow along in "regular pi view" (recommended).
 
@@ -31,8 +32,8 @@ echo "$PICTL_TARGET"
 pictl attach --target <PREFIX_OF_PICTL_TARGET>
 ```
 
-* You can detach with `ctrl+]`. Detaching does not stop the agent.
-* You can also exit with `ctrl+d` as usual, which _does_ stop the agent since it forwards the exit command to the pi process. But it'll be automatically revived when any commands are sent to it. When it's revived, the same cwd and arguments to pi are used that were used when it was first created.
+- You can detach with `ctrl+]`. Detaching does not stop the agent.
+- You can also exit with `ctrl+d` as usual, which _does_ stop the agent since it forwards the exit command to the pi process. But it'll be automatically revived when any commands are sent to it. When it's revived, the same cwd and arguments to pi are used that were used when it was first created.
 
 **Send commands** to the agent with `prompt` and pi's other RPC commands. Do this from the first terminal (or wherever you've set `PICTL_TARGET`):
 
@@ -48,8 +49,8 @@ pictl get-entries
 pictl navigate-tree 8c5cb595
 ```
 
-* For all available RPC commands, see pi's [`rpc-types.ts`](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/src/modes/rpc/rpc-types.ts), or run `pictl -H`. The tweaked version of pi used by `pictl` also includes the commands `get-entries`, `get-tree`, and `navigate-tree`, which stock pi does not.
-* The help also includes details about subcommand arguments, e.g. `pictl set-model -H` to learn about arguments of `set-model`.
+- For all available RPC commands, see pi's [`rpc-types.ts`](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/src/modes/rpc/rpc-types.ts), or run `pictl -H`. The tweaked version of pi used by `pictl` also includes the commands `get-entries`, `get-tree`, and `navigate-tree`, which stock pi does not.
+- The help also includes details about subcommand arguments, e.g. `pictl set-model -H` to learn about arguments of `set-model`.
 
 **Manage your agents**
 
@@ -63,8 +64,8 @@ pictl archive -t <PREFIX_OF_PICTL_TARGET>
 pictl purge -t <PREFIX_OF_PICTL_TARGET>
 ```
 
-* The actual session messages live in your `~/.pi` as usual.
-* `pictl`'s agent registry lives in your per-OS user data dir (`~/.local/share/pictl` on Linux), or wherever `$PICTL_DIR` points if you set it.
+- The actual session messages live in your `~/.pi` as usual.
+- `pictl`'s agent registry lives in your per-OS user data dir (`~/.local/share/pictl` on Linux), or wherever `$PICTL_DIR` points if you set it.
 
 **Setup tab completion** with `pictl completion install` (bash only).
 

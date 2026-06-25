@@ -22,11 +22,12 @@ There is no central pictl daemon. Each agent has its own daemon process.
 ## Spawn flow
 
 `pictl spawn` runs a daemon process which does these things:
-* creates `$PICTL_DIR/<agent-id>/`, the "registry entry" for this agent
-* runs `pi --rpc-socket <agent-dir>/pi.sock` inside a PTY
-* serves `<agent-dir>/tty.sock`, which allows interactive attaching with `pictl attach`
-* maintains terminal screen state for the PTY (resizes to the minimim dimensions of all attached clients)
-* owns all metadata in `<agent-dir>/agent.json`, keeping it up to date (this is mainly just the mapping between agent id and pi session id, and the PIDs of pi and the daemon itself)
+
+- creates `$PICTL_DIR/<agent-id>/`, the "registry entry" for this agent
+- runs `pi --rpc-socket <agent-dir>/pi.sock` inside a PTY
+- serves `<agent-dir>/tty.sock`, which allows interactive attaching with `pictl attach`
+- maintains terminal screen state for the PTY (resizes to the minimim dimensions of all attached clients)
+- owns all metadata in `<agent-dir>/agent.json`, keeping it up to date (this is mainly just the mapping between agent id and pi session id, and the PIDs of pi and the daemon itself)
 
 The daemon is solving roughly the same category of problem as tmux or persistent IDE terminals: a background process owns the terminal session, and frontends can connect and disconnect.
 
@@ -110,7 +111,7 @@ Important states:
 
 - **idle/streaming**: daemon and pi processes are running; sockets should be reachable.
 - **dormant**: agent directory exists, but the daemon/pi processes are gone.
-- **archived**: dormant and hidden from normal `pictl list` (but visible with `--all`). 
+- **archived**: dormant and hidden from normal `pictl list` (but visible with `--all`).
 - **purged**: agent directory removed permanently.
 
 For dormant/archived agents, running any command that requires interacting with `pi.sock` or `tty.sock` will automatically respawn the pi and daemon processes, returning them to idle/streaming status. Revival is serialized per agent so two clients do not race to start separate daemons for the same directory. Same for archiving and purging.
