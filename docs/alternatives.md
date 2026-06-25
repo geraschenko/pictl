@@ -1,3 +1,5 @@
+Hey, you're not supposed to be reading this; it's unfinished. But if you care about alternatives, you may want to look at [agent-harness-landscape.md](agent-harness-landscape.md) (AI-generated overview of the ecosystem).
+
 # alternatives
 
 Purpose: collect research notes on other agent orchestration/control systems and compare assumptions. This is a **preliminary sketch**, not authoritative documentation.

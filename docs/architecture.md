@@ -121,11 +121,11 @@ pictl is meant to be the language-neutral shell interface to this system.
 
 - humans can use it directly
 - scripts can use it
-- agents can use it to spawn or discover other agents, communicate with them, and send RPC commands. There's a draft skill in [skills/pictl](../skills/pictl/). Note that allowing and agent to call `navigate-tree` on _itself_ requires special attention; see [extensions/navigate-tree.ts](../extensions/navigate-tree.ts) if you want to do that.
+- agents can use it to spawn or discover other agents, communicate with them, and send RPC commands. There's a draft skill in [skills/pictl](../skills/pictl/). Note that allowing an agent to call `navigate-tree` on _itself_ requires special attention; see [extensions/navigate-tree.ts](../extensions/navigate-tree.ts) if you want to do that.
 - richer SDKs can be layered on top later;
 - direct `tty.sock` clients can bypass it when they need native terminal integration. I have a ratatui-based TUI app that I'd like to use pictl, so expect a rust client for `tty.sock` soon.
 
-The design goal is that anything a human can do by hand should have a corresponding scriptable operation, without making the underlying agent less interactive or less attachable. Absolutely every pi RPC command has a corresponding pictl subcommand.
+The design goal is that anything a human can do by hand should have a corresponding scriptable operation, without making the underlying agent less interactive or less attachable. Every pi RPC command has a corresponding pictl subcommand.
 
 ## Reference material
 

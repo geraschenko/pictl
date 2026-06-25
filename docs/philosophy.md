@@ -1,3 +1,5 @@
+Hey, you're not supposed to be reading this; it's unfinished.
+
 # philosophy
 
 Purpose: develop the broader argument for pictl. This is a **preliminary sketch**, not authoritative documentation.

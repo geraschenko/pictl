@@ -70,6 +70,8 @@ pictl purge -t <PREFIX_OF_PICTL_TARGET>
 
 ## `pictl format`, `pictl tail`
 
+TODO: explain these
+
 ## Further reading
 
 These documents are meant to answer different questions:
