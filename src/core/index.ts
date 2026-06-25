@@ -43,15 +43,14 @@ export {
 export {
   streamTail,
   streamPrompt,
+  promptDetached,
   parseStreamOutputType,
-  parsePromptType,
   parseStreamUntil,
   normalizeFollowUntil,
   STREAM_OUTPUT_TYPES,
-  PROMPT_TYPES,
   STREAM_UNTIL_USAGE,
+  type RecordWriter,
   type StreamOutputType,
-  type PromptType,
   type StreamUntil,
   type PromptStreamOptions,
 } from "./streaming.ts";

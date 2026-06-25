@@ -6,6 +6,8 @@ import { createServer, type Server, type Socket } from "node:net";
 import { test } from "node:test";
 import { app } from "./app.ts";
 import { runCliApp } from "./cli.ts";
+import type { MessageStreamRecord } from "./stream-types.ts";
+import { formatMessageRecords } from "../format/messages.ts";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -189,6 +191,14 @@ async function withFakePiSocket<T>(
                 pendingMessageCount: 0,
               },
             });
+          } else if (request.type === "get_messages") {
+            writeJson(socket, {
+              id,
+              type: "response",
+              command: "get_messages",
+              success: true,
+              data: { messages: entries.map((entry) => entry.message) },
+            });
           } else if (request.type === "get_entries") {
             const since = request.since as string | undefined;
             const sinceIndex =
@@ -232,7 +242,7 @@ test("prompt streams assistant response and final cursor after prompt completion
       const process = fakeProcess({ PICTL_TARGET: agentId });
       await runCliApp(
         app,
-        ["prompt", "What is the name of the parent directory?"],
+        ["prompt", "--json", "What is the name of the parent directory?"],
         process.proc,
       );
 
@@ -276,7 +286,7 @@ test("prompt entries stream only includes entry records", async () => {
       const process = fakeProcess({ PICTL_TARGET: agentId });
       await runCliApp(
         app,
-        ["prompt", "--type", "entries", "What is the name?"],
+        ["prompt", "--type", "entries", "--json", "What is the name?"],
         process.proc,
       );
 
@@ -321,13 +331,107 @@ test("streaming flag validation rejects ambiguous or unsupported combinations", 
     const detachTimeout = fakeProcess({ PICTL_TARGET: agentId });
     await runCliApp(
       app,
-      ["prompt", "--type", "detach", "--timeout", "1", "hello"],
+      ["prompt", "--detach", "--timeout", "1", "hello"],
       detachTimeout.proc,
     );
     assert.equal(detachTimeout.proc.exitCode, 2);
     assert.match(
       detachTimeout.stderr,
-      /--type detach cannot be combined with --timeout/,
+      /--detach cannot be combined with --timeout/,
     );
+
+    const detachUntil = fakeProcess({ PICTL_TARGET: agentId });
+    await runCliApp(
+      app,
+      ["prompt", "--detach", "--until", "idle", "hello"],
+      detachUntil.proc,
+    );
+    assert.equal(detachUntil.proc.exitCode, 2);
+    assert.match(
+      detachUntil.stderr,
+      /--detach cannot be combined with --until/,
+    );
+  });
+});
+
+test("prompt prints formatted messages and a cursor by default", async () => {
+  await withFakeRegistry(async (agentId, agentDir) => {
+    await withFakePiSocket(agentDir, async () => {
+      const process = fakeProcess({ PICTL_TARGET: agentId });
+      await runCliApp(app, ["prompt", "What is the name?"], process.proc);
+
+      assert.equal(process.proc.exitCode, 0);
+      assert.equal(process.stderr, "");
+      assert.equal(
+        process.stdout,
+        "== user ==\nWhat is the name of the parent directory?\n\n" +
+          "== assistant ==\n.worktrees\n\n" +
+          "[cursor: assistant-entry]\n",
+      );
+    });
+  });
+});
+
+test("prompt default formatted output equals piping --json through pictl format", async () => {
+  await withFakeRegistry(async (agentId, agentDir) => {
+    const jsonProc = fakeProcess({ PICTL_TARGET: agentId });
+    await withFakePiSocket(agentDir, async () => {
+      await runCliApp(app, ["prompt", "--json", "hi"], jsonProc.proc);
+    });
+    const formattedProc = fakeProcess({ PICTL_TARGET: agentId });
+    await withFakePiSocket(agentDir, async () => {
+      await runCliApp(app, ["prompt", "hi"], formattedProc.proc);
+    });
+
+    const records = jsonlLines(
+      jsonProc.stdout,
+    ) as unknown as MessageStreamRecord[];
+    assert.equal(formattedProc.stdout, formatMessageRecords(records));
+  });
+});
+
+test("prompt --type entries prints formatted entry lines by default", async () => {
+  await withFakeRegistry(async (agentId, agentDir) => {
+    await withFakePiSocket(agentDir, async () => {
+      const process = fakeProcess({ PICTL_TARGET: agentId });
+      await runCliApp(
+        app,
+        ["prompt", "--type", "entries", "hi"],
+        process.proc,
+      );
+
+      assert.equal(process.proc.exitCode, 0);
+      assert.equal(process.stderr, "");
+      // Formatted (not JSON): a single line `<id> <role> <summary>`.
+      assert.match(process.stdout, /^assistant-entry assistant\s+\.worktrees\n$/);
+    });
+  });
+});
+
+test("prompt --detach sends the prompt and returns without streaming", async () => {
+  await withFakeRegistry(async (agentId, agentDir) => {
+    await withFakePiSocket(agentDir, async () => {
+      const process = fakeProcess({ PICTL_TARGET: agentId });
+      await runCliApp(app, ["prompt", "--detach", "hi"], process.proc);
+
+      assert.equal(process.proc.exitCode, 0);
+      assert.equal(process.stderr, "");
+      assert.equal(process.stdout, "");
+    });
+  });
+});
+
+test("tail prints formatted messages by default", async () => {
+  await withFakeRegistry(async (agentId, agentDir) => {
+    await withFakePiSocket(agentDir, async () => {
+      const process = fakeProcess({ PICTL_TARGET: agentId });
+      await runCliApp(app, ["tail", "--until", "idle"], process.proc);
+
+      assert.equal(process.proc.exitCode, 0);
+      assert.equal(process.stderr, "");
+      // Historical user message, then the final cursor; formatted, not JSON.
+      assert.match(process.stdout, /^== user ==\n/);
+      assert.match(process.stdout, /\[cursor: user-entry\]\n$/);
+    });
   });
 });

@@ -1,13 +1,15 @@
 /*
  * `pictl tail --target <agent> [--type messages|entries|raw] [--since <entry-id>]
- * [-n <count>] [--follow|-f] [--until <cond>]` streams JSONL activity from one
- * agent and emits a final `pictl_cursor` record for bounded streams.
+ * [-n <count>] [--follow|-f] [--until <cond>] [--json]` streams activity from
+ * one agent and emits a final `pictl_cursor` record for bounded streams.
  *
- * Message mode is the default. It prints historical message-shaped records,
- * then optionally follows append-only message/control events. Entry mode drains
- * real session entries with `get_entries --since <cursor>` on socket wakeups.
- * Raw mode prints future socket records directly; it has no historical backlog,
- * so `-n` and `--since` do not apply.
+ * Output is human-readable by default; `--json` emits JSONL (for piping into
+ * `pictl format`). Message mode is the default. It prints historical
+ * message-shaped records, then optionally follows append-only message/control
+ * events. Entry mode drains real session entries with `get_entries --since
+ * <cursor>` on socket wakeups. Raw mode prints future socket records directly
+ * (always as JSON); it has no historical backlog, so `-n` and `--since` do not
+ * apply.
  *
  * `--follow`/`-f` is sugar for `--until killed` and conflicts with explicit
  * `--until`. Finite `--until` conditions stop the stream, drain trailing output
@@ -32,6 +34,7 @@ import {
   STREAM_UNTIL_USAGE,
   type StreamOutputType,
 } from "./streaming.ts";
+import { makeRecordWriter } from "../format/record-writer.ts";
 import { UsageError } from "./util.ts";
 
 function parseLimit(input: string): number {
@@ -68,6 +71,7 @@ const tailFlags = {
     },
     "secs",
   ),
+  json: booleanFlag("Emit JSONL instead of formatted output"),
 };
 
 type TailFlags = InferFlags<typeof tailFlags>;
@@ -82,6 +86,7 @@ export async function tail(
   }
   await streamTail(this, {
     outputType,
+    writer: makeRecordWriter(this, outputType, flags.json),
     since: flags.since,
     limit: flags.n,
     until: normalizeFollowUntil({ follow: flags.follow, until: flags.until }),
@@ -91,7 +96,7 @@ export async function tail(
 
 const tailCommand = commandOneTarget<TailFlags>({
   common: true,
-  docs: { brief: "stream session activity as JSONL" },
+  docs: { brief: "stream session activity" },
   parameters: { flags: tailFlags, aliases: { f: "follow", n: "n" } },
   func: tail,
 });

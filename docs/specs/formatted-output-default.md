@@ -470,20 +470,38 @@ from the `format` surface.
 
 ### Tasks
 
-- [ ] `core/streaming.ts`: remove `PROMPT_TYPES`/`PromptType`/`parsePromptType`;
+- [x] `core/streaming.ts`: remove `PROMPT_TYPES`/`PromptType`/`parsePromptType`;
       rename `JsonlWriter` → `RecordWriter` (export); remove `StdoutJsonlWriter`
       and internal writer construction; add `writer` to `PromptStreamOptions` and
       `StreamOptions`; change `PromptStreamOptions.type` to `StreamOutputType`;
       add `buildPromptCommand`; add `promptDetached`; drop the detach branch in
       `streamPrompt`.
-- [ ] `src/format/record-writer.ts`: `StdoutJsonlWriter` (moved),
+- [x] `src/format/record-writer.ts`: `StdoutJsonlWriter` (moved),
       `FormattedMessageWriter`, `FormattedEntryWriter`, `makeRecordWriter`.
-- [ ] `core/rpc-commands.ts`: `prompt` flags (`--type` values, `-d/--detach`,
+- [x] `core/rpc-commands.ts`: `prompt` flags (`--type` values, `-d/--detach`,
       `--json`), detach branch, `makeRecordWriter` injection, brief.
-- [ ] `core/tail.ts`: `--json` flag, `makeRecordWriter` injection, brief/comment.
-- [ ] `core/index.ts`: drop `parsePromptType`/`PROMPT_TYPES`/`PromptType`; add
+- [x] `core/tail.ts`: `--json` flag, `makeRecordWriter` injection, brief/comment.
+- [x] `core/index.ts`: drop `parsePromptType`/`PROMPT_TYPES`/`PromptType`; add
       `RecordWriter`, `promptDetached` (stays format-free — no
       `makeRecordWriter` re-export).
-- [ ] Tests: update changed-default tests; add formatted/detach/parity tests.
-- [ ] Docs: README section; briefs; `--type` help string.
-- [ ] `npm run check && npm run lint && npm test` green.
+- [x] Tests: update changed-default tests; add formatted/detach/parity tests.
+- [x] Docs: README section; briefs; `--type` help string.
+- [x] `npm run check && npm run lint && npm test` green.
+
+### 2026-06-25 — implemented
+
+All tasks complete; `npm run check`, `npm run lint`, `npm test` (56/56) green.
+
+Notes from implementation (matched the spec; no design changes):
+
+- `streamPrompt`/`streamTail` now read `options.writer`; `buildPromptCommand`
+  de-duplicates the pi `prompt` RpcCommand construction shared with
+  `promptDetached`.
+- The `--detach` validation moved ahead of the `--type` branch in `prompt`, and
+  `streamingBehavior` normalization was hoisted so both the detach and stream
+  paths reuse it.
+- Test harness gained a `get_messages` handler on the fake pi socket — the prior
+  tests only exercised `prompt` (which uses message events), but the new
+  `tail` default-messages test drains historical messages via `get_messages`.
+- Added a byte-equality parity test: `prompt`'s default formatted output equals
+  its `--json` output parsed and run through `formatMessageRecords`.

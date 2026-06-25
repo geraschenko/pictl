@@ -69,9 +69,58 @@ pictl purge -t <PREFIX_OF_PICTL_TARGET>
 
 **Setup tab completion** with `pictl completion install` (bash only).
 
-## `pictl format`, `pictl tail`
+## Watching activity: `pictl prompt`, `pictl tail`, `pictl format`
 
-TODO: explain these
+`pictl prompt` and `pictl tail` both stream a live agent's activity. `prompt`
+sends a message and streams the resulting turn; `tail` streams an existing
+agent's activity without sending anything. Both print **human-readable,
+formatted output by default**.
+
+**Choose what to stream** with `--type`:
+
+- `--type messages` (default) — one block per message (and per control event
+  like compaction), the same rendering as `pictl format messages`.
+- `--type entries` — one line per session entry (`<id> <role> <summary>`), the
+  same rendering as `pictl format entries`.
+- `--type raw` — raw pi socket events, one JSON object per line. (`raw` is
+  inherently JSON, so `--json` is a no-op for it.)
+
+```sh
+pictl prompt "Say hi"          # formatted messages, then a final cursor
+pictl tail                     # formatted messages from a running agent
+pictl tail --type entries      # one line per entry
+pictl tail --type raw          # raw socket events
+```
+
+**Get machine-readable JSONL** with `--json`. This is exactly the output that
+older `pictl` versions printed by default, and it is meant for piping into
+`pictl format` (for finer control than `prompt`/`tail` expose) or into your own
+tooling:
+
+```sh
+# Fine-grained formatting that prompt/tail don't expose directly:
+pictl prompt --json "Say hi" | pictl format messages --tool-results full
+pictl tail --type entries --json | pictl format entries --timestamps
+
+# pictl format also has a `tree` renderer for the entry tree:
+pictl get-tree | pictl format tree
+```
+
+For a **finite** message stream, the default formatted output is byte-identical
+to its `--json` output piped through `pictl format messages` — the trailing
+`[cursor: …]` line is preserved so you can resume from it.
+
+**`pictl tail --since <entry-id>`** starts the stream just after a given entry
+instead of from the beginning of history — handy for resuming from a cursor you
+saw earlier. (`--since` does not apply to `--type raw`, which has no backlog.)
+
+**`pictl prompt -d`/`--detach`** sends the prompt and returns immediately
+without streaming. `--type`/`--json` are ignored (there is nothing to print),
+and combining `--detach` with `--until` or `--timeout` is an error.
+
+```sh
+pictl prompt -d "Go work on the thing"
+```
 
 ## Further reading
 

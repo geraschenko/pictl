@@ -30,9 +30,6 @@ const STREAMING_NOISE_EVENTS = new Set([
 export const STREAM_OUTPUT_TYPES = ["messages", "entries", "raw"] as const;
 export type StreamOutputType = (typeof STREAM_OUTPUT_TYPES)[number];
 
-export const PROMPT_TYPES = ["messages", "entries", "raw", "detach"] as const;
-export type PromptType = (typeof PROMPT_TYPES)[number];
-
 // "killed" is a streaming-only extension, not a pi.sock state predicate like
 // the UntilCondition cases: it means "follow until the socket closes" and
 // resolves by throwing (see waitForUntil), never by reaching a success state.
@@ -43,6 +40,7 @@ export type StreamUntil = UntilCondition | { kind: "killed" };
 
 interface StreamOptions {
   outputType: StreamOutputType;
+  writer: RecordWriter;
   since: string | undefined;
   limit: number | undefined;
   until: StreamUntil | undefined;
@@ -50,7 +48,8 @@ interface StreamOptions {
 }
 
 export interface PromptStreamOptions {
-  type: PromptType;
+  type: StreamOutputType;
+  writer: RecordWriter;
   until: StreamUntil;
   timeoutMs: number | undefined;
   message: string;
@@ -58,7 +57,13 @@ export interface PromptStreamOptions {
   streamingBehavior: "steer" | "followUp" | undefined;
 }
 
-interface JsonlWriter {
+/**
+ * The output seam for the streaming engine. Concrete implementations and the
+ * `type`+`json` → writer factory live in `src/format/record-writer.ts`; the
+ * command layer injects one. Keeping only the interface here keeps the engine
+ * free of any `format` import (dependency inversion).
+ */
+export interface RecordWriter {
   writeRecord(record: unknown): void;
 }
 
@@ -78,24 +83,8 @@ type GetEntriesData = Extract<
 
 type SessionEntry = GetEntriesData["entries"][number];
 
-class StdoutJsonlWriter implements JsonlWriter {
-  private readonly context: CommandContext;
-
-  constructor(context: CommandContext) {
-    this.context = context;
-  }
-
-  writeRecord(record: unknown): void {
-    this.context.process.stdout.write(`${JSON.stringify(record)}\n`);
-  }
-}
-
 export function parseStreamOutputType(input: string): StreamOutputType {
   return oneOf(input, STREAM_OUTPUT_TYPES, "--type");
-}
-
-export function parsePromptType(input: string): PromptType {
-  return oneOf(input, PROMPT_TYPES, "--type");
 }
 
 export const STREAM_UNTIL_USAGE = `${UNTIL_USAGE}|killed`;
@@ -132,7 +121,7 @@ async function getEntries(
 
 async function writeFinalCursor(
   client: PiSocketClient,
-  writer: JsonlWriter,
+  writer: RecordWriter,
 ): Promise<StreamCursorRecord> {
   const state = await getState(client);
   const entries = await getEntries(client, undefined);
@@ -272,7 +261,7 @@ function messageRecordFromEvent(
 
 async function streamMessages(
   client: PiSocketClient,
-  writer: JsonlWriter,
+  writer: RecordWriter,
   until: StreamUntil | undefined,
   timeoutMs: number | undefined,
   stopConditionGate: Promise<void> = Promise.resolve(),
@@ -324,7 +313,7 @@ function messageFromEntry(entry: SessionEntry): AgentMessage | undefined {
 
 async function emitHistoricalMessages(
   client: PiSocketClient,
-  writer: JsonlWriter,
+  writer: RecordWriter,
   since: string | undefined,
   limit: number | undefined,
 ): Promise<void> {
@@ -352,7 +341,7 @@ async function emitHistoricalMessages(
 
 async function drainEntries(
   client: PiSocketClient,
-  writer: JsonlWriter,
+  writer: RecordWriter,
   cursor: string | undefined,
   limit: number | undefined,
 ): Promise<string | undefined> {
@@ -367,7 +356,7 @@ async function drainEntries(
 
 async function streamEntries(
   client: PiSocketClient,
-  writer: JsonlWriter,
+  writer: RecordWriter,
   since: string | undefined,
   limit: number | undefined,
   until: StreamUntil | undefined,
@@ -418,7 +407,7 @@ async function streamEntries(
 
 async function streamRaw(
   client: PiSocketClient,
-  writer: JsonlWriter,
+  writer: RecordWriter,
   until: StreamUntil | undefined,
   timeoutMs: number | undefined,
   stopConditionGate: Promise<void> = Promise.resolve(),
@@ -442,25 +431,49 @@ async function connectForContext(
   );
 }
 
+function buildPromptCommand(options: {
+  message: string;
+  images: Extract<RpcCommand, { type: "prompt" }>["images"] | undefined;
+  streamingBehavior: "steer" | "followUp" | undefined;
+}): RpcCommand {
+  return {
+    type: "prompt",
+    message: options.message,
+    ...(options.images !== undefined && { images: options.images }),
+    ...(options.streamingBehavior !== undefined && {
+      streamingBehavior: options.streamingBehavior,
+    }),
+  };
+}
+
+/**
+ * Fire-and-forget: connect, send the prompt, close. No writer and no streaming
+ * — `--detach` has no output to shape.
+ */
+export async function promptDetached(
+  context: CommandContext,
+  options: {
+    message: string;
+    images: Extract<RpcCommand, { type: "prompt" }>["images"] | undefined;
+    streamingBehavior: "steer" | "followUp" | undefined;
+  },
+): Promise<void> {
+  const client = await connectForContext(context);
+  try {
+    await client.request(buildPromptCommand(options));
+  } finally {
+    client.close();
+  }
+}
+
 export async function streamPrompt(
   context: CommandContext,
   options: PromptStreamOptions,
 ): Promise<void> {
-  const writer = new StdoutJsonlWriter(context);
+  const writer = options.writer;
   const client = await connectForContext(context);
   try {
-    const command: RpcCommand = {
-      type: "prompt",
-      message: options.message,
-      ...(options.images !== undefined && { images: options.images }),
-      ...(options.streamingBehavior !== undefined && {
-        streamingBehavior: options.streamingBehavior,
-      }),
-    };
-    if (options.type === "detach") {
-      await client.request(command);
-      return;
-    }
+    const command = buildPromptCommand(options);
     const initialEntryCursor =
       options.type === "entries"
         ? (await getEntries(client, undefined)).entries.at(-1)?.id
@@ -519,7 +532,7 @@ export async function streamTail(
   if (options.outputType === "raw" && options.since !== undefined) {
     throw new UsageError("--since is not supported with --type raw");
   }
-  const writer = new StdoutJsonlWriter(context);
+  const writer = options.writer;
   const client = await connectForContext(context);
   try {
     const until =

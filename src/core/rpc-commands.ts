@@ -32,11 +32,14 @@ import { piSocketPath } from "./registry.ts";
 import { connectWithRetry, type PiSocketClient } from "./pi-socket-client.ts";
 import { oneOf, UsageError } from "./util.ts";
 import {
-  parsePromptType,
+  parseStreamOutputType,
   parseStreamUntil,
+  promptDetached,
   streamPrompt,
+  STREAM_OUTPUT_TYPES,
   STREAM_UNTIL_USAGE,
 } from "./streaming.ts";
+import { makeRecordWriter } from "../format/record-writer.ts";
 
 const SOCKET_CONNECT_DEADLINE_MS = 5_000;
 
@@ -184,10 +187,13 @@ async function sendRpc(
 const promptFlags = {
   ...imageFlag,
   type: parsedFlag(
-    "Output type (messages|entries|raw|detach)",
-    parsePromptType,
+    "Output type (messages|entries|raw)",
+    parseStreamOutputType,
     "type",
+    completeChoices(STREAM_OUTPUT_TYPES),
   ),
+  detach: booleanFlag("Send the prompt and return immediately"),
+  json: booleanFlag("Emit JSONL instead of formatted output"),
   until: parsedFlag(
     `Stream until ${STREAM_UNTIL_USAGE}`,
     parseStreamUntil,
@@ -216,34 +222,46 @@ export async function prompt(
   flags: PromptFlags,
   message: string,
 ): Promise<void> {
+  const streamingBehavior =
+    flags.streamingBehavior === undefined
+      ? undefined
+      : flags.streamingBehavior === "steer"
+        ? "steer"
+        : "followUp";
+  if (flags.detach) {
+    if (flags.until !== undefined) {
+      throw new UsageError("--detach cannot be combined with --until");
+    }
+    if (flags.timeout !== undefined) {
+      throw new UsageError("--detach cannot be combined with --timeout");
+    }
+    const { images } = await imagesFromFlags(flags.image);
+    await promptDetached(this, {
+      message: await messageFrom(this, message),
+      images,
+      streamingBehavior,
+    });
+    return;
+  }
   const type = flags.type ?? "messages";
-  if (type === "detach" && flags.until !== undefined) {
-    throw new UsageError("--type detach cannot be combined with --until");
-  }
-  if (type === "detach" && flags.timeout !== undefined) {
-    throw new UsageError("--type detach cannot be combined with --timeout");
-  }
   const { images } = await imagesFromFlags(flags.image);
   await streamPrompt(this, {
     type,
+    writer: makeRecordWriter(this, type, flags.json),
     until: flags.until ?? { kind: "turn-end" },
     timeoutMs: flags.timeout === undefined ? undefined : flags.timeout * 1000,
     message: await messageFrom(this, message),
     images,
-    streamingBehavior:
-      flags.streamingBehavior === undefined
-        ? undefined
-        : flags.streamingBehavior === "steer"
-          ? "steer"
-          : "followUp",
+    streamingBehavior,
   });
 }
 
 const promptCommand = commandOneTarget<PromptFlags, [string]>({
   common: true,
-  docs: { brief: "send a prompt and stream activity as JSONL" },
+  docs: { brief: "send a prompt and stream the agent's activity" },
   parameters: {
     flags: promptFlags,
+    aliases: { d: "detach" },
     positional: {
       kind: "tuple",
       parameters: [stringArg("Message", "message|-")],
