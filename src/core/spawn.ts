@@ -24,7 +24,13 @@ import {
   type InferFlags,
 } from "./cli.ts";
 import { type CommandContext } from "./targets.ts";
-import { agentDirPath, daemonLogPath, pictlBaseDir } from "./registry.ts";
+import {
+  agentDirPath,
+  daemonLogPath,
+  pictlBaseDir,
+  socketPathLengthError,
+} from "./registry.ts";
+import { UsageError } from "./util.ts";
 
 interface DaemonLaunch {
   agentDir: string;
@@ -166,6 +172,9 @@ export async function spawn(
   const cwd = resolve(flags.cwd ?? process.cwd());
   const piBin = resolvePiBin(this.env);
   const agentDir = agentDirPath(agentId);
+
+  const pathError = socketPathLengthError(agentDir);
+  if (pathError) throw new UsageError(pathError);
 
   await mkdir(pictlBaseDir(), { recursive: true });
   try {

@@ -61,6 +61,29 @@ export function ttySocketPath(agentDir: string): string {
   return join(agentDir, "tty.sock");
 }
 
+/**
+ * Unix socket paths must fit in sockaddr_un.sun_path including its NUL
+ * terminator: 108 bytes on Linux, 104 on macOS/BSD. The daemon binds tty.sock
+ * and pi binds pi.sock under agentDir; if the longer one (tty.sock) would not
+ * fit, the bind later fails with an opaque `EINVAL: invalid argument`. Returns a
+ * human-readable error describing the overflow and how to fix it, or undefined
+ * if the sockets fit. Pure; platform is injectable for testing.
+ */
+export function socketPathLengthError(
+  agentDir: string,
+  platform: NodeJS.Platform = process.platform,
+): string | undefined {
+  const limit = platform === "linux" ? 108 : 104;
+  const longest = ttySocketPath(agentDir);
+  const needed = Buffer.byteLength(longest) + 1; // + NUL terminator
+  if (needed <= limit) return undefined;
+  return (
+    `socket path is too long for this OS: "${longest}" needs ${needed} bytes ` +
+    `(including NUL terminator) but the limit is ${limit}. ` +
+    `Use a shorter --id, or set PICTL_DIR to a shorter directory.`
+  );
+}
+
 export function tombstonePath(agentDir: string): string {
   return join(agentDir, "tombstone");
 }
