@@ -75,7 +75,7 @@ However, a rich terminal client cannot faithfully treat `pictl attach` as a reus
 
 ## `PICTL_DIR` as the registry
 
-pictl persists the registry under `PICTL_DIR`, defaulting to the per-OS user data directory (via [`env-paths`](https://www.npmjs.com/package/env-paths)): `~/.local/share/pictl` on Linux, `~/Library/Application Support/pictl` on macOS, `%LOCALAPPDATA%\pictl` on Windows. The registry is the directory tree itself:
+pictl persists the registry under `PICTL_DIR`, defaulting to the per-OS user data directory (via [`env-paths`](https://www.npmjs.com/package/env-paths), e.g. `~/.local/share/pictl` on Linux, `~/Library/Application Support/pictl` on macOS). The registry is the directory tree itself:
 
 ```text
 $PICTL_DIR/
