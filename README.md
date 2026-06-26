@@ -49,6 +49,7 @@ pictl navigate-tree 8c5cb595
 ```
 
 > [!NOTE]
+>
 > - For all available RPC commands, see pi's [`rpc-types.ts`](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/src/modes/rpc/rpc-types.ts), or run `pictl -H`. The tweaked version of pi used by `pictl` also includes the commands `get-entries`, `get-tree`, and `navigate-tree`, which stock pi does not.
 > - The help also includes details about subcommand arguments, e.g. `pictl set-model -H` to learn about arguments of `set-model`.
 
@@ -65,6 +66,7 @@ pictl purge -t <PREFIX_OF_PICTL_TARGET>
 ```
 
 > [!NOTE]
+>
 > - The actual session messages live in your `~/.pi` as usual.
 > - `pictl`'s agent registry lives in your per-OS user data dir (`~/.local/share/pictl` on Linux), or wherever `$PICTL_DIR` points if you set it.
 

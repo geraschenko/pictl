@@ -1,6 +1,10 @@
 {
   "messages": [
-    { "role": "user", "content": [{ "type": "text", "text": "Hello" }], "timestamp": 1 },
+    {
+      "role": "user",
+      "content": [{ "type": "text", "text": "Hello" }],
+      "timestamp": 1
+    },
     {
       "role": "assistant",
       "content": [
