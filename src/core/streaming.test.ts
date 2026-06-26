@@ -394,16 +394,15 @@ test("prompt --type entries prints formatted entry lines by default", async () =
   await withFakeRegistry(async (agentId, agentDir) => {
     await withFakePiSocket(agentDir, async () => {
       const process = fakeProcess({ PICTL_TARGET: agentId });
-      await runCliApp(
-        app,
-        ["prompt", "--type", "entries", "hi"],
-        process.proc,
-      );
+      await runCliApp(app, ["prompt", "--type", "entries", "hi"], process.proc);
 
       assert.equal(process.proc.exitCode, 0);
       assert.equal(process.stderr, "");
       // Formatted (not JSON): a single line `<id> <role> <summary>`.
-      assert.match(process.stdout, /^assistant-entry assistant\s+\.worktrees\n$/);
+      assert.match(
+        process.stdout,
+        /^assistant-entry assistant\s+\.worktrees\n$/,
+      );
     });
   });
 });

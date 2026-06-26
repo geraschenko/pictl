@@ -62,7 +62,10 @@ export class FormattedEntryWriter implements RecordWriter {
   }
 
   writeRecord(record: unknown): void {
-    const line = formatEntry(record as SessionEntry, DEFAULT_ENTRY_FORMAT_OPTIONS);
+    const line = formatEntry(
+      record as SessionEntry,
+      DEFAULT_ENTRY_FORMAT_OPTIONS,
+    );
     this.context.process.stdout.write(`${line}\n`);
   }
 }

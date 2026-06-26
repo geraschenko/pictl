@@ -12,8 +12,8 @@ into `pictl format`.
 
 Today the output shape is controlled by a single `--type` flag whose values
 are `messages | entries | raw` (plus a `detach` value on `prompt` only). This
-conflates two orthogonal concerns: *what* stream of data to emit (messages,
-entries, or raw socket events) and *how* to encode it (human-readable vs JSON).
+conflates two orthogonal concerns: _what_ stream of data to emit (messages,
+entries, or raw socket events) and _how_ to encode it (human-readable vs JSON).
 It also overloads `--type` with a lifecycle option (`detach`) that is not an
 output shape at all.
 
@@ -31,7 +31,7 @@ We separate these concerns:
 For both `prompt` and `tail`:
 
 - `--type` accepts `messages` (default), `entries`, `raw`.
-- Without `--json`, output is human-readable, rendered through the *same*
+- Without `--json`, output is human-readable, rendered through the _same_
   formatting code as `pictl format`:
   - `--type messages` → `formatMessageRecord` per record (default options).
   - `--type entries` → `formatEntry` per entry (default options).
@@ -50,7 +50,7 @@ For `prompt` only:
   express an intent to wait, which contradicts detach).
 
 Finer formatting control (tool-result display, widths, timestamps, filters,
-etc.) is intentionally *not* exposed on `prompt`/`tail`. It is obtained by
+etc.) is intentionally _not_ exposed on `prompt`/`tail`. It is obtained by
 emitting `--json` and piping into `pictl format messages|entries`.
 
 ### Final cursor parity
@@ -83,7 +83,7 @@ to it — the cursor is just another JSON line, unchanged from today.
 
 Entry output is one line per entry and, **with the default options that
 `prompt`/`tail` use**, is byte-identical to `pictl format entries` run with no
-format flags. It is *not* byte-identical if the user pipes `--json` into
+format flags. It is _not_ byte-identical if the user pipes `--json` into
 `pictl format entries` with non-default flags (`--timestamps`, `--full`,
 `--filter`, `--width`); that is expected and fine.
 
@@ -380,7 +380,7 @@ into `core/streaming.ts` and branches on `type`+`json` there. That puts a
 future SDK would consume — which inverts the intended layering (`format` renders
 `core`'s data, so `format` should depend on `core`, not vice versa).
 
-Instead we invert: `core/streaming.ts` owns only the `RecordWriter` *interface*
+Instead we invert: `core/streaming.ts` owns only the `RecordWriter` _interface_
 and accepts a writer as a parameter. The concrete writers and the
 `type`+`json` → writer factory live in `src/format/record-writer.ts` (which may
 legally depend on `core`). The command functions `prompt` and `tail` are the

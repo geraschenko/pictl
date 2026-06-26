@@ -84,7 +84,10 @@ test("socketPathLengthError: Linux boundary is 108 bytes", () => {
 
 test("socketPathLengthError: macOS boundary is 104 bytes", () => {
   // agentDir 94 + 9 + 1 = 104 = limit.
-  assert.equal(socketPathLengthError(agentDirOfLength(94), "darwin"), undefined);
+  assert.equal(
+    socketPathLengthError(agentDirOfLength(94), "darwin"),
+    undefined,
+  );
   assert.match(
     socketPathLengthError(agentDirOfLength(95), "darwin") ?? "",
     /too long.*105 bytes.*limit is 104/s,
