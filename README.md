@@ -1,16 +1,11 @@
-# pictl
+# `pictl`: a pi agent orchestration CLI
 
-`pictl` is a CLI orchestration tool for pi coding-agent instances. It aims to let humans, scripts, and agents interact with live pi instances in a unified way.
+There are many agent orchestration tools. This one is mine. `pictl` aims to let humans, agents, scripts, and code interact with live pi instances _simultaneously_, each on their own terms. Humans can attach with the stock pi TUI, and agents/scripts get ergonomic (but unfettered) access to the RPC interface. You don't have to give up your `/tree`, and they aren't forced to `tmux capture-pane`.
 
 ## Installation
 
 ```sh
 npm install -g github:geraschenko/pictl
-```
-
-Check that `pictl` is now on your `PATH`:
-
-```sh
 pictl --version
 ```
 
@@ -39,18 +34,23 @@ pictl attach --target <PREFIX_OF_PICTL_TARGET>
 
 ```sh
 pictl prompt "Say hello. Keep it short"
-pictl set-model anthropic claude-opus-4-8
+pictl set-model openai-codex gpt-5.5
 
 # Note: compaction will fail if the session is already tiny.
 pictl compact --custom-instructions "Next we're going to say goodbye. Only keep context relevant to that task."
-pictl get-entries
 
-# Note: you have to use a real entry id from your actual session here; see the output from get-entries.
+# RPC pass-through commands (except for `prompt`) return json. `pictl format`
+# can prettify the responses from `get-messages`, `get-entries`, and `get-tree`.
+pictl get-entries | pictl format entries
+
+# Note: you have to use a real entry id from your actual session here;
+# see the output from `get-entries` above.
 pictl navigate-tree 8c5cb595
 ```
 
-- For all available RPC commands, see pi's [`rpc-types.ts`](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/src/modes/rpc/rpc-types.ts), or run `pictl -H`. The tweaked version of pi used by `pictl` also includes the commands `get-entries`, `get-tree`, and `navigate-tree`, which stock pi does not.
-- The help also includes details about subcommand arguments, e.g. `pictl set-model -H` to learn about arguments of `set-model`.
+> [!NOTE]
+> - For all available RPC commands, see pi's [`rpc-types.ts`](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/src/modes/rpc/rpc-types.ts), or run `pictl -H`. The tweaked version of pi used by `pictl` also includes the commands `get-entries`, `get-tree`, and `navigate-tree`, which stock pi does not.
+> - The help also includes details about subcommand arguments, e.g. `pictl set-model -H` to learn about arguments of `set-model`.
 
 **Manage your agents**
 
@@ -64,8 +64,9 @@ pictl archive -t <PREFIX_OF_PICTL_TARGET>
 pictl purge -t <PREFIX_OF_PICTL_TARGET>
 ```
 
-- The actual session messages live in your `~/.pi` as usual.
-- `pictl`'s agent registry lives in your per-OS user data dir (`~/.local/share/pictl` on Linux), or wherever `$PICTL_DIR` points if you set it.
+> [!NOTE]
+> - The actual session messages live in your `~/.pi` as usual.
+> - `pictl`'s agent registry lives in your per-OS user data dir (`~/.local/share/pictl` on Linux), or wherever `$PICTL_DIR` points if you set it.
 
 **Setup tab completion** with `pictl completion install` (bash only).
 
@@ -76,15 +77,11 @@ an existing agent's activity without sending anything.
 
 ### Machine-readable output
 
-Both `prompt` and `tail` print human-readable, formatted output by default, but
-add `--json` to get machine-readable output. If you want finer control over the
-formatting use `--json` and pipe to `pictl format`.
+Both `prompt` and `tail` print human-readable, formatted output by default, but add `--json` to get machine-readable output. If you want finer control over the formatting use `--json` and pipe to `pictl format`.
 
 ### Async prompting
 
-Send a prompt without waiting for the reply with `pictl prompt --detach`. Then
-check back with `tail`. The output of `prompt`/`tail` end with a "cursor" that
-identifies the entry id of last message returned, and `pictl tail --since <entry-id>` will return all the messages after that. For example:
+Send a prompt without waiting for the reply with `pictl prompt --detach`. Then check back with `tail`. The output of `prompt`/`tail` end with a "cursor" that identifies the entry id of last message returned, and `pictl tail --since <entry-id>` will return all the messages after that. For example:
 
 ```sh
 $ pictl tail -t c8b
