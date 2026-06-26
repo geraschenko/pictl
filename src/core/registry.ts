@@ -49,6 +49,27 @@ export function agentDirPath(agentId: string): string {
   return join(pictlBaseDir(), agentId);
 }
 
+/**
+ * An agent id becomes a single path segment under the registry dir (and is
+ * embedded in the socket paths), so a user-supplied `--id` must be one safe
+ * component: no path separators and not `.`/`..`, which would otherwise escape
+ * the registry. The default (randomUUID) always passes; this guards explicit
+ * ids. Returns a human-readable error, or undefined if the id is acceptable.
+ */
+export function agentIdError(agentId: string): string | undefined {
+  if (
+    !/^[A-Za-z0-9._-]+$/.test(agentId) ||
+    agentId === "." ||
+    agentId === ".."
+  ) {
+    return (
+      `invalid agent id '${agentId}': use only letters, digits, '.', '_', ` +
+      `and '-' (no path separators)`
+    );
+  }
+  return undefined;
+}
+
 export function agentJsonPath(agentDir: string): string {
   return join(agentDir, "agent.json");
 }

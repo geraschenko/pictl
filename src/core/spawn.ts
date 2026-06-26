@@ -26,6 +26,7 @@ import {
 import { type CommandContext } from "./targets.ts";
 import {
   agentDirPath,
+  agentIdError,
   daemonLogPath,
   pictlBaseDir,
   socketPathLengthError,
@@ -169,6 +170,8 @@ export async function spawn(
   ...piArgs: string[]
 ): Promise<void> {
   const agentId = flags.id ?? randomUUID();
+  const idError = agentIdError(agentId);
+  if (idError) throw new UsageError(idError);
   const cwd = resolve(flags.cwd ?? process.cwd());
   const piBin = resolvePiBin(this.env);
   const agentDir = agentDirPath(agentId);

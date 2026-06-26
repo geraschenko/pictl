@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, stat } from "node:fs/promises";
 import { connect, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -207,6 +207,16 @@ test("a failed snapshot drops the client instead of buffering forever", async ()
     harness.rejectSnapshot(new Error("serialize blew up"));
     await client.closed;
     assert.equal(client.frames.length, 0);
+  } finally {
+    await harness.cleanup();
+  }
+});
+
+test("the listening socket is owner-only (0600)", async () => {
+  const harness = await startServer();
+  try {
+    const mode = (await stat(harness.socketPath)).mode & 0o777;
+    assert.equal(mode, 0o600);
   } finally {
     await harness.cleanup();
   }

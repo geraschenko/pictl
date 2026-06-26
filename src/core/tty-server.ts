@@ -5,6 +5,7 @@
  * connection management.
  */
 
+import { chmod } from "node:fs/promises";
 import { createServer, type Server, type Socket } from "node:net";
 import { StringDecoder } from "node:string_decoder";
 import {
@@ -54,11 +55,18 @@ export class TtyServer {
     this.server = createServer((socket) => this.handleConnection(socket));
   }
 
-  listen(socketPath: string): Promise<void> {
-    return new Promise((resolve, reject) => {
+  async listen(socketPath: string): Promise<void> {
+    await new Promise<void>((resolve, reject) => {
       this.server.once("error", reject);
-      this.server.listen(socketPath, resolve);
+      this.server.listen(socketPath, () => {
+        this.server.off("error", reject);
+        resolve();
+      });
     });
+    // Connecting to tty.sock grants full control of the agent's PTY (read its
+    // screen, inject input), so restrict it to the owner rather than leaving
+    // it at the umask default. pi locks down pi.sock the same way.
+    await chmod(socketPath, 0o600);
   }
 
   /**

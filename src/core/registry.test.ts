@@ -6,6 +6,7 @@ import { after, before, test } from "node:test";
 import {
   type AgentRecord,
   agentDirPath,
+  agentIdError,
   resolveAgentId,
   socketPathLengthError,
   writeAgentRecord,
@@ -110,4 +111,15 @@ test("socketPathLengthError: message names the path and a remedy", () => {
   const msg = socketPathLengthError(agentDirOfLength(200), "linux") ?? "";
   assert.match(msg, /tty\.sock/);
   assert.match(msg, /--id|PICTL_DIR/);
+});
+
+test("agentIdError: accepts uuids and friendly ids", () => {
+  assert.equal(agentIdError("c8b2e994-6872-425d-bfe7-b24b7987696d"), undefined);
+  assert.equal(agentIdError("my_agent.1"), undefined);
+});
+
+test("agentIdError: rejects path traversal and separators", () => {
+  for (const bad of ["..", ".", "../foo", "a/b", "a\\b", "", "with space"]) {
+    assert.ok(agentIdError(bad), `expected '${bad}' to be rejected`);
+  }
 });
