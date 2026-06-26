@@ -1,5 +1,5 @@
 {
-  "name": "pictl",
+  "name": "@geraschenko/pictl",
   "version": "0.1.0",
   "description": "Spawn, observe, control, and attach to a fleet of pi coding-agent instances",
   "license": "Apache-2.0",
@@ -13,6 +13,9 @@
     "url": "https://github.com/geraschenko/pictl/issues"
   },
   "type": "module",
+  "publishConfig": {
+    "access": "public"
+  },
   "bin": {
     "pictl": "dist/core/main.js"
   },

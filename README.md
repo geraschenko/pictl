@@ -1,11 +1,13 @@
 # `pictl`: a [pi](https://pi.dev) agent orchestration CLI
 
+[![npm](https://img.shields.io/npm/v/@geraschenko/pictl)](https://www.npmjs.com/package/@geraschenko/pictl)
+
 There are many agent orchestration tools. This one is mine. `pictl` aims to let humans, agents, scripts, and code interact with live pi instances _simultaneously_, each on their own terms. Humans can attach with the stock pi TUI, and agents/scripts get ergonomic (but unfettered) access to the RPC interface. You don't have to give up your `/tree`, and they aren't forced to `tmux capture-pane`.
 
 ## Installation
 
 ```sh
-npm install -g github:geraschenko/pictl
+npm install -g @geraschenko/pictl
 pictl --version
 ```
 
