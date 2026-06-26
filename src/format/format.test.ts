@@ -35,6 +35,18 @@ test("format messages renders text, compact tool calls, summaries, and cursor", 
   );
 });
 
+test("format messages supports get-messages JSON", async () => {
+  const output = formatMessageRecords(
+    parseMessageRecords(await fixture("messages.json")),
+  );
+  assert.equal(
+    output,
+    "== user ==\nHello\n\n" +
+      "== assistant ==\n[thinking]\n[tool:read path: README.md]\n\n" +
+      "[read:ok 1 lines, 12 bytes]\n",
+  );
+});
+
 test("format messages renders control event details from real pi event fields", () => {
   const output = formatMessageRecords(
     parseMessageRecords(

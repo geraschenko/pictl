@@ -326,11 +326,33 @@ export function parseTreeInput(input: string): TreeInput {
   return decodeTreeInput(parseJsonInput(input));
 }
 
+function decodeMessagesInput(
+  value: Record<string, unknown>,
+): readonly MessageStreamRecord[] {
+  if (!Array.isArray(value.messages)) {
+    throw new UsageError("invalid messages input");
+  }
+  return value.messages.map((message) => {
+    validateMessage(message);
+    return { type: "message", message } as unknown as MessageStreamRecord;
+  });
+}
+
 export function parseMessageRecords(
   input: string,
 ): readonly MessageStreamRecord[] {
   if (input.trim() === "") {
     return [];
+  }
+  if (input.trimStart().startsWith("{")) {
+    try {
+      const parsed = JSON.parse(input) as unknown;
+      if (isRecord(parsed) && "messages" in parsed) {
+        return decodeMessagesInput(parsed);
+      }
+    } catch {
+      // Not a single JSON object; parse below as JSONL.
+    }
   }
   return parseJsonlInput(input).map(decodeMessageStreamRecord);
 }

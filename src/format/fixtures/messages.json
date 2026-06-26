@@ -1,0 +1,44 @@
+{
+  "messages": [
+    { "role": "user", "content": [{ "type": "text", "text": "Hello" }], "timestamp": 1 },
+    {
+      "role": "assistant",
+      "content": [
+        { "type": "thinking", "thinking": "hidden" },
+        {
+          "type": "toolCall",
+          "id": "call-1",
+          "name": "read",
+          "arguments": { "path": "README.md" }
+        }
+      ],
+      "api": "test",
+      "provider": "test",
+      "model": "test",
+      "usage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "totalTokens": 0,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stopReason": "toolUse",
+      "timestamp": 2
+    },
+    {
+      "role": "toolResult",
+      "toolCallId": "call-1",
+      "toolName": "read",
+      "content": [{ "type": "text", "text": "large output" }],
+      "isError": false,
+      "timestamp": 3
+    }
+  ]
+}
