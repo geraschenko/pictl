@@ -1,0 +1,20 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/api-extractor/v7/api-extractor.schema.json",
+  "projectFolder": ".",
+  "mainEntryPointFilePath": "<projectFolder>/dist/dts/core/index.d.ts",
+  "compiler": { "tsconfigFilePath": "<projectFolder>/tsconfig.dts.json" },
+  "apiReport": {
+    "enabled": true,
+    "reportFolder": "<projectFolder>/docs/",
+    "reportTempFolder": "<projectFolder>/dist/api-extractor-temp/",
+    "reportFileName": "pictl.api.md"
+  },
+  "docModel": { "enabled": false },
+  "dtsRollup": { "enabled": false },
+  "tsdocMetadata": { "enabled": false },
+  "messages": {
+    "extractorMessageReporting": {
+      "ae-missing-release-tag": { "logLevel": "none" }
+    }
+  }
+}

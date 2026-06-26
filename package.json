@@ -1,0 +1,62 @@
+{
+  "name": "pictl",
+  "version": "0.1.0",
+  "description": "Spawn, observe, control, and attach to a fleet of pi coding-agent instances",
+  "license": "Apache-2.0",
+  "author": "Anton Geraschenko <geraschenko@gmail.com>",
+  "homepage": "https://github.com/geraschenko/pictl#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/geraschenko/pictl.git"
+  },
+  "bugs": {
+    "url": "https://github.com/geraschenko/pictl/issues"
+  },
+  "type": "module",
+  "bin": {
+    "pictl": "dist/core/main.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/dts/core/index.d.ts",
+      "import": "./dist/core/index.js"
+    }
+  },
+  "files": [
+    "dist/core",
+    "dist/dts",
+    "!dist/**/*.map"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+    "build": "npm run clean && tsc -p tsconfig.build.json && tsc -p tsconfig.dts.json && node -e \"require('node:fs').chmodSync('dist/core/main.js', 0o755)\"",
+    "prepare": "npm run build",
+    "check": "tsc --noEmit",
+    "lint": "eslint src",
+    "test": "node --test \"src/**/*.test.ts\"",
+    "fmt": "treefmt",
+    "verify-before-publish": "scripts/verify-before-publish.sh",
+    "setup-worktree": "scripts/setup-worktree.sh",
+    "presubmit": "npm run check && npm run lint && treefmt --fail-on-change && npm test"
+  },
+  "dependencies": {
+    "@geraschenko/pi-coding-agent": "^0.80.2-fork.2",
+    "@stricli/auto-complete": "1.2.7",
+    "@stricli/core": "1.2.7",
+    "@xterm/addon-serialize": "^0.14.0",
+    "@xterm/headless": "^5.5.0",
+    "env-paths": "^4.0.0",
+    "node-pty": "^1.0.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.4",
+    "@types/node": "^22.0.0",
+    "eslint": "^9.39.4",
+    "prettier": "^3.8.4",
+    "typescript": "^5.8.0",
+    "typescript-eslint": "^8.61.0"
+  }
+}
