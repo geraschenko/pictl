@@ -38,6 +38,7 @@
     "lint": "eslint src",
     "test": "node --test \"src/**/*.test.ts\"",
     "fmt": "treefmt",
+    "verify-before-publish": "scripts/verify-before-publish.sh",
     "setup-worktree": "scripts/setup-worktree.sh",
     "presubmit": "npm run check && npm run lint && treefmt --fail-on-change && npm test"
   },
