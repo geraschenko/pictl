@@ -1,10 +1,17 @@
-/*
- * Public entry point for pictl-core.
+/**
+ * Programmatic access to a pictl-managed fleet of pi agents: discover agents in
+ * the registry, connect to their `pi.sock`/`tty.sock`, make RPC calls, and wait
+ * on turn/idle conditions.
  *
- * This is a PROVISIONAL first cut of the SDK surface, organized by the
- * canonical-library responsibilities in docs/thoughts/sdks-and-helpers.md. It
- * is expected to be pruned substantially once export-visualization tooling
- * lands. `main.ts` remains the CLI bin entry and does not depend on this file.
+ * This exposes only CLI-independent primitives: things that take a socket path,
+ * a PiSocketClient, or an agent id. The CLI command bodies (`streamPrompt`,
+ * `streamTail`, `promptDetached`) and the flag-parsing/usage helpers stay out of
+ * the surface — they are coupled to the Stricli command context and to argument
+ * parsing, not to anything an SDK consumer would call. See
+ * docs/thoughts/sdks-and-helpers.md for the layering this follows. `main.ts`
+ * remains the CLI bin entry and does not depend on this file.
+ *
+ * @packageDocumentation
  */
 
 // pi.sock client
@@ -37,29 +44,12 @@ export {
   piSocketPath,
   ttySocketPath,
   type AgentRecord,
+  type SessionHistoryEntry,
 } from "./registry.ts";
-
-// stream consumption
-export {
-  streamTail,
-  streamPrompt,
-  promptDetached,
-  parseStreamOutputType,
-  parseStreamUntil,
-  normalizeFollowUntil,
-  STREAM_OUTPUT_TYPES,
-  STREAM_UNTIL_USAGE,
-  type RecordWriter,
-  type StreamOutputType,
-  type StreamUntil,
-  type PromptStreamOptions,
-} from "./streaming.ts";
 
 // until-conditions
 export {
-  parseUntilCondition,
   applyUntilCondition,
   UntilTimeoutError,
-  UNTIL_USAGE,
   type UntilCondition,
 } from "./until.ts";
