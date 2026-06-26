@@ -9,6 +9,13 @@ npm install -g github:geraschenko/pictl
 pictl --version
 ```
 
+> [!NOTE]
+> `pictl` depends on [`node-pty`](https://github.com/microsoft/node-pty), a
+> native addon compiled during install, so you need a C/C++ toolchain and Python
+> on your machine: `build-essential` and `python3` on Debian/Ubuntu, the Xcode
+> Command Line Tools on macOS, or the equivalent for your platform. Node 20 or
+> newer is required.
+
 ## Quickstart
 
 **Start an agent** and make it the default target for subsequent commands:

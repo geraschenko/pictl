@@ -14,8 +14,12 @@
  *   N may be fractional (e.g. `no-activity:0.5`).
  */
 
-import { IdleTimeoutError, waitIdle } from "./lifecycle.ts";
-import { getState, type PiSocketClient } from "./pi-socket-client.ts";
+import {
+  getState,
+  IdleTimeoutError,
+  waitIdle,
+  type PiSocketClient,
+} from "./pi-socket-client.ts";
 import { UsageError } from "./util.ts";
 
 export const UNTIL_COMPLETIONS = ["turn-end", "idle", "no-activity:"] as const;

@@ -39,7 +39,8 @@ import {
 } from "./registry.ts";
 import {
   connectWithRetry,
-  getState,
+  IdleTimeoutError,
+  waitIdle,
   type PiSocketClient,
 } from "./pi-socket-client.ts";
 import { launchDaemon } from "./spawn.ts";
@@ -161,60 +162,6 @@ function killSilently(pid: number, signal: NodeJS.Signals): void {
     process.kill(pid, signal);
   } catch {
     // Already gone.
-  }
-}
-
-export class IdleTimeoutError extends Error {}
-
-/**
- * Wait until the agent is fully idle (not streaming AND pending queue empty).
- * State is re-checked only on agent_end (once per turn), not per event. The
- * waiter is registered before each get_state so an agent_end landing between
- * the two is not missed.
- */
-export async function waitIdle(
-  client: PiSocketClient,
-  timeoutMs: number | undefined,
-): Promise<void> {
-  const deadline = timeoutMs === undefined ? undefined : Date.now() + timeoutMs;
-  while (true) {
-    const nextAgentEnd = new Promise<"agent_end" | "closed">((resolve) => {
-      client.onEvent((event) => {
-        if (event.type === "agent_end") {
-          resolve("agent_end");
-        }
-      });
-      void client.waitClosed().then(() => resolve("closed"));
-    });
-
-    const state = await getState(client);
-    if (!state.isStreaming && state.pendingMessageCount === 0) {
-      return;
-    }
-
-    if (deadline === undefined) {
-      if ((await nextAgentEnd) === "closed") {
-        throw new Error("pi socket closed while waiting for idle");
-      }
-    } else {
-      const remaining = deadline - Date.now();
-      if (remaining <= 0) {
-        throw new IdleTimeoutError();
-      }
-      // Cleared after the race; see the timer comment in terminatePi.
-      let timeoutTimer: NodeJS.Timeout | undefined;
-      const timeout = new Promise<"timeout">((resolve) => {
-        timeoutTimer = setTimeout(() => resolve("timeout"), remaining);
-      });
-      const winner = await Promise.race([nextAgentEnd, timeout]);
-      clearTimeout(timeoutTimer);
-      if (winner === "timeout") {
-        throw new IdleTimeoutError();
-      }
-      if (winner === "closed") {
-        throw new Error("pi socket closed while waiting for idle");
-      }
-    }
   }
 }
 

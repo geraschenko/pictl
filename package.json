@@ -2,6 +2,16 @@
   "name": "pictl",
   "version": "0.1.0",
   "description": "Spawn, observe, control, and attach to a fleet of pi coding-agent instances",
+  "license": "Apache-2.0",
+  "author": "Anton Geraschenko <geraschenko@gmail.com>",
+  "homepage": "https://github.com/geraschenko/pictl#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/geraschenko/pictl.git"
+  },
+  "bugs": {
+    "url": "https://github.com/geraschenko/pictl/issues"
+  },
   "type": "module",
   "bin": {
     "pictl": "dist/core/main.js"
@@ -12,8 +22,18 @@
       "import": "./dist/core/index.js"
     }
   },
+  "files": [
+    "dist/core",
+    "dist/dts",
+    "!dist/**/*.map"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && node -e \"require('node:fs').chmodSync('dist/core/main.js', 0o755)\"",
+    "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+    "build": "npm run clean && tsc -p tsconfig.build.json && tsc -p tsconfig.dts.json && node -e \"require('node:fs').chmodSync('dist/core/main.js', 0o755)\"",
+    "prepare": "npm run build",
     "check": "tsc --noEmit",
     "lint": "eslint src",
     "test": "node --test \"src/**/*.test.ts\"",
