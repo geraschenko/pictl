@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { app } from "./app.ts";
 import { runCliApp } from "./cli.ts";
+import { VERSION } from "./version.ts";
 
 function fakeProcess(env: NodeJS.ProcessEnv = {}) {
   let stdout = "";
@@ -69,7 +70,7 @@ test("help and version print key lines", async () => {
   const version = fakeProcess();
   await runCliApp(app, ["--version"], version.proc);
   assert.equal(version.proc.exitCode, 0);
-  assert.equal(version.stdout.trim(), "0.1.0");
+  assert.equal(version.stdout.trim(), VERSION);
 
   const help = fakeProcess();
   await runCliApp(app, ["--help"], help.proc);

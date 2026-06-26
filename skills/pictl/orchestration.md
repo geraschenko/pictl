@@ -33,7 +33,7 @@ Commands that need the socket transparently revive dormant or archived agents.
 
 To run agents in parallel, fan out detached prompts, then wait for each. For a single agent you need none of this — just `prompt` and read its output.
 
-Snapshot each agent's cursor before prompting, so afterward you can collect *everything* it did, not just its last message (a human may also be steering it, and the last message can omit crucial context):
+Snapshot each agent's cursor before prompting, so afterward you can collect _everything_ it did, not just its last message (a human may also be steering it, and the last message can omit crucial context):
 
 ```bash
 starts=()
