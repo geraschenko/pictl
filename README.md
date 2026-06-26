@@ -2,7 +2,9 @@
 
 [![npm](https://img.shields.io/npm/v/@geraschenko/pictl)](https://www.npmjs.com/package/@geraschenko/pictl)
 
-There are many agent orchestration tools. This one is mine. `pictl` aims to let humans, agents, scripts, and code interact with live pi instances _simultaneously_, each on their own terms. Humans can attach with the stock pi TUI, and agents/scripts get ergonomic (but unfettered) access to the RPC interface. You don't have to give up your `/tree`, and they aren't forced to `tmux capture-pane`.
+`pictl` aims to let humans, agents, scripts, and code interact with live pi instances _simultaneously_, each on their own terms. Humans can attach with the stock pi TUI, and agents/scripts get ergonomic (but unfettered) access to the RPC interface. You don't have to give up your `/tree`, and they aren't forced to `tmux capture-pane`.
+
+Like pi, `pictl` is meant to be minimal, extensible, and composable.
 
 ## Installation
 
@@ -83,8 +85,7 @@ pictl purge -t <PREFIX_OF_PICTL_TARGET>
 
 ## Getting fancy with `pictl [prompt|tail|format]`
 
-`pictl prompt` and `pictl tail` both stream a live agent's activity. `prompt` sends a message and streams until the end of the assistant turn; `tail` streams
-an existing agent's activity without sending anything.
+`pictl prompt` and `pictl tail` both show a live agent's activity. `prompt` sends a message and streams until the end of the assistant turn. `tail` doesn't send anything and prints the agent's current context, returning immediately even if the agent is still streaming. Use `tail --follow` to keep streaming indefinitely, or `tail --until turn-end` to wait for the current turn (if any) to finish before returning.
 
 ### Machine-readable output
 
@@ -138,7 +139,7 @@ You can control what you get from `prompt`/`tail` with `--type`:
 - `--type messages` (default): one block per message (and per control event like compaction), the same rendering as `pictl format messages`. `--json` for no formatting.
 - `--type entries`: one line per session entry (`<id> <role> <summary>`), the same rendering as `pictl format entries`. `--json` for no formatting.
 - `--type raw`: raw pi socket events, one JSON object per line. `raw` is
-  inherently JSON, so `--json` is a no-op for it. Since raw RPC messages aren't persisted, you can only get raw messages that appear _after_ you run the command.
+  inherently JSON, so `--json` is a no-op for it. Since raw RPC messages aren't persisted, you can only get raw messages that appear _after_ you run the command. For `tail`, `--type raw` implies `--follow`.
 
 If the reason you're after entries is to recover the tree structure from the `parentId` field, you may want to get the tree structure directly with `get-tree`. The output of `get-tree` is json (like pretty much all subcommands other than `prompt` and `tail`), but you can pretty print it like this:
 

@@ -15,10 +15,10 @@ Read branch references as needed:
 
 - Do **not** purge, force-kill, or take over agents you did not create unless the user explicitly asks.
 - When spawning subagents, give them clear role instructions and tell them relevant agent ids, including your own `$PI_AGENT_ID`.
-- Spawn review agents read-only by default (`-- --tools read,grep,find,ls`) unless tests or edits are explicitly needed.
-- Prefer `pictl prompt -t ... --streaming-behavior ...` over raw `steer`/`follow-up`; it avoids races when the target's streaming state changes.
-- `pictl prompt` streams JSONL by default and emits a final cursor. Use `--type detach` only when you want to send the prompt and return after acceptance without output.
-- Use machine-readable output for scripts (`list --json`, `status --json`, prompt/tail JSONL, RPC command output); do not parse human TUI text.
+- Spawn review agents read-only by default (`-- --tools read,grep,find,ls`) unless edits or tests are explicitly needed.
+- Always message with `pictl prompt`, never raw `steer`/`follow-up`. For a single agent, `prompt` and read its streamed output; you do not need `-d` or `wait`.
+- `pictl prompt` streams formatted output by default and emits a final cursor. Add `--json` for machine-readable JSONL.
+- Use machine-readable output for scripts (`list --json`, `status --json`, `prompt`/`tail --json`, RPC command output); do not parse human TUI text.
 
 ## Identify yourself and discover nearby agents
 
@@ -35,55 +35,30 @@ pictl status -t <agent>     # details for one agent
 
 ## Message another agent
 
-Send a normal task, stream its activity as JSONL, and get a final cursor:
+Send a task and stream its activity, ending with a final cursor:
 
 ```bash
 pictl prompt -t <agent> "Please do X and report back."
+pictl prompt -t <agent> - < task.md      # longer prompt from stdin
 ```
 
-Send without streaming output:
+If the peer is busy, `prompt` errors by default. To queue instead, say what should happen:
 
 ```bash
-pictl prompt -t <agent> "Please do X and report back." --type detach
-```
-
-Read a longer prompt from stdin:
-
-```bash
-pictl prompt -t <agent> - < task.md
-```
-
-If the peer is busy, `prompt` will return an error by default. If you want to queue the prompt, choose what should happen explicitly:
-
-```bash
-# Timely correction to the active turn if it is streaming; normal prompt otherwise.
+# Correct the active turn if it is streaming; normal prompt otherwise.
 pictl prompt -t <agent> "Correction: use branch feature/foo, not main." --streaming-behavior steer
 
-# Queue this as the next turn if the agent is streaming; normal prompt otherwise.
+# Queue as the next turn if the agent is streaming; normal prompt otherwise.
 pictl prompt -t <agent> "After your current turn, also check Y." --streaming-behavior follow-up
 ```
 
-Use raw `pictl steer` and `pictl follow-up` only when you deliberately want those exact RPC commands. In most cases, `prompt --streaming-behavior ...` is safer.
-
-Abort only when necessary:
+Abort only when continuing the turn is harmful or wasteful:
 
 ```bash
 pictl abort -t <agent>
 ```
 
-## Wait for progress
-
-```bash
-pictl wait -t <agent> --until turn-end
-pictl wait -t <agent> --until idle
-pictl wait -t <agent> --until no-activity:30 --timeout 120
-```
-
-- `turn-end`: the current or queued turn finished.
-- `idle`: not streaming and no queued messages.
-- `no-activity:<secs>`: no socket events for that long, even if the agent is not idle; useful for stalled UI/tool waits.
-
-Exit code `3` means `--timeout` expired. Do not assume the task failed; the condition simply was not reached in time.
+To prompt several agents at once and wait for them, or to fire a prompt and check back later, see [orchestration](orchestration.md).
 
 ## Check what happened
 

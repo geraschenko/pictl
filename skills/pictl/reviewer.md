@@ -18,7 +18,7 @@ Spawn a read-only reviewer:
 
 ```bash
 reviewer=$(pictl spawn --tag reviewer -- --tools read,grep,find,ls)
-pictl prompt -t "$reviewer" - <<EOF | pictl format messages
+pictl prompt -t "$reviewer" - <<EOF
 You are a fresh-context reviewer. Be critical and look for blind spots.
 
 Context:
@@ -35,6 +35,8 @@ EOF
 ```
 
 If a finding needs tests or edits, the main agent should perform that follow-up.
+
+To dispatch a review with `prompt -d` and keep working until it is ready, use the async check-back pattern in [orchestration.md](orchestration.md).
 
 ## Prompt knobs
 
@@ -56,7 +58,7 @@ After edits, talk to the reviewer directly. Summarize what changed and why. Invi
 Example:
 
 ```bash
-pictl prompt -t "$reviewer" - <<'EOF' | pictl format messages
+pictl prompt -t "$reviewer" - <<'EOF'
 I addressed your concern about the parser contract by adding explicit assertion functions and defining malformed known-type entries as invalid input.
 
 I intentionally did not add a fallback for malformed known types because that would hide schema drift.

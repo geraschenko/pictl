@@ -2,51 +2,13 @@
 
 Use this reference when you need exact command behavior beyond the top-level pictl skill.
 
-## `prompt` vs `steer` vs `follow-up`
+## Always use `prompt`, never raw `steer`/`follow-up`
 
-Prefer `prompt` for most messaging.
+`pictl prompt` streams the turn's activity on the same socket used to send the prompt, avoiding subscription races and returning a final cursor. When the target may be streaming, add `--streaming-behavior steer|follow-up` rather than checking status and then calling a raw command: that check-then-act is a race (the target may finish in between), while pi decides atomically — normal prompt if idle, steer/follow-up if streaming.
 
-```bash
-pictl prompt -t <agent> "Do this."
-```
+`pictl steer` and `pictl follow-up` exist for exact RPC use but are almost never the right choice.
 
-When the target may be streaming, use `prompt --streaming-behavior` instead of checking status and then choosing a raw command:
-
-```bash
-pictl prompt -t <agent> "Correction: use branch feature/foo." --streaming-behavior steer
-pictl prompt -t <agent> "After this turn, also check Y." --streaming-behavior follow-up
-```
-
-Why: checking whether an agent is streaming and then calling raw `steer` or `follow-up` is a race. The target may finish between your check and your send. `prompt --streaming-behavior ...` lets pi decide atomically:
-
-- if idle, it behaves like a normal prompt;
-- if streaming, it becomes a steer or follow-up according to the flag.
-
-Raw commands still exist for exact RPC use:
-
-```bash
-pictl steer -t <agent> "Interject into the current turn."
-pictl follow-up -t <agent> "Queue this after the current turn."
-```
-
-Use them only when you deliberately want those exact semantics.
-
-## Prompt streaming and waiting
-
-`pictl prompt` streams JSONL on the same socket connection used to send the prompt. This is the recommended one-shot form because it avoids subscription races and returns the activity plus a final cursor.
-
-```bash
-pictl prompt -t <agent> "Do X."
-```
-
-Equivalent two-step usage is available when you do not need prompt output:
-
-```bash
-pictl prompt -t <agent> "Do X." --type detach
-pictl wait -t <agent> --until turn-end
-```
-
-Use `--until` when you want a stop condition other than turn end:
+Use `--until` for a stop condition other than turn end:
 
 ```bash
 pictl prompt -t <agent> "Start investigating." --until no-activity:30
@@ -84,18 +46,6 @@ Most commands that need the socket transparently revive dormant or archived agen
 - `list`/`status` are inspection-only;
 - `gc` only removes tombstoned or corrupt dirs;
 - `wait` treats dormant/archived agents as already doing no work.
-
-## Tail cursors are session-scoped
-
-`pictl tail` cursor records include both `sessionId` and `entryId`:
-
-```json
-{"type":"pictl_cursor","sessionId":"...","entryId":"..."}
-```
-
-In simple usage, saving only `entryId` often works. For robust orchestration, save both. If the session changes, an old entry id may not exist in the new session and `tail --since` can fail with “entry not found”.
-
-Session changes can happen via `/new`, `/resume`, `fork`, `clone`, or `switch-session`.
 
 ## Useful passthrough commands
 

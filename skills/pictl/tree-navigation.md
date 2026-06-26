@@ -13,7 +13,7 @@ pictl navigate-tree -t <agent> <target-id> --summarize \
 
 # Navigate first, then send your own summary as the next prompt.
 pictl navigate-tree -t <agent> <target-id> && \
-  pictl prompt -t <agent> --type detach '<summary and continuation>'
+  pictl prompt -t <agent> -d '<summary and continuation>'
 ```
 
 Both patterns require the target to be **idle**: `navigate_tree` is rejected while the target is streaming. They are for a script, peer, or human navigating an idle agent. An agent navigating **itself** from inside its own turn is streaming, so it cannot use these — see [Self-navigation](#self-navigation) below.
