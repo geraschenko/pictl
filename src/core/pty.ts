@@ -14,7 +14,8 @@
  *
  * Remove this file once a fixed node-pty reaches `latest` (1.2.0 stable) and we
  * pin `^1.2.0`. The beta is not a pin candidate: the 1.2.0 line also drops
- * winpty and is otherwise in flux.
+ * winpty and is otherwise in flux. That same bump also adds Linux prebuilds, so
+ * update the README to drop the build-toolchain requirement note at that point.
  */
 
 import { chmodSync, statSync } from "node:fs";

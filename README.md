@@ -14,11 +14,13 @@ pictl --version
 ```
 
 > [!NOTE]
-> `pictl` depends on [`node-pty`](https://github.com/microsoft/node-pty), a
-> native addon compiled during install, so you need a C/C++ toolchain and Python
-> on your machine: `build-essential` and `python3` on Debian/Ubuntu, the Xcode
-> Command Line Tools on macOS, or the equivalent for your platform. Node 20 or
-> newer is required.
+> `pictl` runs on Linux and macOS only; it uses Unix domain sockets and has no
+> native Windows support. Node 20 or newer is required.
+>
+> On Linux, `pictl`'s [`node-pty`](https://github.com/microsoft/node-pty)
+> dependency has no prebuilt binary and compiles a native addon during install,
+> so you need a C/C++ toolchain and Python: `build-essential` and `python3` on
+> Debian/Ubuntu, or the equivalent.
 
 ## Quickstart
 
