@@ -1,6 +1,6 @@
 {
   "name": "@geraschenko/pictl",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Spawn, observe, control, and attach to a fleet of pi coding-agent instances",
   "license": "Apache-2.0",
   "author": "Anton Geraschenko <geraschenko@gmail.com>",

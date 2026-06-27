@@ -16,7 +16,6 @@ import {
   SettingsManager,
 } from "@geraschenko/pi-coding-agent";
 import xterm from "@xterm/headless";
-import pty from "node-pty";
 import { cursorTo, cursorToRow, HIDE_CURSOR, SHOW_CURSOR } from "./ansi.ts";
 import {
   booleanFlag,
@@ -38,6 +37,7 @@ import {
   writeAgentRecord,
 } from "./registry.ts";
 import { connectWithRetry, type SocketEvent } from "./pi-socket-client.ts";
+import { spawnPty } from "./pty.ts";
 import { TtyServer } from "./tty-server.ts";
 import { fileExists } from "./util.ts";
 
@@ -241,7 +241,7 @@ async function daemon(
   ]);
 
   const sessionArgs = args.resume ? await revivalSessionArgs(sessions) : [];
-  const piProcess = pty.spawn(
+  const piProcess = spawnPty(
     args.piBin,
     ["--rpc-socket", piSocketPath(agentDir), ...sessionArgs, ...args.piArgs],
     {
