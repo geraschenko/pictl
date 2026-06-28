@@ -1,0 +1,1 @@
+I think agent.json currently doesn't have enough information for the revived agent to have exactly the same state as before it was killed. Specifically, if things like the model, thinking level, etc changed over the course of the session, reusing the original command used to spawn the agent is wrong.
