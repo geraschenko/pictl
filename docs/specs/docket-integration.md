@@ -65,8 +65,8 @@ Notes:
 ## Open questions (resolve when we build against docket)
 
 1. **Echo on direct conversation.** If the owner converses with a worker *directly* (raw `pictl prompt -t worker`) rather than via a docket dispatch, that turn is not a docket job, so it is not captured — good. But if the owner dispatched the worker earlier *and* the worker keeps producing turns, only dispatched turns are captured. We believe expressing each interaction as a dispatch keeps this clean; confirm once we try it. (Earlier worry about a relay re-injecting the owner's own conversation is moot under the docket model — only dispatched commands are captured.)
-2. **The `take` menu UX.** v1 is "notify with the ready list; owner takes by id." A richer "X and Y are ready, which first?" stateful exchange is deferred; revisit if the simple menu is awkward in practice.
-3. **Notify gate interval.** `no-activity:5` is a placeholder; tune against real agent pacing.
+2. **The `take` menu UX.** v1 is "notify with the ready list; owner takes by id." Revisit if the simple menu is awkward in practice.
+3. **Notify gate interval.** `no-activity:1` is a placeholder; tune against real agent pacing.
 4. **Does docket graduate to a standalone product?** Built now as an independent repo/package but validated solely through this integration. Decide later whether it earns first-class product status (its own README-as-product, broader feature set) or stays a focused tool.
 5. **Capture format of the dispatched `pictl prompt`.** `pictl prompt` streams *formatted* (possibly ANSI-styled) output by default, which docket captures verbatim into the job's `stdout` and the owner later receives via `take`. Decide whether dispatch should use plain/`--json` output for cleaner re-injection, or whether formatted text is fine to feed back into the owner's prompt.
 
