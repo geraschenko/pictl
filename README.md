@@ -15,7 +15,7 @@ pictl --version
 
 > [!NOTE]
 > `pictl` runs on Linux and macOS only; it uses Unix domain sockets and has no
-> native Windows support. Node 20 or newer is required.
+> native Windows support. Node 22.18 or newer is required.
 >
 > On Linux, `pictl`'s [`node-pty`](https://github.com/microsoft/node-pty)
 > dependency has no prebuilt binary and compiles a native addon during install,
