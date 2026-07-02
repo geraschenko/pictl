@@ -82,8 +82,19 @@ function resolvePiBin(env: NodeJS.ProcessEnv = process.env): string {
   return join(packageRoot, bin.pi);
 }
 
+/**
+ * The script Node was invoked with, re-execed for the detached daemon. Using
+ * process.argv[1] (rather than a path derived from import.meta.url) keeps the
+ * re-exec correct whether pictl runs from the built `dist/` (`main.js`) or from
+ * `.ts` source under type-stripping (`main.ts`), where a hardcoded `./main.js`
+ * would point at a nonexistent file.
+ */
 function mainEntryPath(): string {
-  return fileURLToPath(new URL("./main.js", import.meta.url));
+  const entry = process.argv[1];
+  if (entry === undefined) {
+    throw new Error("cannot determine pictl entry script (process.argv[1])");
+  }
+  return entry;
 }
 
 async function readAll(stream: Readable): Promise<string> {
