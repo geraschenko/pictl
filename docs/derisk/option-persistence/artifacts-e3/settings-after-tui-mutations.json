@@ -1,0 +1,6 @@
+{
+  "lastChangelogVersion": "0.80.2-fork.2",
+  "defaultThinkingLevel": "high",
+  "defaultProvider": "anthropic",
+  "defaultModel": "claude-sonnet-4-0"
+}

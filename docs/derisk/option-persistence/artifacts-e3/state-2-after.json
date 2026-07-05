@@ -1,0 +1,32 @@
+{
+  "model": {
+    "id": "claude-sonnet-4-0",
+    "name": "Claude Sonnet 4 (latest)",
+    "api": "anthropic-messages",
+    "provider": "anthropic",
+    "baseUrl": "https://api.anthropic.com",
+    "reasoning": true,
+    "input": [
+      "text",
+      "image"
+    ],
+    "cost": {
+      "input": 3,
+      "output": 15,
+      "cacheRead": 0.3,
+      "cacheWrite": 3.75
+    },
+    "contextWindow": 200000,
+    "maxTokens": 64000
+  },
+  "thinkingLevel": "high",
+  "isStreaming": false,
+  "isCompacting": false,
+  "steeringMode": "one-at-a-time",
+  "followUpMode": "one-at-a-time",
+  "sessionFile": "/tmp/pictl-option-derisk/sessions/2026-07-04T18-57-24-769Z_019f2e7e-1d21-7600-901e-566c17da63a6.jsonl",
+  "sessionId": "019f2e7e-1d21-7600-901e-566c17da63a6",
+  "autoCompactionEnabled": true,
+  "messageCount": 0,
+  "pendingMessageCount": 0
+}

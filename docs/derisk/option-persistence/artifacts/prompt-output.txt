@@ -1,0 +1,7 @@
+== user ==
+Reply with exactly: OK
+
+== assistant ==
+[error: No API key for provider: anthropic]
+
+[cursor: 3e420ee0]

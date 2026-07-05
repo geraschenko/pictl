@@ -1,5 +1,12 @@
 # Derisking experiment: which mutable session state survives pictl revival, and what does pi broadcast?
 
+> **RESOLVED (2026-07-04).** See [`FINDINGS.md`](./FINDINGS.md) — pi restores
+> all seven candidate fields on its own (session file for model / thinking /
+> name; global settings.json for the rest); pictl needs no persisted-options
+> machinery. Drivers: `run-e1e2.sh` (variants: suspend, sigkill,
+> settings-wipe), `run-e3.sh`; evidence in `artifacts*/`. This README is the
+> pre-experiment brief, kept for methodology.
+
 > Modeled on clauctl's `docs/derisk/resume-persistence/`. Origin:
 > `docs/thoughts/reviving-state.md` (the four empirical questions there are
 > what this experiment answers).
@@ -91,7 +98,7 @@ shell script driving pictl (run against scratch `PICTL_DIR` /
 **E1+E2 — restore-on-revival and RPC-driven event observability (one
 scripted run).**
 
-1. `pictl spawn` an agent; `pictl tail -f --type raw --json > events.jsonl &`
+1. `pictl spawn` an agent; `pictl tail -f --type raw > events.jsonl &`
    — a passive second socket connection logging every broadcast record for
    the rest of the run (`streamRaw` prints all non-response records; this is
    exactly the daemon's vantage point, and untyped/undocumented events would

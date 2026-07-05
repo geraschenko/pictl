@@ -1,0 +1,14 @@
+{
+  "lastChangelogVersion": "0.80.2-fork.2",
+  "defaultProvider": "anthropic",
+  "defaultModel": "claude-opus-4-5",
+  "defaultThinkingLevel": "high",
+  "steeringMode": "all",
+  "followUpMode": "all",
+  "compaction": {
+    "enabled": false
+  },
+  "retry": {
+    "enabled": false
+  }
+}

@@ -1,0 +1,10 @@
+{"type":"session","version":3,"id":"019f2e7c-5328-7fd6-beee-34ed1ba3ccea","timestamp":"2026-07-04T18:55:27.528Z","cwd":"/tmp/pictl-option-derisk/cwd"}
+{"type":"model_change","id":"52eb2deb","parentId":null,"timestamp":"2026-07-04T18:55:27.533Z","provider":"anthropic","modelId":"claude-opus-4-8"}
+{"type":"thinking_level_change","id":"645f5ee8","parentId":"52eb2deb","timestamp":"2026-07-04T18:55:27.533Z","thinkingLevel":"medium"}
+{"type":"model_change","id":"ccce9914","parentId":"645f5ee8","timestamp":"2026-07-04T18:55:28.335Z","provider":"anthropic","modelId":"claude-haiku-4-5"}
+{"type":"message","id":"1c8fe03a","parentId":"ccce9914","timestamp":"2026-07-04T18:55:28.867Z","message":{"role":"user","content":[{"type":"text","text":"Reply with exactly: OK"}],"timestamp":1783191328866}}
+{"type":"message","id":"3e420ee0","parentId":"1c8fe03a","timestamp":"2026-07-04T18:55:29.138Z","message":{"role":"assistant","content":[],"api":"anthropic-messages","provider":"anthropic","model":"claude-haiku-4-5","usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"stopReason":"error","errorMessage":"No API key for provider: anthropic","timestamp":1783191329138}}
+{"type":"model_change","id":"e13e4b57","parentId":"3e420ee0","timestamp":"2026-07-04T18:55:30.223Z","provider":"anthropic","modelId":"claude-3-7-sonnet-20250219"}
+{"type":"model_change","id":"fe5293c2","parentId":"e13e4b57","timestamp":"2026-07-04T18:55:30.733Z","provider":"anthropic","modelId":"claude-opus-4-5"}
+{"type":"thinking_level_change","id":"969b6fe3","parentId":"fe5293c2","timestamp":"2026-07-04T18:55:31.271Z","thinkingLevel":"high"}
+{"type":"session_info","id":"cdb1f00b","parentId":"969b6fe3","timestamp":"2026-07-04T18:55:33.925Z","name":"derisk-option-persistence"}

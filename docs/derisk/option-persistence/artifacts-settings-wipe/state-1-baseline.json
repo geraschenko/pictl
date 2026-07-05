@@ -1,0 +1,32 @@
+{
+  "model": {
+    "id": "claude-haiku-4-5",
+    "name": "Claude Haiku 4.5 (latest)",
+    "api": "anthropic-messages",
+    "provider": "anthropic",
+    "baseUrl": "https://api.anthropic.com",
+    "reasoning": true,
+    "input": [
+      "text",
+      "image"
+    ],
+    "cost": {
+      "input": 1,
+      "output": 5,
+      "cacheRead": 0.1,
+      "cacheWrite": 1.25
+    },
+    "contextWindow": 200000,
+    "maxTokens": 64000
+  },
+  "thinkingLevel": "medium",
+  "isStreaming": false,
+  "isCompacting": false,
+  "steeringMode": "one-at-a-time",
+  "followUpMode": "one-at-a-time",
+  "sessionFile": "/tmp/pictl-option-derisk/sessions/2026-07-04T18-55-47-538Z_019f2e7c-a152-71e6-8b64-d822cbc33930.jsonl",
+  "sessionId": "019f2e7c-a152-71e6-8b64-d822cbc33930",
+  "autoCompactionEnabled": true,
+  "messageCount": 2,
+  "pendingMessageCount": 0
+}

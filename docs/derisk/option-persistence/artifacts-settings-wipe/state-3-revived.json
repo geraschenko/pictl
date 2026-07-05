@@ -1,0 +1,33 @@
+{
+  "model": {
+    "id": "claude-opus-4-5",
+    "name": "Claude Opus 4.5 (latest)",
+    "api": "anthropic-messages",
+    "provider": "anthropic",
+    "baseUrl": "https://api.anthropic.com",
+    "reasoning": true,
+    "input": [
+      "text",
+      "image"
+    ],
+    "cost": {
+      "input": 5,
+      "output": 25,
+      "cacheRead": 0.5,
+      "cacheWrite": 6.25
+    },
+    "contextWindow": 200000,
+    "maxTokens": 64000
+  },
+  "thinkingLevel": "high",
+  "isStreaming": false,
+  "isCompacting": false,
+  "steeringMode": "one-at-a-time",
+  "followUpMode": "one-at-a-time",
+  "sessionFile": "/tmp/pictl-option-derisk/sessions/2026-07-04T18-55-47-538Z_019f2e7c-a152-71e6-8b64-d822cbc33930.jsonl",
+  "sessionId": "019f2e7c-a152-71e6-8b64-d822cbc33930",
+  "sessionName": "derisk-option-persistence",
+  "autoCompactionEnabled": true,
+  "messageCount": 2,
+  "pendingMessageCount": 0
+}
