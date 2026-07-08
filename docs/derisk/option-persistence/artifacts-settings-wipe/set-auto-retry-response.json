@@ -1,1 +1,6 @@
-{"id":"pictl-1","type":"response","command":"set_auto_retry","success":true}
+{
+  "id": "pictl-1",
+  "type": "response",
+  "command": "set_auto_retry",
+  "success": true
+}

@@ -13,10 +13,7 @@
     "thinkingLevelMap": {
       "xhigh": "xhigh"
     },
-    "input": [
-      "text",
-      "image"
-    ],
+    "input": ["text", "image"],
     "cost": {
       "input": 5,
       "output": 25,

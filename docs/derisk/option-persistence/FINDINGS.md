@@ -15,7 +15,7 @@ through two different mechanisms with very different guarantees:**
 - **Global-settings restore** (shared across ALL agents in the pi agent dir):
   steering mode, follow-up mode, auto-compaction, auto-retry. pi writes
   settings.json at mutation time, and a revived pi reads current settings.
-  This is *coincidentally* faithful for a single agent but is **not per-agent
+  This is _coincidentally_ faithful for a single agent but is **not per-agent
   state**: another agent (or the user running bare pi) changing the same
   setting between suspend and revival changes what comes back (proven by the
   settings-wipe variant: wipe settings.json before revival and exactly these
@@ -27,21 +27,21 @@ is **false for all seven candidate fields** at this pi version.
 
 ## Per-field table
 
-| field           | mutated via                        | restored on revival? | mechanism                | broadcast event on mutation (RPC / TUI)                  |
-| --------------- | ---------------------------------- | -------------------- | ------------------------ | -------------------------------------------------------- |
-| model           | `set_model`, TUI ctrl+p            | yes (latest wins)    | session file + settings¹ | **none / none**                                          |
-| thinking level  | `set_thinking_level`, TUI shift+tab | yes                 | session file + settings² | `thinking_level_changed` / same                          |
-| session name    | `set_session_name`                 | yes                  | session file             | `session_info_changed` / (untested, no TUI binding used) |
-| steering mode   | `set_steering_mode`                | yes                  | **settings only**        | **none**                                                 |
-| follow-up mode  | `set_follow_up_mode`               | yes                  | **settings only**        | **none**                                                 |
-| auto-compaction | `set_auto_compaction`              | yes                  | **settings only**        | **none**                                                 |
-| auto-retry      | `set_auto_retry`                   | presumed³            | **settings only**        | **none**                                                 |
+| field           | mutated via                         | restored on revival? | mechanism                | broadcast event on mutation (RPC / TUI)                  |
+| --------------- | ----------------------------------- | -------------------- | ------------------------ | -------------------------------------------------------- |
+| model           | `set_model`, TUI ctrl+p             | yes (latest wins)    | session file + settings¹ | **none / none**                                          |
+| thinking level  | `set_thinking_level`, TUI shift+tab | yes                  | session file + settings² | `thinking_level_changed` / same                          |
+| session name    | `set_session_name`                  | yes                  | session file             | `session_info_changed` / (untested, no TUI binding used) |
+| steering mode   | `set_steering_mode`                 | yes                  | **settings only**        | **none**                                                 |
+| follow-up mode  | `set_follow_up_mode`                | yes                  | **settings only**        | **none**                                                 |
+| auto-compaction | `set_auto_compaction`               | yes                  | **settings only**        | **none**                                                 |
+| auto-retry      | `set_auto_retry`                    | presumed³            | **settings only**        | **none**                                                 |
 
 ¹ `set_model` writes both a `model_change` session entry and
 `defaultProvider`/`defaultModel` to settings.json. With settings wiped, the
 session entry alone restored the model — the session file is sufficient.
 ² RPC `set_thinking_level` writes only the session entry; the TUI shift+tab
-cycle *also* writes `defaultThinkingLevel` to settings. Either path restores.
+cycle _also_ writes `defaultThinkingLevel` to settings. Either path restores.
 ³ `set_auto_retry` writes `retry.enabled` to settings.json, the same
 mechanism as the three fields above, but there is **no way to read auto-retry
 state back**: `get_state` has no field for it (a pi API gap worth reporting
@@ -93,7 +93,7 @@ regardless). Restore is inferred from the mechanism, not observed.
    settings.json in the interim. If per-agent fidelity for
    steering/follow-up/auto-compaction/auto-retry ever matters, the fix
    belongs in pi (per-session persistence), not pictl — but note this is
-   pi's *designed* behavior (these are user preferences, not session state).
+   pi's _designed_ behavior (these are user preferences, not session state).
 3. **Do not build revival machinery on the event stream.** Only two of seven
    fields broadcast events; the daemon cannot observe the rest. Fortunately
    it doesn't need to.

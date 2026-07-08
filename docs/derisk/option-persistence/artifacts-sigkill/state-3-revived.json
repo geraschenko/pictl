@@ -6,10 +6,7 @@
     "provider": "anthropic",
     "baseUrl": "https://api.anthropic.com",
     "reasoning": true,
-    "input": [
-      "text",
-      "image"
-    ],
+    "input": ["text", "image"],
     "cost": {
       "input": 5,
       "output": 25,

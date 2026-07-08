@@ -21,7 +21,7 @@ revival unless pi restores it from the session file.
 
 clauctl solved the equivalent problem with "record the args of every
 state-mutating control call as you make it" — but that discipline **does not
-transfer**: clauctl's daemon *is* the SDK client issuing mutations, while
+transfer**: clauctl's daemon _is_ the SDK client issuing mutations, while
 pictl's daemon is not in the mutation path at all. RPC clients (`pictl
 set-model`, ...) connect straight to pi.sock, and an attached user mutates
 state through pi's TUI over the PTY with no RPC command record. The daemon
@@ -66,7 +66,7 @@ From `session-manager.d.ts`, `agent-session.d.ts`, `rpc-types.d.ts`:
 
 Priors are hypotheses to verify, not results — the whole point is that
 `.d.ts` shapes don't prove runtime behavior (e.g. does `--session` actually
-re-apply the *latest* `model_change` entry? do the typed events actually get
+re-apply the _latest_ `model_change` entry? do the typed events actually get
 broadcast on the socket, and for TUI-driven changes too?).
 
 ## Candidate fields
@@ -74,15 +74,15 @@ broadcast on the socket, and for TUI-driven changes too?).
 Everything mutable via pictl's RPC passthrough (`rpc-commands.ts`) that is
 plausibly persistent session state:
 
-| field           | mutated via                                  | prior: session-restored? | prior: event on mutation?  | readable via get_state? |
-| --------------- | -------------------------------------------- | ------------------------ | -------------------------- | ----------------------- |
-| model           | `set_model`, `cycle_model`                   | yes (`model_change`)     | none typed                 | yes                     |
-| thinking level  | `set_thinking_level`, `cycle_thinking_level` | yes (`thinking_level_change`) | `thinking_level_changed` | yes                  |
-| session name    | `set_session_name`                           | yes (`session_info`)     | `session_info_changed`     | yes                     |
-| steering mode   | `set_steering_mode`                          | no entry type            | none typed                 | yes                     |
-| follow-up mode  | `set_follow_up_mode`                         | no entry type            | none typed                 | yes                     |
-| auto-compaction | `set_auto_compaction`                        | no entry type            | none typed                 | yes                     |
-| auto-retry      | `set_auto_retry`                             | no entry type            | none typed                 | **no**                  |
+| field           | mutated via                                  | prior: session-restored?      | prior: event on mutation? | readable via get_state? |
+| --------------- | -------------------------------------------- | ----------------------------- | ------------------------- | ----------------------- |
+| model           | `set_model`, `cycle_model`                   | yes (`model_change`)          | none typed                | yes                     |
+| thinking level  | `set_thinking_level`, `cycle_thinking_level` | yes (`thinking_level_change`) | `thinking_level_changed`  | yes                     |
+| session name    | `set_session_name`                           | yes (`session_info`)          | `session_info_changed`    | yes                     |
+| steering mode   | `set_steering_mode`                          | no entry type                 | none typed                | yes                     |
+| follow-up mode  | `set_follow_up_mode`                         | no entry type                 | none typed                | yes                     |
+| auto-compaction | `set_auto_compaction`                        | no entry type                 | none typed                | yes                     |
+| auto-retry      | `set_auto_retry`                             | no entry type                 | none typed                | **no**                  |
 
 Excluded: `switch_session`/`fork`/`clone`/`new_session` (session rotation —
 already covered by `session_changed` handling), transient actions (`abort`,
