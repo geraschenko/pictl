@@ -74,3 +74,9 @@ Archive reviewers you spawned when done:
 ```bash
 pictl archive -t "$reviewer"
 ```
+
+Archiving does not destroy the reviewer: prompting an archived agent
+automatically revives it with its full prior context. To continue a review in
+a later phase (e.g. the reviewer who approved the spec reviewing the
+implementation), prompt the archived reviewer rather than spawning a new one —
+spawn fresh only when you specifically want unanchored eyes.
