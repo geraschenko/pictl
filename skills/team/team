@@ -1,0 +1,355 @@
+#!/usr/bin/env node
+// team: async messaging with worker agents, backed by a per-manager docket inbox.
+// See docs/specs/docket-integration.md and docs/specs/team-tmux.md. Dependency-free
+// by design: this skill is not packaged with pictl, and Node (not bash) because
+// the wrapper exists to avoid shell-quoting hazards.
+import { createHash, randomUUID } from "node:crypto";
+import { mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, rmSync } from "node:fs";
+import { join, dirname, basename, resolve } from "node:path";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+
+const USAGE = `usage: team <subcommand> [args]
+
+  team start [--pane <target> | --no-notify]
+                                      ensure your inbox exists; print its path
+  team dispatch <worker> [<msg>|-]    send an async message (omitted/- msg: read stdin)
+  team ready                          list untaken results
+  team take <id>                      print one result and mark it taken
+  team status                         full inbox status, incl. running jobs
+  team cancel <id>                    stop waiting for a result (not the worker)
+  team gc [--dry-run] [--older-than <dur>]
+                                      delete old jobs and stale inboxes (all managers)
+`;
+
+class UsageError extends Error {}
+class ChildExit extends Error {
+  constructor(code) {
+    super(`child exited with code ${code}`);
+    this.code = code;
+  }
+}
+
+function dataHome(env) {
+  if (env.XDG_DATA_HOME !== undefined) return resolve(env.XDG_DATA_HOME);
+  if (env.HOME !== undefined) return resolve(env.HOME, ".local/share");
+  throw new Error("cannot locate data home: neither XDG_DATA_HOME nor HOME is set");
+}
+
+function keyHash(key) {
+  return createHash("sha256").update(key).digest("hex").slice(0, 16);
+}
+
+const SHELL_NAMES = new Set(["bash", "sh", "zsh", "dash", "fish", "ksh"]);
+
+function readProc(pid, file) {
+  return readFileSync(`/proc/${pid}/${file}`, "utf8");
+}
+
+// Ancestry walk (Linux /proc): ascend past harness shells, so fresh-shell-per-
+// call harnesses (and pipelines/subshells, whose extra shell layers are
+// skipped) derive a stable identity. Name-free on purpose: harness processes
+// can carry arbitrary comm names (observed: a claude version string), and the
+// only reliably-named ancestor can be a daemon shared across sessions.
+// Interactive shells stop the walk (per-pane identity); session leadership
+// alone does not identify one — daemonized-harness tool shells are session
+// leaders too — so the stop requires a controlling tty as well.
+function walkToManagerPid(startPid) {
+  let pid = startPid;
+  let daemonized = false;
+  try {
+    for (;;) {
+      const comm = readProc(pid, "comm").trim();
+      const stat = readProc(pid, "stat");
+      // Parse after the last ')' to survive parens in comm; the fields there
+      // are: state ppid pgrp session tty_nr ...
+      const fields = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+      const parent = Number(fields[1]);
+      const sessionId = Number(fields[3]);
+      const ttyNr = Number(fields[4]);
+      if (readProc(pid, "cmdline").split("\0").includes("--bg-spare")) daemonized = true;
+      if (!SHELL_NAMES.has(comm)) return { pid, orphaned: false, daemonized };
+      if (sessionId === pid && ttyNr !== 0) return { pid, orphaned: false, daemonized };
+      if (parent <= 1) return { pid, orphaned: true, daemonized };
+      pid = parent;
+    }
+  } catch {
+    // /proc unreadable (non-Linux): fall back to keying on startPid directly.
+    return { pid: startPid, orphaned: false, daemonized: false };
+  }
+}
+
+// The manager's identity determines its inbox: PI_AGENT_ID if set (stable across
+// restarts), else the manager pid from the ancestry walk. Deliberately no
+// override — honoring DOCKET_DIR would glue a spawned agent to its manager's
+// inbox.
+function resolveDocketDir(env, ppid) {
+  const key = env.PI_AGENT_ID ?? String(walkToManagerPid(ppid).pid);
+  return join(dataHome(env), "team", keyHash(key));
+}
+
+function shellQuote(s) {
+  return "'" + s.replaceAll("'", "'\\''") + "'";
+}
+
+// Pane discovery is notify-only (never identity) and reads team's OWN env only:
+// ancestor environs are launch-time snapshots and were observed carrying a
+// live, unrelated session's pane.
+function tmuxPane(env) {
+  if (env.TMUX === undefined || env.TMUX_PANE === undefined) return undefined;
+  return { socket: env.TMUX.split(",")[0], pane: env.TMUX_PANE };
+}
+
+// Wakes a terminal-resident agent by typing the ready menu into its tmux pane;
+// the guard/gate/paste mechanics live in the sibling tmux-notify script. Its
+// absolute path is baked in: docket runs hooks from its own environment, so
+// nothing relative or PATH-based is reliable. If the skill directory moves,
+// stale hooks fail silently and results stay pollable.
+function tmuxNotifyHook(socket, pane) {
+  const script = join(dirname(fileURLToPath(import.meta.url)), "tmux-notify");
+  const socketArgs = socket === undefined ? "" : `-S ${shellQuote(socket)} `;
+  return `${shellQuote(script)} ${socketArgs}${shellQuote(pane)}`;
+}
+
+function notifyHook(env, opts) {
+  if (opts.noNotify) return undefined;
+  if (env.PI_AGENT_ID !== undefined) {
+    const id = shellQuote(env.PI_AGENT_ID);
+    // The no-activity:1 gate delays the wake until the manager has been quiet
+    // for 1s. After the gate clears, the manager may begin a new turn before
+    // the prompt lands; a plain prompt would then bounce with "busy", so the
+    // wake is injected with --streaming-behavior follow-up (queued, delivered
+    // at the next opportunity). `;` not `&&`: attempt delivery even if the
+    // gate wait fails.
+    return (
+      `pictl wait -t ${id} --until no-activity:1; ` +
+      `docket ready | pictl prompt -t ${id} --streaming-behavior follow-up -`
+    );
+  }
+  if (opts.pane !== undefined) return tmuxNotifyHook(undefined, opts.pane);
+  const pane = tmuxPane(env);
+  if (pane !== undefined) return tmuxNotifyHook(pane.socket, pane.pane);
+  return undefined;
+}
+
+function runDocket(args, { quietStdout = false } = {}) {
+  const child = spawnSync("docket", args, {
+    stdio: [quietStdout ? "ignore" : "inherit", quietStdout ? "ignore" : "inherit", "inherit"],
+  });
+  if (child.error) throw new Error(`failed to run docket: ${child.error.message}`);
+  if (child.status !== 0) throw new ChildExit(child.status ?? 1);
+}
+
+function ensureDocket(dir, env, opts) {
+  // docket init creates <dir> itself but not its parent.
+  mkdirSync(dirname(dir), { recursive: true });
+  const creating = !existsSync(dir);
+  const hook = notifyHook(env, opts);
+  const args = ["init", dir];
+  // The hook is installed at docket creation and re-wired by an explicit
+  // `start --pane`; flag-less calls never pass --notify, and docket preserves
+  // the hook in that case — that is what makes a notify choice (including
+  // --no-notify) stick. Note --no-notify cannot clear an existing hook.
+  if (hook !== undefined && (creating || opts.pane !== undefined)) args.push("--notify", hook);
+  // init prints the docket path; suppress it so callers control their output.
+  runDocket(args, { quietStdout: true });
+}
+
+// Docket creation is refused when the derived identity could never work:
+// an orphaned walk keys an inbox nobody can re-derive, and a daemonized
+// manager with no known pane would need its user to name one (its exec
+// ancestry runs through a shared daemon, so no automatic route exists).
+// Once the docket exists, no flag is ever needed again (hook stickiness).
+function checkDocketCreatable(dir, env, ppid, opts) {
+  if (env.PI_AGENT_ID !== undefined || existsSync(dir)) return;
+  const info = walkToManagerPid(ppid);
+  if (info.orphaned) {
+    throw new Error("manager identity resolves to an orphaned shell; refusing to create an inbox that could not be re-derived");
+  }
+  if (info.daemonized && opts.pane === undefined && !opts.noNotify && tmuxPane(env) === undefined) {
+    // The absolute script path, not "team": this script is not on PATH, and
+    // the re-run instructions must work when retyped literally.
+    const self = fileURLToPath(import.meta.url);
+    throw new Error(
+      "you appear to be a daemonized agent, so your tmux pane cannot be determined automatically.\n" +
+        "Ask your user which tmux pane you are displayed in (a pane id like %5, or a target like session:0.0), then re-run:\n" +
+        `  ${self} start --pane <target>   wake-up notifications will be typed into that pane\n` +
+        `  ${self} start --no-notify       no notifications; poll \`ready\` instead`
+    );
+  }
+}
+
+function start(env, ppid, opts) {
+  const dir = resolveDocketDir(env, ppid);
+  checkDocketCreatable(dir, env, ppid, opts);
+  ensureDocket(dir, env, opts);
+  console.log(dir);
+}
+
+function dispatch(worker, message, env, ppid) {
+  const dir = resolveDocketDir(env, ppid);
+  checkDocketCreatable(dir, env, ppid, {});
+  ensureDocket(dir, env, {});
+  // Spool per-docket, but beside the docket dir rather than inside it —
+  // docket owns its directory's layout.
+  const spoolDir = join(dirname(dir), "messages", basename(dir));
+  mkdirSync(spoolDir, { recursive: true });
+  const messageFile = join(spoolDir, `${randomUUID()}.txt`);
+  writeFileSync(messageFile, message);
+  // docket runs this via sh -c with stdin /dev/null, so the redirect re-opens
+  // stdin from the spooled message file; the message content itself never
+  // passes through a shell. --streaming-behavior follow-up: without it, a
+  // prompt to a mid-turn worker is rejected by the pi RPC, so dispatching to a
+  // busy worker would capture an immediate error instead of queuing; on an
+  // idle worker the flag is a no-op.
+  const command =
+    `pictl prompt -t ${shellQuote(worker)} --streaming-behavior follow-up - ` +
+    `< ${shellQuote(messageFile)}`;
+  runDocket(["dispatch", command, "--docket", dir]);
+}
+
+function passthrough(subcommand, args, env, ppid) {
+  runDocket([subcommand, ...args, "--docket", resolveDocketDir(env, ppid)]);
+}
+
+function ready(env, ppid) {
+  passthrough("ready", [], env, ppid);
+}
+
+function take(id, env, ppid) {
+  passthrough("take", [id], env, ppid);
+}
+
+function status(env, ppid) {
+  passthrough("status", [], env, ppid);
+}
+
+function cancel(id, env, ppid) {
+  passthrough("cancel", [id], env, ppid);
+}
+
+// Global cleanup across all managers' inboxes: docket gc owns the age/state
+// policy per inbox (delete old taken/canceled jobs, delete the whole docket
+// when stale); team only sweeps spool dirs whose inbox is gone. That sibling-
+// existence rule composes with --dry-run for free: docket then leaves the
+// inbox, so its spool is left too. Pre-existing orphans still honor dry-run
+// explicitly. No identity is involved — gc works from any shell.
+function gc(env, opts) {
+  const teamDir = join(dataHome(env), "team");
+  if (!existsSync(teamDir)) return;
+  const docketArgs = ["gc"];
+  if (opts.dryRun) docketArgs.push("--dry-run");
+  if (opts.olderThan !== undefined) docketArgs.push("--older-than", opts.olderThan);
+  for (const entry of readdirSync(teamDir, { withFileTypes: true })) {
+    if (!entry.isDirectory() || entry.name === "messages") continue;
+    runDocket([...docketArgs, "--docket", join(teamDir, entry.name)]);
+  }
+  const messagesDir = join(teamDir, "messages");
+  if (!existsSync(messagesDir)) return;
+  for (const entry of readdirSync(messagesDir, { withFileTypes: true })) {
+    if (!entry.isDirectory() || existsSync(join(teamDir, entry.name))) continue;
+    const spoolDir = join(messagesDir, entry.name);
+    if (opts.dryRun) {
+      console.log(`would delete ${spoolDir}`);
+    } else {
+      rmSync(spoolDir, { recursive: true, force: true });
+      console.log(`deleted ${spoolDir}`);
+    }
+  }
+}
+
+function readMessage(messageArg) {
+  if (messageArg === undefined || messageArg === "-") return readFileSync(0, "utf8");
+  return messageArg;
+}
+
+function expectArgs(subcommand, args, count) {
+  if (args.length !== count) {
+    throw new UsageError(`team ${subcommand} takes ${count} argument${count === 1 ? "" : "s"}`);
+  }
+  for (const arg of args) {
+    if (arg.startsWith("-")) throw new UsageError(`unknown flag: ${arg}`);
+  }
+}
+
+function main(argv, env, ppid) {
+  const [subcommand, ...args] = argv;
+  switch (subcommand) {
+    case "start": {
+      const opts = {};
+      for (let i = 0; i < args.length; i++) {
+        if (args[i] === "--pane") {
+          i += 1;
+          if (args[i] === undefined) throw new UsageError("--pane requires a <target>");
+          opts.pane = args[i];
+        } else if (args[i] === "--no-notify") {
+          opts.noNotify = true;
+        } else {
+          throw new UsageError(`unexpected argument to team start: ${args[i]}`);
+        }
+      }
+      if (opts.pane !== undefined && opts.noNotify) {
+        throw new UsageError("--pane and --no-notify are mutually exclusive");
+      }
+      return start(env, ppid, opts);
+    }
+    case "dispatch": {
+      if (args.length < 1 || args.length > 2) {
+        throw new UsageError("team dispatch takes <worker> and an optional <message>");
+      }
+      const [worker, messageArg] = args;
+      if (worker.startsWith("-")) throw new UsageError(`unknown flag: ${worker}`);
+      if (messageArg !== undefined && messageArg !== "-" && messageArg.startsWith("-")) {
+        throw new UsageError(`unknown flag: ${messageArg} (use - to read the message from stdin)`);
+      }
+      const message = readMessage(messageArg);
+      // Guard against `team dispatch <worker>` with stdin at /dev/null, which
+      // would otherwise silently dispatch an empty task.
+      if (message.trim() === "") throw new UsageError("dispatch message is empty");
+      return dispatch(worker, message, env, ppid);
+    }
+    case "ready":
+      expectArgs("ready", args, 0);
+      return ready(env, ppid);
+    case "take":
+      expectArgs("take", args, 1);
+      return take(args[0], env, ppid);
+    case "status":
+      expectArgs("status", args, 0);
+      return status(env, ppid);
+    case "cancel":
+      expectArgs("cancel", args, 1);
+      return cancel(args[0], env, ppid);
+    case "gc": {
+      const opts = {};
+      for (let i = 0; i < args.length; i++) {
+        if (args[i] === "--dry-run") {
+          opts.dryRun = true;
+        } else if (args[i] === "--older-than") {
+          i += 1;
+          if (args[i] === undefined) throw new UsageError("--older-than requires a duration");
+          opts.olderThan = args[i];
+        } else {
+          throw new UsageError(`unexpected argument to team gc: ${args[i]}`);
+        }
+      }
+      return gc(env, opts);
+    }
+    case undefined:
+      throw new UsageError("missing subcommand");
+    default:
+      throw new UsageError(`unknown subcommand: ${subcommand}`);
+  }
+}
+
+try {
+  main(process.argv.slice(2), process.env, process.ppid);
+} catch (err) {
+  if (err instanceof UsageError) {
+    process.stderr.write(`team: ${err.message}\n\n${USAGE}`);
+    process.exit(2);
+  }
+  if (err instanceof ChildExit) process.exit(err.code);
+  process.stderr.write(`team: ${err.message}\n`);
+  process.exit(1);
+}

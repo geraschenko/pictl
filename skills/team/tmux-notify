@@ -1,0 +1,48 @@
+#!/bin/sh
+# Wake a terminal-resident agent by typing the docket ready menu into its tmux
+# pane. Runs as a docket notify hook, so `docket ready` resolves the docket
+# whose job just completed.
+#
+# usage: tmux-notify [-S <socket>] <pane-target>
+
+if [ "$1" = "-S" ]; then
+  socket=$2
+  shift 2
+fi
+target=$1
+
+tmuxCmd() {
+  if [ -n "$socket" ]; then command tmux -S "$socket" "$@"; else command tmux "$@"; fi
+}
+
+# Guard: deliver only if the pane still runs an interactive agent — a pane
+# that dropped back to a shell would *execute* the payload. `node` is
+# deliberately excluded from the allowlist: plain `pi` reports as `pi`, and
+# the one agent that reports `node` — a `pictl attach` client — has
+# $PI_AGENT_ID set and gets a pictl hook instead of this one.
+cmd=$(tmuxCmd display-message -p -t "$target" '#{pane_current_command}') || exit 0
+case "$cmd" in pi|claude|codex) ;; *) exit 0 ;; esac
+
+# Quiet gate: deliver only after two consecutive identical full-screen
+# captures 1s apart (mid-turn screens churn every second: spinner, timer,
+# token counter); cap 600 tries, then deliver anyway.
+prev='__sentinel__'
+i=0
+while [ "$i" -lt 600 ]; do
+  cur=$(tmuxCmd capture-pane -p -t "$target") || exit 0
+  [ "$cur" = "$prev" ] && break
+  prev=$cur
+  i=$((i + 1))
+  sleep 1
+done
+
+# Re-check the guard: the quiet gate can wait minutes, and a pane that
+# dropped back to a shell in the meantime would *execute* the payload.
+cmd=$(tmuxCmd display-message -p -t "$target" '#{pane_current_command}') || exit 0
+case "$cmd" in pi|claude|codex) ;; *) exit 0 ;; esac
+
+# Bracketed paste keeps a multi-line payload intact and unparsed by the
+# terminal; $$ uniquifies the buffer per run.
+docket ready | tmuxCmd load-buffer -b "team-notify-$$" -
+tmuxCmd paste-buffer -p -d -b "team-notify-$$" -t "$target"
+tmuxCmd send-keys -t "$target" Enter

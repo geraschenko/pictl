@@ -18,7 +18,7 @@ merged options on respawn. The empirical study behind it is
 `~/git/geraschenko/clauctl/docs/derisk/resume-persistence/FINDINGS.md`.
 
 That discipline does not transfer directly to pictl, because pictl's daemon is
-not in the mutation path. clauctl's daemon *is* the SDK client issuing the
+not in the mutation path. clauctl's daemon _is_ the SDK client issuing the
 control calls; in pictl, mutations bypass the daemon entirely:
 
 - RPC clients (`pictl model`, `pictl thinking`, ...) connect straight to
