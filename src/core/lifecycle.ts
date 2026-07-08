@@ -92,14 +92,7 @@ async function reviveAgent(agent: AgentRecord): Promise<AgentRecord> {
     // Reviving an archived agent — including implicitly, by sending it a
     // command — un-archives it.
     await setArchived(agent.agentDir, false);
-    await launchDaemon({
-      agentDir: agent.agentDir,
-      agentId: agent.id,
-      cwd: agent.cwd,
-      piBin: agent.piBin,
-      piArgs: agent.spawnArgs,
-      resume: true,
-    });
+    await launchDaemon(agent.id);
     return await loadAgent(agent.id);
   } finally {
     await rm(lockPath, { force: true });
@@ -408,14 +401,7 @@ async function resume(this: CommandContext): Promise<void> {
       this.process.stdout.write(`${agent.id} is already running\n`);
       return;
     }
-    await launchDaemon({
-      agentDir: agent.agentDir,
-      agentId: agent.id,
-      cwd: agent.cwd,
-      piBin: agent.piBin,
-      piArgs: agent.spawnArgs,
-      resume: true,
-    });
+    await launchDaemon(agent.id);
     this.process.stdout.write(`resumed ${agent.id}\n`);
   });
 }

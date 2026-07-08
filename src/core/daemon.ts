@@ -18,21 +18,22 @@ import {
 import xterm from "@xterm/headless";
 import { cursorTo, cursorToRow, HIDE_CURSOR, SHOW_CURSOR } from "./ansi.ts";
 import {
-  booleanFlag,
   commandNoTarget,
   parsedFlag,
   requiredStringFlag,
-  restArgs,
-  stringFlag,
   type InferFlags,
 } from "./cli.ts";
 import { type CommandContext } from "./targets.ts";
 import {
   type AgentRecord,
+  agentDirPath,
   daemonLogPath,
   piSocketPath,
   readAgentRecord,
+  readSpawnOptions,
   type SessionHistoryEntry,
+  type SpawnOptions,
+  spawnOptionsPath,
   ttySocketPath,
   writeAgentRecord,
 } from "./registry.ts";
@@ -46,12 +47,7 @@ const PTY_ROWS = 24;
 const RPC_CONNECT_DEADLINE_MS = 30_000;
 
 const daemonFlags = {
-  agentDir: requiredStringFlag("Agent directory", "path"),
   agentId: requiredStringFlag("Agent id", "uuid"),
-  cwd: requiredStringFlag("Working directory", "path"),
-  piBin: requiredStringFlag("pi binary", "path"),
-  resume: booleanFlag("Resume"),
-  tag: stringFlag("Tag", "str"),
   readyFd: parsedFlag("Ready fd", numberParser, "int"),
 };
 
@@ -201,35 +197,65 @@ export function projectTrustWouldBlock(cwd: string, piArgs: string[]): boolean {
   );
 }
 
-async function daemon(
-  this: CommandContext,
-  flags: DaemonFlags,
-  ...piArgs: string[]
-): Promise<void> {
-  const args = { ...flags, piArgs };
-  const { agentDir, agentId } = args;
+async function daemon(this: CommandContext, flags: DaemonFlags): Promise<void> {
+  const { agentId } = flags;
+  const agentDir = agentDirPath(agentId);
   // _daemon is a Node daemon and needs pid/signals/exit; Stricli's process type
   // intentionally only models portable stdio, so use Node's process here.
   const proc = this.process as NodeJS.Process;
 
+  const failStartup = (message: string): void => {
+    proc.stderr.write(`[daemon] ${message}\n`);
+    signalReady(flags.readyFd, { ok: false, error: message });
+  };
+
+  // Classify the launch from disk state: an agent.json means revival (config
+  // read back from it, including any stale spawn-options.json left by a
+  // daemon that died mid-handoff); otherwise a spawn-options.json means
+  // initial spawn. See docs/specs/daemon-derived-args.md.
   const existing = await readAgentRecord(agentDir);
-  const createdAt =
-    existing.kind === "ok"
-      ? existing.record.createdAt
-      : new Date().toISOString();
-  const sessions = existing.kind === "ok" ? existing.record.sessions : [];
-  // First spawn carries --tag; revival preserves whatever was recorded.
-  const tag = existing.kind === "ok" ? existing.record.tag : args.tag;
+  const spawnFile = await readSpawnOptions(agentDir);
+  let resume: boolean;
+  let options: SpawnOptions;
+  let createdAt: string;
+  let sessions: SessionHistoryEntry[];
+  if (existing.kind === "ok") {
+    resume = true;
+    const record = existing.record;
+    options = {
+      cwd: record.cwd,
+      piBin: record.piBin,
+      spawnArgs: record.spawnArgs,
+      ...(record.tag !== undefined && { tag: record.tag }),
+    };
+    createdAt = record.createdAt;
+    sessions = record.sessions;
+  } else if (existing.kind === "corrupt") {
+    failStartup(`cannot classify launch: ${existing.error}`);
+    return;
+  } else if (spawnFile.kind === "ok") {
+    resume = false;
+    options = spawnFile.options;
+    createdAt = new Date().toISOString();
+    sessions = [];
+  } else {
+    failStartup(
+      spawnFile.kind === "corrupt"
+        ? `cannot classify launch: ${spawnFile.error}`
+        : `neither agent.json nor spawn-options.json in ${agentDir} ` +
+            `(_daemon is internal; use pictl spawn)`,
+    );
+    return;
+  }
 
   // pi would sit on its interactive trust dialog forever in a headless PTY;
   // detect that deterministically and fail fast instead of hanging.
-  if (projectTrustWouldBlock(args.cwd, args.piArgs)) {
+  if (projectTrustWouldBlock(options.cwd, options.spawnArgs)) {
     const message =
-      `pi would block on the project-trust prompt in ${args.cwd}; ` +
+      `pi would block on the project-trust prompt in ${options.cwd}; ` +
       `pass --[no-]approve (pictl spawn -- --approve) or trust/distrust ` +
       `the directory once interactively by running pi there.`;
-    proc.stderr.write(`[daemon] ${message}\n`);
-    signalReady(args.readyFd, { ok: false, error: message });
+    failStartup(message);
     return;
   }
 
@@ -240,15 +266,20 @@ async function daemon(
     rm(ttySocketPath(agentDir), { force: true }),
   ]);
 
-  const sessionArgs = args.resume ? await revivalSessionArgs(sessions) : [];
+  const sessionArgs = resume ? await revivalSessionArgs(sessions) : [];
   const piProcess = spawnPty(
-    args.piBin,
-    ["--rpc-socket", piSocketPath(agentDir), ...sessionArgs, ...args.piArgs],
+    options.piBin,
+    [
+      "--rpc-socket",
+      piSocketPath(agentDir),
+      ...sessionArgs,
+      ...options.spawnArgs,
+    ],
     {
       name: "xterm-256color",
       cols: PTY_COLS,
       rows: PTY_ROWS,
-      cwd: args.cwd,
+      cwd: options.cwd,
       env: ptyEnv(agentId, this.env),
     },
   );
@@ -299,16 +330,19 @@ async function daemon(
   const record: AgentRecord = {
     id: agentId,
     createdAt,
-    cwd: args.cwd,
-    ...(tag !== undefined && { tag }),
-    piBin: args.piBin,
-    spawnArgs: args.piArgs,
+    cwd: options.cwd,
+    ...(options.tag !== undefined && { tag: options.tag }),
+    piBin: options.piBin,
+    spawnArgs: options.spawnArgs,
     daemonPid: proc.pid,
     piPid: piProcess.pid,
     sessions,
     agentDir,
   };
   await writeAgentRecord(record);
+  // The handoff is complete once the options are in agent.json; force also
+  // covers revival, where any spawn file present is a stale leftover.
+  await rm(spawnOptionsPath(agentDir), { force: true });
 
   // agent.json writes are serialized through this chain; session events can
   // arrive faster than a write completes.
@@ -380,24 +414,20 @@ async function daemon(
       RPC_CONNECT_DEADLINE_MS,
       handleEvent,
     );
-    signalReady(args.readyFd, { ok: true });
+    signalReady(flags.readyFd, { ok: true });
   } catch (error) {
-    const message =
+    failStartup(
       `could not connect to pi socket: ${String(error)} ` +
-      `(log: ${daemonLogPath(agentDir)})`;
-    proc.stderr.write(`[daemon] ${message}\n`);
-    signalReady(args.readyFd, { ok: false, error: message });
+        `(log: ${daemonLogPath(agentDir)})`,
+    );
     piProcess.kill("SIGKILL");
     cleanupAndExit(1);
   }
 }
 
-const daemonCommand = commandNoTarget<DaemonFlags, string[]>({
+const daemonCommand = commandNoTarget<DaemonFlags>({
   docs: { brief: "Internal command to launch a single-agent pi daemon" },
-  parameters: {
-    flags: daemonFlags,
-    positional: restArgs("Arguments forwarded to pi", "pi-args"),
-  },
+  parameters: { flags: daemonFlags },
   func: daemon,
 });
 

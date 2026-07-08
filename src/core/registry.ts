@@ -1,10 +1,11 @@
 /**
  * The agent registry is a directory of agent dirs: $PICTL_DIR/<agentId>/ with
  * agent.json (written only by the daemon), pi.sock, tty.sock, daemon.log,
- * and optionally a tombstone file marking the dir for gc.
+ * a transient spawn-options.json handed from spawn to the daemon, and
+ * optionally a tombstone file marking the dir for gc.
  */
 
-import { open, readdir, readFile, rename } from "node:fs/promises";
+import { open, readdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import envPaths from "env-paths";
 import { fileExists } from "./util.ts";
@@ -107,6 +108,77 @@ export function socketPathLengthError(
 
 export function tombstonePath(agentDir: string): string {
   return join(agentDir, "tombstone");
+}
+
+/**
+ * The transient spawn-time configuration handoff: `spawn` writes it before
+ * launching the daemon; the daemon folds it into the agent.json it writes,
+ * then deletes it. Its presence (with no agent.json) is what tells the daemon
+ * this is an initial spawn rather than a revival, so the daemon stays the
+ * sole agent.json writer without needing a --resume flag.
+ */
+export function spawnOptionsPath(agentDir: string): string {
+  return join(agentDir, "spawn-options.json");
+}
+
+/** Field names mirror AgentRecord; the daemon folds these into agent.json. */
+export interface SpawnOptions {
+  cwd: string;
+  piBin: string;
+  spawnArgs: string[];
+  tag?: string;
+}
+
+/**
+ * Plain (non-atomic) write: the file is written before the daemon launches,
+ * so there is never a concurrent reader.
+ */
+export async function writeSpawnOptions(
+  agentDir: string,
+  options: SpawnOptions,
+): Promise<void> {
+  await writeFile(
+    spawnOptionsPath(agentDir),
+    `${JSON.stringify(options, null, "\t")}\n`,
+  );
+}
+
+export type SpawnOptionsReadResult =
+  | { kind: "ok"; options: SpawnOptions }
+  | { kind: "missing" }
+  | { kind: "corrupt"; error: string };
+
+export async function readSpawnOptions(
+  agentDir: string,
+): Promise<SpawnOptionsReadResult> {
+  let raw: string;
+  try {
+    raw = await readFile(spawnOptionsPath(agentDir), "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return { kind: "missing" };
+    }
+    return { kind: "corrupt", error: String(error) };
+  }
+  try {
+    const options = JSON.parse(raw) as SpawnOptions;
+    if (
+      typeof options.cwd !== "string" ||
+      typeof options.piBin !== "string" ||
+      !Array.isArray(options.spawnArgs)
+    ) {
+      return {
+        kind: "corrupt",
+        error: "spawn-options.json missing required fields",
+      };
+    }
+    return { kind: "ok", options };
+  } catch (error) {
+    return {
+      kind: "corrupt",
+      error: `spawn-options.json is not valid JSON: ${String(error)}`,
+    };
+  }
 }
 
 /**

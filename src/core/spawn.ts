@@ -30,19 +30,9 @@ import {
   daemonLogPath,
   pictlBaseDir,
   socketPathLengthError,
+  writeSpawnOptions,
 } from "./registry.ts";
 import { UsageError } from "./util.ts";
-
-interface DaemonLaunch {
-  agentDir: string;
-  agentId: string;
-  cwd: string;
-  piBin: string;
-  piArgs: string[];
-  resume: boolean;
-  /** Set only on initial spawn; revival preserves the recorded tag. */
-  tag?: string;
-}
 
 function isExecutableFile(path: string): boolean {
   try {
@@ -110,26 +100,22 @@ async function readAll(stream: Readable): Promise<string> {
  * fd 3 that the daemon writes a one-line ready/error message to once pi's RPC
  * socket is up (or startup failed). Awaiting that pipe is what makes spawn exit
  * only after the agent is actually reachable — no fixed sleeps.
+ *
+ * Everything else the daemon needs it derives itself: the agent dir from the
+ * id (PICTL_DIR is inherited), and the spawn-time configuration from
+ * spawn-options.json (initial spawn) or agent.json (revival) — see the
+ * startup classification in daemon.ts.
  */
-export async function launchDaemon(launch: DaemonLaunch): Promise<void> {
-  const logFd = openSync(daemonLogPath(launch.agentDir), "a");
+export async function launchDaemon(agentId: string): Promise<void> {
+  const agentDir = agentDirPath(agentId);
+  const logFd = openSync(daemonLogPath(agentDir), "a");
   const daemonArgs = [
     mainEntryPath(),
     "_daemon",
-    "--agent-dir",
-    launch.agentDir,
     "--agent-id",
-    launch.agentId,
-    "--cwd",
-    launch.cwd,
-    "--pi-bin",
-    launch.piBin,
+    agentId,
     "--ready-fd",
     "3", // readiness pipe fd
-    ...(launch.tag !== undefined ? ["--tag", launch.tag] : []),
-    ...(launch.resume ? ["--resume"] : []),
-    "--",
-    ...launch.piArgs,
   ];
   const child = spawnChild(process.execPath, daemonArgs, {
     detached: true,
@@ -162,7 +148,7 @@ export async function launchDaemon(launch: DaemonLaunch): Promise<void> {
     throw new Error(
       ready?.error !== undefined
         ? `daemon failed to start: ${ready.error}`
-        : `daemon failed to start: exited before signaling ready (log: ${daemonLogPath(launch.agentDir)})`,
+        : `daemon failed to start: exited before signaling ready (log: ${daemonLogPath(agentDir)})`,
     );
   }
 }
@@ -200,17 +186,15 @@ export async function spawn(
     throw error;
   }
 
-  // On failure the dir is left in place so daemon.log can be inspected;
-  // `pictl gc` removes dirs that never got an agent.json.
-  await launchDaemon({
-    agentDir,
-    agentId,
+  await writeSpawnOptions(agentDir, {
     cwd,
     piBin,
-    piArgs,
-    resume: false,
-    tag: flags.tag,
+    spawnArgs: piArgs,
+    ...(flags.tag !== undefined && { tag: flags.tag }),
   });
+  // On failure the dir is left in place so daemon.log can be inspected;
+  // `pictl gc` removes dirs that never got an agent.json.
+  await launchDaemon(agentId);
   this.process.stdout.write(`${agentId}\n`);
 }
 

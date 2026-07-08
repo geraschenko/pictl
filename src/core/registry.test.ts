@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
@@ -7,9 +7,13 @@ import {
   type AgentRecord,
   agentDirPath,
   agentIdError,
+  readSpawnOptions,
   resolveAgentId,
   socketPathLengthError,
+  type SpawnOptions,
+  spawnOptionsPath,
   writeAgentRecord,
+  writeSpawnOptions,
 } from "./registry.ts";
 
 /** An agentDir of exactly `len` ASCII bytes. tty.sock adds 9, the NUL 1 more. */
@@ -121,5 +125,61 @@ test("agentIdError: accepts uuids and friendly ids", () => {
 test("agentIdError: rejects path traversal and separators", () => {
   for (const bad of ["..", ".", "../foo", "a/b", "a\\b", "", "with space"]) {
     assert.ok(agentIdError(bad), `expected '${bad}' to be rejected`);
+  }
+});
+
+test("spawn options round-trip, with and without tag", async () => {
+  const agentDir = await mkdtemp(join(tmpdir(), "pictl-spawn-options-"));
+  try {
+    const withTag: SpawnOptions = {
+      cwd: "/tmp",
+      piBin: "/usr/bin/pi",
+      spawnArgs: ["--approve"],
+      tag: "web",
+    };
+    await writeSpawnOptions(agentDir, withTag);
+    assert.deepEqual(await readSpawnOptions(agentDir), {
+      kind: "ok",
+      options: withTag,
+    });
+
+    const withoutTag: SpawnOptions = {
+      cwd: "/tmp",
+      piBin: "/usr/bin/pi",
+      spawnArgs: [],
+    };
+    await writeSpawnOptions(agentDir, withoutTag);
+    assert.deepEqual(await readSpawnOptions(agentDir), {
+      kind: "ok",
+      options: withoutTag,
+    });
+  } finally {
+    await rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("readSpawnOptions: missing file", async () => {
+  const agentDir = await mkdtemp(join(tmpdir(), "pictl-spawn-options-"));
+  try {
+    assert.deepEqual(await readSpawnOptions(agentDir), { kind: "missing" });
+  } finally {
+    await rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("readSpawnOptions: invalid JSON and missing fields are corrupt", async () => {
+  const agentDir = await mkdtemp(join(tmpdir(), "pictl-spawn-options-"));
+  try {
+    await writeFile(spawnOptionsPath(agentDir), "not json");
+    const invalid = await readSpawnOptions(agentDir);
+    assert.equal(invalid.kind, "corrupt");
+    assert.match((invalid as { error: string }).error, /not valid JSON/);
+
+    await writeFile(spawnOptionsPath(agentDir), `{"cwd": "/tmp"}`);
+    const incomplete = await readSpawnOptions(agentDir);
+    assert.equal(incomplete.kind, "corrupt");
+    assert.match((incomplete as { error: string }).error, /required fields/);
+  } finally {
+    await rm(agentDir, { recursive: true, force: true });
   }
 });
