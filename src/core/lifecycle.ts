@@ -323,6 +323,9 @@ async function purge(this: CommandContext, flags: PurgeFlags): Promise<void> {
 
 const purgeCommand = commandMultiTarget<PurgeFlags>({
   docs: { brief: "wait until idle, then delete permanently" },
+  // The audit line is deleted along with the dir on success, but survives
+  // exactly when purge is interesting: a failed target keeps its dir.
+  audited: true,
   parameters: { flags: purgeFlags },
   func: purge,
 });
@@ -354,6 +357,7 @@ async function suspend(
 
 const suspendCommand = commandMultiTarget<TimeoutFlags>({
   docs: { brief: "wait until idle, then stop" },
+  audited: true,
   parameters: { flags: timeoutFlags },
   func: suspend,
 });
@@ -390,6 +394,7 @@ async function archive(
 const archiveCommand = commandMultiTarget<TimeoutFlags>({
   common: true,
   docs: { brief: "suspend, then hide from list" },
+  audited: true,
   parameters: { flags: timeoutFlags },
   func: archive,
 });
@@ -408,6 +413,7 @@ async function resume(this: CommandContext): Promise<void> {
 
 const resumeCommand = commandMultiTarget({
   docs: { brief: "revive dormant agents" },
+  audited: true,
   func: resume,
 });
 

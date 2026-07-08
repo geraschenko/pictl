@@ -9,15 +9,25 @@ import { chmod } from "node:fs/promises";
 import { createServer, type Server, type Socket } from "node:net";
 import { StringDecoder } from "node:string_decoder";
 import {
+  decodeHello,
   decodeResize,
   encodeExit,
   encodeFrame,
   FrameDecoder,
   FrameType,
+  type HelloPayload,
   type ResizePayload,
 } from "./tty-protocol.ts";
 
 const EXIT_FLUSH_DEADLINE_MS = 1_000;
+
+/** The server's view of a helloed client. */
+export interface AttachmentInfo {
+  pid: number;
+  client: string;
+  connectedAt: string; // ISO 8601, like AgentRecord.createdAt
+  size?: ResizePayload;
+}
 
 export interface TtyServerHooks {
   /**
@@ -33,12 +43,26 @@ export interface TtyServerHooks {
   serializeScreen(): Promise<string>;
   writeInput(data: string): void;
   resize(cols: number, rows: number): void;
+  // The hooks below are synchronous and fire-and-forget from the server's
+  // perspective; implementations wrap their own async work.
+  /** A client completed hello. */
+  onAttach(info: AttachmentInfo): void;
+  /** A helloed client disconnected. */
+  onDetach(info: AttachmentInfo): void;
+  /**
+   * The attachment list changed (hello, resize, or disconnect). The array is
+   * a fresh snapshot; implementations may keep it but must not mutate it.
+   */
+  onAttachmentsChanged(attachments: AttachmentInfo[]): void;
 }
 
 interface AttachClient {
   socket: Socket;
   /** Output relayed before the snapshot was sent; null once flushed. */
   pendingOutput: Buffer[] | null;
+  connectedAt: string;
+  /** Set once the client's hello frame arrives; tracking begins there. */
+  hello?: HelloPayload;
   /** Last size this client reported; undefined until its first resize frame. */
   size?: ResizePayload;
 }
@@ -96,6 +120,21 @@ export class TtyServer {
     this.hooks.resize(cols, rows);
   }
 
+  private attachmentInfo(client: AttachClient): AttachmentInfo {
+    return {
+      pid: client.hello!.pid,
+      client: client.hello!.client,
+      connectedAt: client.connectedAt,
+      ...(client.size !== undefined && { size: client.size }),
+    };
+  }
+
+  private attachmentsSnapshot(): AttachmentInfo[] {
+    return [...this.clients]
+      .filter((client) => client.hello !== undefined)
+      .map((client) => this.attachmentInfo(client));
+  }
+
   /** Relay PTY output to every attached client. */
   broadcastOutput(data: string): void {
     if (this.clients.size === 0) {
@@ -115,7 +154,9 @@ export class TtyServer {
    * Tell every client the agent is going away, then close. The exit frame is
    * best-effort: flushing is bounded because a client that has stopped
    * reading (with a full kernel buffer) must not block daemon shutdown — its
-   * socket dying when the daemon exits carries the same information.
+   * socket dying when the daemon exits carries the same information. Clears
+   * clients directly, bypassing dropClient: shutdown emits no detach hooks —
+   * the daemon's exit is itself the boundary.
    */
   async shutdown(reason: string): Promise<void> {
     this.shuttingDown = true;
@@ -144,12 +185,31 @@ export class TtyServer {
       socket.destroy();
       return;
     }
-    const client: AttachClient = { socket, pendingOutput: [] };
+    const client: AttachClient = {
+      socket,
+      pendingOutput: [],
+      connectedAt: new Date().toISOString(),
+    };
     this.clients.add(client);
+    // dropClient is registered on both 'close' and 'error', and destroy()
+    // re-triggers 'close', so onDetach fires only when the delete actually
+    // removed the client (and only for helloed clients — unhelloed ones are
+    // invisible to hooks).
     const dropClient = (): void => {
-      this.clients.delete(client);
+      // During shutdown the exit handshake owns the sockets and shutdown()
+      // clears the client set itself; no detach hooks may fire (shutdown is
+      // hook-silent), and a 'close' arriving before clients.clear() would
+      // otherwise emit one.
+      if (this.shuttingDown) {
+        return;
+      }
+      const removed = this.clients.delete(client);
       socket.destroy();
       this.applyMinSize();
+      if (removed && client.hello !== undefined) {
+        this.hooks.onDetach(this.attachmentInfo(client));
+        this.hooks.onAttachmentsChanged(this.attachmentsSnapshot());
+      }
     };
     socket.on("close", dropClient);
     socket.on("error", dropClient);
@@ -183,15 +243,40 @@ export class TtyServer {
     const inputDecoder = new StringDecoder("utf8");
     const frameDecoder = new FrameDecoder();
     socket.on("data", (chunk) => {
+      // Frames racing the exit handshake are meaningless and must not fire
+      // hooks after shutdown() has cleared the attachment state.
+      if (this.shuttingDown) {
+        return;
+      }
       try {
         for (const frame of frameDecoder.push(chunk)) {
+          // hello is the required first client frame: input or resize before
+          // it (or a repeated hello) is a protocol violation and drops the
+          // client. A client that never sends any frame can still observe
+          // passively (snapshot and output) without appearing in
+          // attachments — tracking is cooperative, not enforcement.
           switch (frame.type) {
+            case FrameType.hello:
+              if (client.hello !== undefined) {
+                throw new Error("repeated hello frame");
+              }
+              client.hello = decodeHello(frame.payload);
+              this.hooks.onAttach(this.attachmentInfo(client));
+              this.hooks.onAttachmentsChanged(this.attachmentsSnapshot());
+              break;
             case FrameType.input:
+              if (client.hello === undefined) {
+                throw new Error("input frame before hello");
+              }
               this.hooks.writeInput(inputDecoder.write(frame.payload));
               break;
             case FrameType.resize:
+              if (client.hello === undefined) {
+                throw new Error("resize frame before hello");
+              }
               client.size = decodeResize(frame.payload);
               this.applyMinSize();
+              this.hooks.onAttachmentsChanged(this.attachmentsSnapshot());
               break;
             default:
               throw new Error(

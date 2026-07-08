@@ -25,6 +25,11 @@ import {
 } from "@stricli/core";
 import type { Application } from "@stricli/core";
 import {
+  auditEnabled,
+  recordAuditEvent,
+  resolveCallerSource,
+} from "./audit.ts";
+import {
   determineTargets,
   multiTargetFlags,
   resolveTargets,
@@ -58,7 +63,36 @@ interface CommandSpec<
     customUsage?: readonly string[];
   };
   parameters?: Parameters<FLAGS, ARGS>;
+  /** Marker: write an audit event to each target before func runs. */
+  audited?: true;
   func: CommandFunction<FLAGS, ARGS, CommandContext>;
+}
+
+/**
+ * Record one audit-attempt event per agent dir, attributed to the invoking
+ * process's caller source. The choke point for audited commands: called by
+ * the target-resolving wrappers below after resolveTargets and before the
+ * command func runs; `spawn` (no-target — the agent dir does not exist until
+ * mid-command) calls it directly after creating the dir. Errors propagate
+ * and fail the command loudly (a missing agent dir means the command could
+ * not have worked anyway).
+ */
+export async function recordCommandAudit(
+  env: NodeJS.ProcessEnv,
+  argv: readonly string[],
+  agentDirs: readonly string[],
+): Promise<void> {
+  if (!auditEnabled(env)) {
+    return;
+  }
+  const { source, manager } = resolveCallerSource(
+    env.PI_AGENT_ID,
+    process.ppid,
+  );
+  const ts = new Date().toISOString();
+  for (const agentDir of agentDirs) {
+    await recordAuditEvent(agentDir, { ts, source, argv: [...argv] }, manager);
+  }
 }
 
 export type CompletionFn = (
@@ -309,6 +343,13 @@ export function commandOneTarget<
             this.env,
           ),
         );
+        if (spec.audited) {
+          await recordCommandAudit(
+            this.env,
+            this.argv,
+            this.targets.map((agent) => agent.agentDir),
+          );
+        }
         await spec.func.call(this, commandFlags as FLAGS, ...args);
       },
       parameters: {
@@ -344,6 +385,13 @@ export function commandMultiTarget<
         this.targets = await resolveTargets(
           determineTargets("multiple", target ?? [], this.env),
         );
+        if (spec.audited) {
+          await recordCommandAudit(
+            this.env,
+            this.argv,
+            this.targets.map((agent) => agent.agentDir),
+          );
+        }
         await spec.func.call(this, commandFlags as FLAGS, ...args);
       },
       parameters: {
@@ -374,6 +422,7 @@ export async function runCliApp(
     process: Object.assign(proc, { env }),
     env,
     targets: [],
+    argv,
   });
   if (typeof proc.exitCode === "number" && proc.exitCode < 0) {
     proc.exitCode = 2;

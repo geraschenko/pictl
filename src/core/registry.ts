@@ -1,13 +1,18 @@
 /**
  * The agent registry is a directory of agent dirs: $PICTL_DIR/<agentId>/ with
  * agent.json (written only by the daemon), pi.sock, tty.sock, daemon.log,
- * a transient spawn-options.json handed from spawn to the daemon, and
- * optionally a tombstone file marking the dir for gc.
+ * audit.jsonl and sources.jsonl (see audit.ts), a transient
+ * spawn-options.json handed from spawn to the daemon, and optionally a
+ * tombstone file marking the dir for gc.
  */
 
 import { open, readdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import envPaths from "env-paths";
+// Type-only: AttachmentInfo is the tty server's view of a client, defined
+// there; the reverse import would couple the intentionally pictl-free
+// tty-server to the registry.
+import type { AttachmentInfo } from "./tty-server.ts";
 import { fileExists } from "./util.ts";
 
 /**
@@ -31,6 +36,13 @@ export interface AgentRecord {
   daemonPid: number;
   piPid: number;
   sessions: SessionHistoryEntry[];
+  /**
+   * Live tty.sock attachments. Daemon-owned: reset to [] on daemon startup,
+   * kept in sync while running, cleared on clean shutdown. Meaningless unless
+   * the daemon is alive (a crash leaves stale entries) — readers must ignore
+   * it for non-running agents.
+   */
+  attachments: AttachmentInfo[];
   /**
    * The agent's own directory. Derived from the path, not persisted: populated
    * by readAgentRecord and stripped by writeAgentRecord (see there).
@@ -199,6 +211,16 @@ export function daemonLogPath(agentDir: string): string {
   return join(agentDir, "daemon.log");
 }
 
+/** Audited-command and attach/detach events, appended as JSONL (audit.ts). */
+export function auditLogPath(agentDir: string): string {
+  return join(agentDir, "audit.jsonl");
+}
+
+/** Metadata for observed pid-based caller sources, appended as JSONL. */
+export function sourcesLogPath(agentDir: string): string {
+  return join(agentDir, "sources.jsonl");
+}
+
 export type AgentRecordReadResult =
   | { kind: "ok"; record: AgentRecord }
   | { kind: "missing" }
@@ -227,6 +249,8 @@ export async function readAgentRecord(
       return { kind: "corrupt", error: "agent.json missing required fields" };
     }
     record.agentDir = agentDir;
+    // agent.json files written before attachment tracking lack the field.
+    record.attachments ??= [];
     return { kind: "ok", record };
   } catch (error) {
     return {

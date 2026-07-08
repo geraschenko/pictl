@@ -7,12 +7,17 @@ import { test } from "node:test";
 import {
   decodeExit,
   encodeFrame,
+  encodeHello,
   encodeResize,
   type Frame,
   FrameDecoder,
   FrameType,
 } from "./tty-protocol.ts";
-import { TtyServer, type TtyServerHooks } from "./tty-server.ts";
+import {
+  TtyServer,
+  type AttachmentInfo,
+  type TtyServerHooks,
+} from "./tty-server.ts";
 
 interface TestClient {
   socket: Socket;
@@ -58,6 +63,9 @@ interface Harness {
   socketPath: string;
   inputs: string[];
   resizes: Array<{ cols: number; rows: number }>;
+  attaches: AttachmentInfo[];
+  detaches: AttachmentInfo[];
+  attachmentSnapshots: AttachmentInfo[][];
   /** Resolve the snapshot promise handed out by serializeScreen. */
   resolveSnapshot(snapshot: string): void;
   /** Reject the snapshot promise handed out by serializeScreen. */
@@ -70,6 +78,9 @@ async function startServer(): Promise<Harness> {
   const socketPath = join(dir, "tty.sock");
   const inputs: string[] = [];
   const resizes: Array<{ cols: number; rows: number }> = [];
+  const attaches: AttachmentInfo[] = [];
+  const detaches: AttachmentInfo[] = [];
+  const attachmentSnapshots: AttachmentInfo[][] = [];
   let pendingSnapshots: Array<{
     resolve: (s: string) => void;
     reject: (e: Error) => void;
@@ -81,6 +92,10 @@ async function startServer(): Promise<Harness> {
       ),
     writeInput: (data) => inputs.push(data),
     resize: (cols, rows) => resizes.push({ cols, rows }),
+    onAttach: (info) => attaches.push(info),
+    onDetach: (info) => detaches.push(info),
+    onAttachmentsChanged: (attachments) =>
+      attachmentSnapshots.push(attachments),
   };
   const server = new TtyServer(hooks);
   await server.listen(socketPath);
@@ -89,6 +104,9 @@ async function startServer(): Promise<Harness> {
     socketPath,
     inputs,
     resizes,
+    attaches,
+    detaches,
+    attachmentSnapshots,
     resolveSnapshot: (snapshot) => {
       for (const pending of pendingSnapshots) {
         pending.resolve(snapshot);
@@ -139,6 +157,7 @@ test("input and resize frames reach the hooks; UTF-8 split across frames reassem
   try {
     const client = await connectClient(harness.socketPath);
     harness.resolveSnapshot("");
+    client.socket.write(encodeHello({ pid: 101, client: "test" }));
     const snowman = Buffer.from("☃"); // 3 bytes
     client.socket.write(encodeFrame(FrameType.input, snowman.subarray(0, 1)));
     client.socket.write(encodeFrame(FrameType.input, snowman.subarray(1)));
@@ -165,11 +184,13 @@ test("PTY size is the elementwise min across attached clients", async () => {
     };
     const a = await connectClient(harness.socketPath);
     harness.resolveSnapshot("");
+    a.socket.write(encodeHello({ pid: 101, client: "test-a" }));
     a.socket.write(encodeResize({ cols: 100, rows: 40 }));
     await waitForResizes(1);
 
     const b = await connectClient(harness.socketPath);
     harness.resolveSnapshot("");
+    b.socket.write(encodeHello({ pid: 102, client: "test-b" }));
     b.socket.write(encodeResize({ cols: 80, rows: 50 }));
     await waitForResizes(2);
 
@@ -220,6 +241,114 @@ test("the listening socket is owner-only (0600)", async () => {
   } finally {
     await harness.cleanup();
   }
+});
+
+test("hello, resize, and disconnect drive the attachment hooks", async () => {
+  const harness = await startServer();
+  try {
+    const client = await connectClient(harness.socketPath);
+    harness.resolveSnapshot("");
+    client.socket.write(encodeHello({ pid: 4242, client: "pictl attach" }));
+    while (harness.attaches.length === 0) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    assert.equal(harness.attaches[0]!.pid, 4242);
+    assert.equal(harness.attaches[0]!.client, "pictl attach");
+    assert.equal(harness.attaches[0]!.size, undefined);
+    assert.ok(!Number.isNaN(Date.parse(harness.attaches[0]!.connectedAt)));
+    assert.equal(harness.attachmentSnapshots.length, 1);
+    assert.deepEqual(harness.attachmentSnapshots[0], [harness.attaches[0]]);
+
+    client.socket.write(encodeResize({ cols: 132, rows: 50 }));
+    while (harness.attachmentSnapshots.length < 2) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    assert.deepEqual(harness.attachmentSnapshots[1]![0]!.size, {
+      cols: 132,
+      rows: 50,
+    });
+
+    client.socket.destroy();
+    while (harness.detaches.length === 0) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    assert.equal(harness.detaches[0]!.pid, 4242);
+    assert.deepEqual(harness.attachmentSnapshots.at(-1), []);
+  } finally {
+    await harness.cleanup();
+  }
+});
+
+test("input or resize before hello drops the client", async () => {
+  const harness = await startServer();
+  try {
+    const early = await connectClient(harness.socketPath);
+    harness.resolveSnapshot("");
+    early.socket.write(encodeResize({ cols: 80, rows: 24 }));
+    await early.closed;
+    assert.deepEqual(harness.resizes, []);
+    assert.deepEqual(harness.attaches, []);
+    assert.deepEqual(harness.detaches, []);
+  } finally {
+    await harness.cleanup();
+  }
+});
+
+test("a malformed or repeated hello drops the client", async () => {
+  const harness = await startServer();
+  try {
+    const malformed = await connectClient(harness.socketPath);
+    harness.resolveSnapshot("");
+    malformed.socket.write(
+      encodeFrame(FrameType.hello, Buffer.from('{"pid":"nope"}')),
+    );
+    await malformed.closed;
+    assert.deepEqual(harness.attaches, []);
+
+    const repeated = await connectClient(harness.socketPath);
+    harness.resolveSnapshot("");
+    repeated.socket.write(encodeHello({ pid: 7, client: "test" }));
+    repeated.socket.write(encodeHello({ pid: 7, client: "test" }));
+    await repeated.closed;
+    // The first hello attached; the repeat dropped (and thus detached) it.
+    assert.equal(harness.attaches.length, 1);
+    assert.equal(harness.detaches.length, 1);
+  } finally {
+    await harness.cleanup();
+  }
+});
+
+test("a client that never sends hello still receives output but is invisible to hooks", async () => {
+  const harness = await startServer();
+  try {
+    const passive = await connectClient(harness.socketPath);
+    harness.resolveSnapshot("SNAPSHOT");
+    await passive.framesReceived(1);
+    harness.server.broadcastOutput("observed");
+    await passive.framesReceived(2);
+    assert.equal(passive.frames[1]!.payload.toString(), "observed");
+    passive.socket.destroy();
+    await passive.closed;
+    assert.deepEqual(harness.attaches, []);
+    assert.deepEqual(harness.detaches, []);
+    assert.deepEqual(harness.attachmentSnapshots, []);
+  } finally {
+    await harness.cleanup();
+  }
+});
+
+test("shutdown emits no detach hooks for attached clients", async () => {
+  const harness = await startServer();
+  const client = await connectClient(harness.socketPath);
+  harness.resolveSnapshot("");
+  client.socket.write(encodeHello({ pid: 11, client: "test" }));
+  while (harness.attaches.length === 0) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  await harness.server.shutdown("pi exited (code 0)");
+  await client.closed;
+  assert.deepEqual(harness.detaches, []);
+  assert.equal(harness.attachmentSnapshots.length, 1);
 });
 
 test("a client sending garbage is dropped without affecting others", async () => {

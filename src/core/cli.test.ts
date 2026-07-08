@@ -1,10 +1,14 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { buildApplication, buildRouteMap } from "@stricli/core";
 import { app } from "./app.ts";
-import { runCliApp } from "./cli.ts";
+import type { AuditCommandEvent } from "./audit.ts";
+import { commandOneTarget, recordCommandAudit, runCliApp } from "./cli.ts";
+import { auditLogPath } from "./registry.ts";
+import type { CommandContext } from "./targets.ts";
 import { VERSION } from "./version.ts";
 
 function fakeProcess(env: NodeJS.ProcessEnv = {}) {
@@ -127,6 +131,78 @@ test("representative parser behavior uses --target grammar", async () => {
     await runCliApp(app, ["-t", "abc", "prompt", "hello"], globalTarget.proc);
     assert.equal(globalTarget.proc.exitCode, 2);
     assert.match(globalTarget.stderr, /No command registered for `-t`/);
+  });
+});
+
+// Audit wiring is probed with no-op commands rather than the real audited
+// routes: those are RPC commands whose funcs would attempt daemon revival
+// against the fake registry. The wrappers under test are the same ones the
+// real routes go through.
+const auditProbeApp = buildApplication<CommandContext>(
+  buildRouteMap({
+    routes: {
+      "audited-cmd": commandOneTarget({
+        docs: { brief: "audited no-op" },
+        audited: true,
+        func: async () => {},
+      }),
+      "plain-cmd": commandOneTarget({
+        docs: { brief: "unaudited no-op" },
+        func: async () => {},
+      }),
+    },
+    docs: { brief: "audit wiring probe" },
+  }),
+  { name: "pictl-probe" },
+);
+
+function readAuditEvents(raw: string): AuditCommandEvent[] {
+  return raw
+    .split("\n")
+    .filter((line) => line !== "")
+    .map((line) => JSON.parse(line) as AuditCommandEvent);
+}
+
+test("target wrappers audit exactly the audited commands", async () => {
+  await withRegistry(async (dir) => {
+    const auditLog = auditLogPath(join(dir, "abcdef"));
+
+    const audited = fakeProcess();
+    await runCliApp(auditProbeApp, ["audited-cmd", "-t", "abc"], audited.proc);
+    assert.equal(audited.proc.exitCode, 0);
+    const events = readAuditEvents(await readFile(auditLog, "utf8"));
+    assert.equal(events.length, 1);
+    assert.deepEqual(events[0]!.argv, ["audited-cmd", "-t", "abc"]);
+    assert.ok(events[0]!.source.length > 0);
+
+    const plain = fakeProcess();
+    await runCliApp(auditProbeApp, ["plain-cmd", "-t", "abc"], plain.proc);
+    assert.equal(plain.proc.exitCode, 0);
+
+    const off = fakeProcess({ PICTL_AUDIT: "off" });
+    await runCliApp(auditProbeApp, ["audited-cmd", "-t", "abc"], off.proc);
+    assert.equal(off.proc.exitCode, 0);
+
+    const after = readAuditEvents(await readFile(auditLog, "utf8"));
+    assert.equal(after.length, 1);
+  });
+});
+
+test("recordCommandAudit writes one event per agent dir", async () => {
+  await withRegistry(async (dir) => {
+    const agentDirs = [join(dir, "abcdef"), join(dir, "zzzzzz")];
+    await recordCommandAudit(
+      {},
+      ["abort", "-t", "abc", "-t", "zzz"],
+      agentDirs,
+    );
+    for (const agentDir of agentDirs) {
+      const events = readAuditEvents(
+        await readFile(auditLogPath(agentDir), "utf8"),
+      );
+      assert.equal(events.length, 1);
+      assert.deepEqual(events[0]!.argv, ["abort", "-t", "abc", "-t", "zzz"]);
+    }
   });
 });
 

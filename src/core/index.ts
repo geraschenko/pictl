@@ -27,15 +27,19 @@ export {
   FrameType,
   MAX_PAYLOAD_BYTES,
   encodeFrame,
+  encodeHello,
+  decodeHello,
   encodeResize,
   decodeResize,
   encodeExit,
   decodeExit,
   FrameDecoder,
   type Frame,
+  type HelloPayload,
   type ResizePayload,
   type ExitPayload,
 } from "./tty-protocol.ts";
+export { type AttachmentInfo } from "./tty-server.ts";
 
 // registry / agent discovery
 export {

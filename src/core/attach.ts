@@ -22,6 +22,7 @@ import { ttySocketPath } from "./registry.ts";
 import {
   decodeExit,
   encodeFrame,
+  encodeHello,
   encodeResize,
   FrameDecoder,
   FrameType,
@@ -79,6 +80,9 @@ export async function attach(this: CommandContext): Promise<void> {
   const cursorToLastRow = (): string => cursorToRow(stdout.rows);
 
   const socket = await connectToTty(ttySocketPath(agentDir), agentId);
+  // hello is the required first client frame (before the initial resize);
+  // the daemon drops clients that send anything else first.
+  socket.write(encodeHello({ pid: nodeProcess.pid, client: "pictl attach" }));
   stdin.setRawMode(true);
   stdin.resume();
 

@@ -51,11 +51,16 @@ It exists because pi's RPC socket is not a terminal protocol. `pictl attach` nee
 
 The daemon therefore exposes a separate framed protocol on `tty.sock` for:
 
+- client identification (a `hello` frame, the required first client frame);
 - initial screen snapshot;
 - PTY output;
 - user input;
 - terminal resize messages;
 - daemon-exit notification.
+
+The daemon tracks helloed clients as the agent's live attachments (in
+`agent.json`) and records attach/detach events in the audit log; see
+[`docs/specs/auditing-and-attach-tracking.md`](specs/auditing-and-attach-tracking.md).
 
 The working definition of this protocol is [`src/core/tty-protocol.ts`](../src/core/tty-protocol.ts).
 
@@ -85,6 +90,7 @@ $PICTL_DIR/
     pi.sock
     tty.sock
     daemon.log
+    audit.jsonl / sources.jsonl
     archive / tombstone / other marker files
 ```
 

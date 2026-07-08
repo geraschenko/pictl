@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   decodeExit,
+  decodeHello,
   decodeResize,
   encodeExit,
   encodeFrame,
+  encodeHello,
   encodeResize,
   FrameDecoder,
   FrameType,
@@ -83,6 +85,27 @@ test("malformed resize payloads throw", () => {
   assert.throws(() => decodeResize(Buffer.from('{"cols":80.5,"rows":24}')));
   assert.throws(() => decodeResize(Buffer.from('{"cols":80}')));
   assert.throws(() => decodeResize(Buffer.from('{"cols":999999,"rows":24}')));
+});
+
+test("hello payload round-trips", () => {
+  const decoder = new FrameDecoder();
+  const frames = decoder.push(
+    encodeHello({ pid: 4242, client: "pictl attach" }),
+  );
+  assert.equal(frames[0]!.type, FrameType.hello);
+  assert.deepEqual(decodeHello(frames[0]!.payload), {
+    pid: 4242,
+    client: "pictl attach",
+  });
+});
+
+test("malformed hello payloads throw", () => {
+  assert.throws(() => decodeHello(Buffer.from("not json")));
+  assert.throws(() => decodeHello(Buffer.from('{"pid":0,"client":"x"}')));
+  assert.throws(() => decodeHello(Buffer.from('{"pid":1.5,"client":"x"}')));
+  assert.throws(() => decodeHello(Buffer.from('{"pid":"1","client":"x"}')));
+  assert.throws(() => decodeHello(Buffer.from('{"pid":1}')));
+  assert.throws(() => decodeHello(Buffer.from('{"client":"x"}')));
 });
 
 test("exit payload round-trips", () => {

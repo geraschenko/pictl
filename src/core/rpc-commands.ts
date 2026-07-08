@@ -259,6 +259,7 @@ export async function prompt(
 const promptCommand = commandOneTarget<PromptFlags, [string]>({
   common: true,
   docs: { brief: "send a prompt and stream the agent's activity" },
+  audited: true,
   parameters: {
     flags: promptFlags,
     aliases: { d: "detach" },
@@ -288,6 +289,7 @@ export async function steer(
 
 const steerCommand = commandOneTarget<RawImageFlags, [string]>({
   docs: { brief: "interject into the current turn" },
+  audited: true,
   parameters: {
     flags: rawImageFlags,
     positional: {
@@ -316,6 +318,7 @@ export async function followUp(
 
 const followUpCommand = commandOneTarget<RawImageFlags, [string]>({
   docs: { brief: "queue a message for after the current turn" },
+  audited: true,
   parameters: {
     flags: rawImageFlags,
     positional: {
@@ -336,6 +339,7 @@ async function sendSimple(
 
 const abortCommand = commandOneTarget<RawFlag>({
   docs: { brief: "abort the current turn" },
+  audited: true,
   parameters: { flags: rawFlag },
   func(flags) {
     return sendSimple(this, flags, { type: "abort" });
@@ -350,6 +354,7 @@ type NewSessionFlags = InferFlags<typeof newSessionFlags>;
 
 const newSessionCommand = commandOneTarget<NewSessionFlags>({
   docs: { brief: "start a fresh session" },
+  audited: true,
   parameters: { flags: newSessionFlags },
   func(flags) {
     return sendSimple(this, flags, {
@@ -371,6 +376,7 @@ const getStateCommand = commandOneTarget<RawFlag>({
 
 const setModelCommand = commandOneTarget<RawFlag, [string, string]>({
   docs: { brief: "switch model" },
+  audited: true,
   parameters: {
     flags: rawFlag,
     positional: {
@@ -388,6 +394,7 @@ const setModelCommand = commandOneTarget<RawFlag, [string, string]>({
 
 const cycleModelCommand = commandOneTarget<RawFlag>({
   docs: { brief: "cycle to the next model" },
+  audited: true,
   parameters: { flags: rawFlag },
   func(flags) {
     return sendSimple(this, flags, { type: "cycle_model" });
@@ -407,6 +414,7 @@ const setThinkingLevelCommand = commandOneTarget<
   [(typeof THINKING_LEVELS)[number]]
 >({
   docs: { brief: "set thinking level" },
+  audited: true,
   parameters: {
     flags: rawFlag,
     positional: {
@@ -431,6 +439,7 @@ const setThinkingLevelCommand = commandOneTarget<
 
 const cycleThinkingLevelCommand = commandOneTarget<RawFlag>({
   docs: { brief: "cycle thinking level" },
+  audited: true,
   parameters: { flags: rawFlag },
   func(flags) {
     return sendSimple(this, flags, { type: "cycle_thinking_level" });
@@ -442,6 +451,7 @@ const setSteeringModeCommand = commandOneTarget<
   ["all" | "one-at-a-time"]
 >({
   docs: { brief: "how queued steering messages are delivered" },
+  audited: true,
   parameters: {
     flags: rawFlag,
     positional: {
@@ -468,6 +478,7 @@ const setFollowUpModeCommand = commandOneTarget<
   ["all" | "one-at-a-time"]
 >({
   docs: { brief: "how queued follow-ups are delivered" },
+  audited: true,
   parameters: {
     flags: rawFlag,
     positional: {
@@ -497,6 +508,7 @@ type CompactFlags = InferFlags<typeof compactFlags>;
 
 const compactCommand = commandOneTarget<CompactFlags>({
   docs: { brief: "compact the session context" },
+  audited: true,
   parameters: { flags: compactFlags },
   func(flags) {
     return sendSimple(this, flags, {
@@ -510,6 +522,7 @@ const compactCommand = commandOneTarget<CompactFlags>({
 
 const setAutoCompactionCommand = commandOneTarget<RawFlag, [boolean]>({
   docs: { brief: "toggle auto-compaction" },
+  audited: true,
   parameters: {
     flags: rawFlag,
     positional: {
@@ -529,6 +542,7 @@ const setAutoCompactionCommand = commandOneTarget<RawFlag, [boolean]>({
 
 const setAutoRetryCommand = commandOneTarget<RawFlag, [boolean]>({
   docs: { brief: "toggle auto-retry of failed turns" },
+  audited: true,
   parameters: {
     flags: rawFlag,
     positional: {
@@ -548,6 +562,7 @@ const setAutoRetryCommand = commandOneTarget<RawFlag, [boolean]>({
 
 const abortRetryCommand = commandOneTarget<RawFlag>({
   docs: { brief: "cancel a pending auto-retry" },
+  audited: true,
   parameters: { flags: rawFlag },
   func(flags) {
     return sendSimple(this, flags, { type: "abort_retry" });
@@ -562,6 +577,7 @@ type BashFlags = InferFlags<typeof bashFlags>;
 
 const bashCommand = commandOneTarget<BashFlags, [string]>({
   docs: { brief: "run a shell command via the agent" },
+  audited: true,
   parameters: {
     flags: bashFlags,
     positional: {
@@ -580,6 +596,7 @@ const bashCommand = commandOneTarget<BashFlags, [string]>({
 
 const abortBashCommand = commandOneTarget<RawFlag>({
   docs: { brief: "abort a running bash command" },
+  audited: true,
   parameters: { flags: rawFlag },
   func(flags) {
     return sendSimple(this, flags, { type: "abort_bash" });
@@ -613,6 +630,7 @@ const exportHtmlCommand = commandOneTarget<ExportHtmlFlags>({
 
 const switchSessionCommand = commandOneTarget<RawFlag, [string]>({
   docs: { brief: "switch to another session file" },
+  audited: true,
   parameters: {
     flags: rawFlag,
     positional: {
@@ -627,6 +645,7 @@ const switchSessionCommand = commandOneTarget<RawFlag, [string]>({
 
 const forkCommand = commandOneTarget<RawFlag, [string]>({
   docs: { brief: "fork the session from an entry" },
+  audited: true,
   parameters: {
     flags: rawFlag,
     positional: {
@@ -641,6 +660,7 @@ const forkCommand = commandOneTarget<RawFlag, [string]>({
 
 const cloneCommand = commandOneTarget<RawFlag>({
   docs: { brief: "clone the session" },
+  audited: true,
   parameters: { flags: rawFlag },
   func(flags) {
     return sendSimple(this, flags, { type: "clone" });
@@ -691,6 +711,7 @@ type NavigateTreeFlags = InferFlags<typeof navigateTreeFlags>;
 
 const navigateTreeCommand = commandOneTarget<NavigateTreeFlags, [string]>({
   docs: { brief: "move the session leaf to another entry" },
+  audited: true,
   parameters: {
     flags: navigateTreeFlags,
     positional: {
@@ -722,6 +743,7 @@ const getLastAssistantTextCommand = commandOneTarget<RawFlag>({
 
 const setSessionNameCommand = commandOneTarget<RawFlag, [string]>({
   docs: { brief: "name the session" },
+  audited: true,
   parameters: {
     flags: rawFlag,
     positional: { kind: "tuple", parameters: [stringArg("Name", "name")] },

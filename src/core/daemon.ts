@@ -37,9 +37,14 @@ import {
   ttySocketPath,
   writeAgentRecord,
 } from "./registry.ts";
+import {
+  auditEnabled,
+  recordAuditEvent,
+  resolveCallerSourceForPid,
+} from "./audit.ts";
 import { connectWithRetry, type SocketEvent } from "./pi-socket-client.ts";
 import { spawnPty } from "./pty.ts";
-import { TtyServer } from "./tty-server.ts";
+import { TtyServer, type AttachmentInfo } from "./tty-server.ts";
 import { fileExists } from "./util.ts";
 
 const PTY_COLS = 80;
@@ -293,6 +298,51 @@ async function daemon(this: CommandContext, flags: DaemonFlags): Promise<void> {
   const serializeAddon = new SerializeAddon();
   terminal.loadAddon(serializeAddon);
 
+  const record: AgentRecord = {
+    id: agentId,
+    createdAt,
+    cwd: options.cwd,
+    ...(options.tag !== undefined && { tag: options.tag }),
+    piBin: options.piBin,
+    spawnArgs: options.spawnArgs,
+    daemonPid: proc.pid,
+    piPid: piProcess.pid,
+    sessions,
+    attachments: [],
+    agentDir,
+  };
+
+  // agent.json writes are serialized through this chain; session and
+  // attachment events can arrive faster than a write completes.
+  let writeQueue: Promise<void> = Promise.resolve();
+  const queueRecordWrite = (): void => {
+    writeQueue = writeQueue.then(
+      () => writeAgentRecord(record),
+      () => writeAgentRecord(record),
+    );
+  };
+
+  // Attach auditing never kills the daemon: failures are logged (stdout goes
+  // to daemon.log) and otherwise ignored.
+  const auditAttachEvent = (
+    event: "attach" | "detach",
+    info: AttachmentInfo,
+  ): void => {
+    if (!auditEnabled(this.env)) {
+      return;
+    }
+    const { source, manager } = resolveCallerSourceForPid(info.pid);
+    const auditRecord = {
+      ts: new Date().toISOString(),
+      source,
+      event,
+      pid: info.pid,
+    };
+    void recordAuditEvent(agentDir, auditRecord, manager).catch((error) =>
+      proc.stdout.write(`[daemon] ${event} audit failed: ${String(error)}\n`),
+    );
+  };
+
   const ttyServer = new TtyServer({
     // terminal.write("") is the parse barrier; serializing inside its
     // callback (not in a then() after it) keeps the snapshot exactly at the
@@ -320,6 +370,12 @@ async function daemon(this: CommandContext, flags: DaemonFlags): Promise<void> {
       piProcess.resize(cols, rows);
       terminal.resize(cols, rows);
     },
+    onAttach: (info) => auditAttachEvent("attach", info),
+    onDetach: (info) => auditAttachEvent("detach", info),
+    onAttachmentsChanged: (attachments) => {
+      record.attachments = attachments;
+      queueRecordWrite();
+    },
   });
 
   piProcess.onData((data) => {
@@ -327,32 +383,10 @@ async function daemon(this: CommandContext, flags: DaemonFlags): Promise<void> {
     ttyServer.broadcastOutput(data);
   });
 
-  const record: AgentRecord = {
-    id: agentId,
-    createdAt,
-    cwd: options.cwd,
-    ...(options.tag !== undefined && { tag: options.tag }),
-    piBin: options.piBin,
-    spawnArgs: options.spawnArgs,
-    daemonPid: proc.pid,
-    piPid: piProcess.pid,
-    sessions,
-    agentDir,
-  };
   await writeAgentRecord(record);
   // The handoff is complete once the options are in agent.json; force also
   // covers revival, where any spawn file present is a stale leftover.
   await rm(spawnOptionsPath(agentDir), { force: true });
-
-  // agent.json writes are serialized through this chain; session events can
-  // arrive faster than a write completes.
-  let writeQueue: Promise<void> = Promise.resolve();
-  const queueRecordWrite = (): void => {
-    writeQueue = writeQueue.then(
-      () => writeAgentRecord(record),
-      () => writeAgentRecord(record),
-    );
-  };
 
   await ttyServer.listen(ttySocketPath(agentDir));
 
@@ -362,16 +396,22 @@ async function daemon(this: CommandContext, flags: DaemonFlags): Promise<void> {
       return;
     }
     exiting = true;
-    void writeQueue
-      .catch(() => undefined)
-      .then(async () => {
-        await ttyServer.shutdown(`pi exited (code ${code})`);
-        await Promise.all([
-          rm(piSocketPath(agentDir), { force: true }),
-          rm(ttySocketPath(agentDir), { force: true }),
-        ]);
-        proc.exit(code);
-      });
+    void (async () => {
+      // shutdown() suppresses tty hooks synchronously, so no attachment
+      // updates can be enqueued after this point; the clear below is final.
+      await ttyServer.shutdown(`pi exited (code ${code})`);
+      // Clean shutdown clears the attachment list; a crash leaves stale
+      // entries, which readers must ignore for non-running agents. Queued
+      // (not written directly) so it serializes behind in-flight writes.
+      record.attachments = [];
+      queueRecordWrite();
+      await writeQueue.catch(() => undefined);
+      await Promise.all([
+        rm(piSocketPath(agentDir), { force: true }),
+        rm(ttySocketPath(agentDir), { force: true }),
+      ]);
+      proc.exit(code);
+    })();
   };
 
   piProcess.onExit(({ exitCode }) => {

@@ -14,7 +14,7 @@ This spec addresses `docs/thoughts/auditing.md` and
 spec.
 
 1. **Auditing**: every audited pictl CLI command targeting an agent appends a
-   JSONL event to `<agent-dir>/audit.jsonl`, attributed to a *caller source* —
+   JSONL event to `<agent-dir>/audit.jsonl`, attributed to a _caller source_ —
    a stable identifier for the managing process (a pi agent id, a claude
    instance, an interactive shell). Metadata describing each observed
    pid-based source is kept in `<agent-dir>/sources.jsonl`.
@@ -35,7 +35,7 @@ attachment came from.
 - `pictl:<agent-id>` — the caller has `PI_AGENT_ID` in its environment, i.e.
   it is (a descendant of) a pictl-managed pi agent. Stable across that
   agent's process restarts.
-- `<comm>:<pid>` — otherwise, the *manager process* found by walking up the
+- `<comm>:<pid>` — otherwise, the _manager process_ found by walking up the
   `/proc` ancestry past shells (adapted from `walkToManagerPid` in
   `skills/team/team`): starting from the caller's parent, ascend while the
   process is a shell (`bash`, `sh`, `zsh`, `dash`, `fish`, `ksh`), stopping
@@ -75,7 +75,7 @@ non-pictl tty.sock clients).
   share that source.
 - The same command issued from a pictl-managed pi agent's bash tool is
   attributed to `pictl:<agent-id>` and adds no sources.jsonl line.
-- Audit events record *attempts*: one line per audited invocation, written
+- Audit events record _attempts_: one line per audited invocation, written
   after target resolution and before the command executes, with no outcome
   field. A multi-target command writes one line per target's agent dir.
 - Read-only commands (`get-state`, `tail`, ...) write nothing.
@@ -306,7 +306,7 @@ the list.
   concurrent first observations of the same source can both append. Readers
   dedup by `source`; duplicates are harmless.
 - **comm is not a clean token**: `/proc/<pid>/comm` is arbitrary (≤15 bytes,
-  may contain spaces or colons). The pid after the *last* `:` in a source
+  may contain spaces or colons). The pid after the _last_ `:` in a source
   string is still unambiguous; sources.jsonl carries the full cmdline.
 - **PID recycling**: a `<comm>:<pid>` source is only meaningful near its
   observation time; sources.jsonl's `firstSeen` plus captured metadata is the
@@ -362,7 +362,7 @@ the list.
   special-cased.
 - **Ancestry walk**: adapt `walkToManagerPid` from `skills/team/team:57`
   (shell-name set, stat parsing after the last `)`, interactive-shell stop
-  rule requiring session leadership *and* a controlling tty). The
+  rule requiring session leadership _and_ a controlling tty). The
   `--bg-spare`/`daemonized` detection is team-specific and not needed here.
   The skill is a standalone script and cannot import from src/, so the logic
   is duplicated knowingly; consider extracting later if a third user appears.
@@ -384,4 +384,97 @@ the list.
 
 **Instructions**: Update this section during each work session. Add new tasks, mark completed ones with [x], document decisions and problems encountered.
 
-*Work log entries go here*
+## 2026-07-08: Implementation
+
+- [x] `src/core/audit.ts`: caller-source resolution (ancestry walk adapted
+      from skills/team/team, minus its team-specific `--bg-spare` detection),
+      `auditEnabled`, `recordAuditEvent` with read-before-append sources dedup.
+      Unit tests in `audit.test.ts` including live-process /proc tests (skipped
+      off-Linux) using stdin-blocked child processes — no timers.
+- [x] `registry.ts`: `auditLogPath`, `sourcesLogPath`,
+      `AgentRecord.attachments?` (type-imported from tty-server).
+- [x] `tty-protocol.ts`: `hello: 6`, `HelloPayload`, `encodeHello`/`decodeHello`
+      (validates pid is a positive integer). Tests added.
+- [x] `tty-server.ts`: `AttachmentInfo`, the three hooks, hello-first
+      enforcement (input/resize before hello, malformed hello, or repeated hello
+      drops the client), detach only on true delete of a helloed client,
+      hook-silent shutdown. Tests added.
+- [x] `attach.ts`: sends hello (pid, "pictl attach") before the initial resize.
+- [x] `daemon.ts`: implements the hooks; `attachments: []` on startup, kept in
+      sync via the existing agent.json write queue, cleared on clean shutdown;
+      attach-audit failures logged to daemon.log, never fatal.
+- [x] `cli.ts`/`targets.ts`: `CommandSpec.audited`, `CommandContext.argv`,
+      `recordCommandAudit` called from the target-resolving wrappers; `spawn`
+      calls it directly after creating the agent dir.
+- [x] Marked the 22 RPC passthroughs + suspend/archive/purge/resume audited.
+- [x] Removed `docs/thoughts/auditing.md` and `docs/thoughts/attach-tracking.md`.
+- [x] `npm run presubmit` green (check, lint, fmt, 80 tests).
+- [x] End-to-end verified with a live agent: spawn + prompt audit lines share
+      one manager source (a claude harness process whose comm is a version
+      string — the name-free walk handled it); sources.jsonl written once;
+      scripted tty.sock client shows attachments (with size) in agent.json while
+      connected and [] after disconnect; attach/detach audit events carry the
+      daemon-computed source; `PICTL_AUDIT=off` suppresses writes; suspend leaves
+      `attachments: []`.
+
+## Implementation-Time Decisions
+
+- **`recordCommandAudit` helper in cli.ts**: the resolve-source +
+  per-agent-dir event loop is shared by the one/multi-target wrappers and
+  `spawn`, so it lives next to the wrappers as an exported function
+  `(env, argv, agentDirs)`. The audit.ts surface stays exactly as specced.
+- **`shuttingDown` guards in dropClient and the data handler**: between
+  `shutdown()`'s exit-frame flush (an await) and its `clients.clear()`, a
+  socket 'close' could fire dropClient while the client is still in the set,
+  leaking a detach hook out of shutdown; late frames in that window could
+  likewise fire onAttach after the daemon cleared `attachments`. Both paths
+  now no-op once shutdown has begun, keeping shutdown hook-silent as specced.
+- **Repeated hello is a protocol violation**: the spec fixes hello as the
+  required _first_ frame but doesn't address repeats; dropping the client
+  (rather than updating the attachment in place) keeps the state machine
+  one-way (unhelloed → helloed) and matches the drop-on-violation posture.
+- **Clean-shutdown order: tty shutdown first, then a queued clear**:
+  `cleanupAndExit` calls `ttyServer.shutdown()` (which suppresses hooks
+  synchronously) before clearing `attachments`, and puts the clear on the
+  serialized write queue rather than writing directly. Clearing first was
+  tried and reviewer-rejected: hooks still live during the clear write could
+  enqueue a stale non-empty attachment list that lands after it.
+- **Record construction moved above TtyServer creation in daemon.ts**: the
+  hooks close over `record` and `queueRecordWrite`, so both now precede the
+  server; the initial `writeAgentRecord` still happens at the same point in
+  startup.
+- **CLI ppid comes from the global `process`**: Stricli's process type does
+  not model ppid, and threading a fake ppid through test contexts would let
+  tests resolve nonsense sources; the caller source always describes the real
+  invoking process.
+
+## 2026-07-08: Post-implementation review
+
+- [x] SDK surface: exported `encodeHello`/`decodeHello`/`HelloPayload` and
+      `AttachmentInfo` from index.ts — hello is now mandatory for direct tty.sock
+      clients (the protocol is a stated stable integration point, and a rust
+      client is planned), and `AgentRecord` references `AttachmentInfo`.
+      Regenerated docs/pictl.api.md.
+- [x] Docs: architecture.md's tty.sock frame list and registry-dir tree, and
+      registry.ts's header comment, now mention hello, audit.jsonl, and
+      sources.jsonl.
+- [x] Re-verified `npm run presubmit` green after the review changes.
+
+Reviewer iteration (same day):
+
+- [x] Fixed the clean-shutdown race the reviewer flagged (see the updated
+      clean-shutdown decision above).
+- [x] `resolveCallerSourceForPid` now falls back to `process:<hello pid>` on
+      _any_ /proc failure, including a walk that fails partway; previously a
+      partial failure produced `process:<client's ppid>`, naming a process the
+      audit trail knows nothing about.
+- [x] Added CLI audit-wiring tests (cli.test.ts): a probe app through the real
+      wrappers asserts audited commands write one event with verbatim argv,
+      unaudited commands write nothing, `PICTL_AUDIT=off` suppresses; plus a
+      multi-dir `recordCommandAudit` test.
+- [x] User review: `AgentRecord.attachments` made required (the spec had it
+      optional for pre-feature agent.json files). Absence carried no
+      information — the value is meaningless for non-running agents anyway —
+      so `readAgentRecord` normalizes a missing field to `[]` at the read
+      boundary (like `agentDir`) and no on-disk migration is needed.
+      Regenerated docs/pictl.api.md.

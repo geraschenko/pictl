@@ -5,7 +5,8 @@
  *
  *   [type: u8][payloadLength: u32 BE][payload]
  *
- * Client → server: `input` (raw terminal input bytes), `resize` (JSON).
+ * Client → server: `hello` (JSON, required first client frame), `input`
+ * (raw terminal input bytes), `resize` (JSON).
  * Server → client: `snapshot` (serialized screen state, sent once on
  * connect), `output` (raw PTY output bytes), `exit` (JSON, the agent is
  * shutting down).
@@ -24,6 +25,7 @@ export const FrameType = {
   snapshot: 3,
   output: 4,
   exit: 5,
+  hello: 6,
 } as const;
 
 export type FrameType = (typeof FrameType)[keyof typeof FrameType];
@@ -84,6 +86,31 @@ function isValidDimension(value: number | undefined): value is number {
     value > 0 &&
     value <= MAX_DIMENSION
   );
+}
+
+export interface HelloPayload {
+  /** The client's own pid, self-reported (cooperative, unverified). */
+  pid: number;
+  /** Free-form client description, e.g. "pictl attach". */
+  client: string;
+}
+
+export function encodeHello(hello: HelloPayload): Buffer {
+  return encodeFrame(FrameType.hello, Buffer.from(JSON.stringify(hello)));
+}
+
+/** Throws on malformed payloads; the receiver should drop the connection. */
+export function decodeHello(payload: Buffer): HelloPayload {
+  const parsed = JSON.parse(payload.toString("utf8")) as Partial<HelloPayload>;
+  if (
+    typeof parsed.pid !== "number" ||
+    !Number.isInteger(parsed.pid) ||
+    parsed.pid <= 0 ||
+    typeof parsed.client !== "string"
+  ) {
+    throw new Error(`invalid hello payload: ${payload.toString("utf8")}`);
+  }
+  return { pid: parsed.pid, client: parsed.client };
 }
 
 export function encodeExit(exit: ExitPayload): Buffer {

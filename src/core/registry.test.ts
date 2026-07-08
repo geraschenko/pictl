@@ -7,6 +7,8 @@ import {
   type AgentRecord,
   agentDirPath,
   agentIdError,
+  agentJsonPath,
+  readAgentRecord,
   readSpawnOptions,
   resolveAgentId,
   socketPathLengthError,
@@ -35,6 +37,7 @@ async function writeAgent(agentId: string): Promise<void> {
     daemonPid: 1,
     piPid: 1,
     sessions: [],
+    attachments: [],
     agentDir,
   };
   await writeAgentRecord(record);
@@ -153,6 +156,30 @@ test("spawn options round-trip, with and without tag", async () => {
       kind: "ok",
       options: withoutTag,
     });
+  } finally {
+    await rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("readAgentRecord: a pre-attachment-tracking record reads as []", async () => {
+  const agentDir = await mkdtemp(join(tmpdir(), "pictl-agent-record-"));
+  try {
+    await writeFile(
+      agentJsonPath(agentDir),
+      JSON.stringify({
+        id: "old-agent",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        cwd: "/tmp",
+        piBin: "pi",
+        spawnArgs: [],
+        daemonPid: 1,
+        piPid: 1,
+        sessions: [],
+      }),
+    );
+    const read = await readAgentRecord(agentDir);
+    assert.equal(read.kind, "ok");
+    assert.deepEqual((read as { record: AgentRecord }).record.attachments, []);
   } finally {
     await rm(agentDir, { recursive: true, force: true });
   }
