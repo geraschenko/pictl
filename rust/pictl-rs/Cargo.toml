@@ -1,0 +1,36 @@
+[package]
+name = "pictl-rs"
+version = "0.1.0"
+edition = "2024"
+description = "Rust client for pictl-managed pi agents: CLI wrapper, tty.sock attach protocol, pi.sock RPC/events"
+license = "Apache-2.0"
+
+[features]
+ratatui = ["dep:ratatui", "dep:vt100", "dep:tui-term"]
+
+[dependencies]
+bytes = "1"
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+pi-rpc-rs = "0.1.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["io-util", "macros", "net", "process", "rt", "sync", "time"] }
+tokio-util = { version = "0.7", features = ["codec"] }
+
+ratatui = { version = "0.30", optional = true }
+tui-term = { version = "0.3.4", optional = true }
+vt100 = { version = "0.16", optional = true }
+
+[dev-dependencies]
+# crossterm is ratatui's re-export; depending on it directly (same version)
+# just turns on the async event-stream feature.
+crossterm = { version = "0.29", features = ["event-stream"] }
+tempfile = "3"
+terminput = "0.5"
+terminput-crossterm = "0.4"
+tokio = { version = "1", features = ["full"] }
+
+[[example]]
+name = "attach"
+required-features = ["ratatui"]

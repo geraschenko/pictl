@@ -415,14 +415,104 @@ let mut pane = AttachPane::connect(
 
 **Instructions**: Update this section during each work session. Add new tasks, mark completed ones with [x], document decisions and problems encountered.
 
-- [ ] `rust/` workspace + `pictl-rs` crate skeleton (compiles with stubs)
-- [ ] `FrameCodec` + tty protocol types + unit tests
-- [ ] `TtyClient`/`TtyEvents` with reader task
-- [ ] `SocketRecord` dispatch + unit tests
-- [ ] `PiSocketClient`/`SocketEvents`
-- [ ] `ActivityWatcher`
-- [ ] TypeScript: surface `compacting` in `probeAgent` (inspect.ts) + test
-- [ ] `Pictl` CLI wrapper + probe types
-- [ ] `AttachPane` + `Widget` impl (feature `ratatui`)
-- [ ] Integration test (gated on pictl availability)
-- [ ] ratatui example
+## Implementation-Time Decisions
+
+- **pi-rpc-rs 0.1.4 already fixed both handoff-doc problems**: `RpcEvent` now
+  has an `Unknown(Value)` fallback and matches the two `session_*` wrapper
+  names exactly. `SocketRecord::from_value` still dispatches fork records
+  first (they'd otherwise land as `RpcEvent::Unknown`), and canonicalizes
+  `Event(RpcEvent::Unknown(v))` → `SocketRecord::Unknown(v)` so unknown
+  records have one representation. `pi-rpc-rs/docs/handoff-unknown-records.md`
+  is now partially stale (transport abstraction still pending).
+- **Malformed typed records degrade to `Unknown`** instead of erroring:
+  consistent with the never-hard-error rule; a malformed *response* would
+  leave its requester hanging, but responses come from pi-rpc-rs-typed
+  serialization on the same version, so treating that skew like any other
+  unknown record is acceptable.
+- **`ActivityWatcher::changed()` pends forever after `Disconnected` is
+  observed** (rather than erroring or returning immediately): `Disconnected`
+  is terminal, so "resolves on next transition" means never; this keeps
+  `select!` loops from spinning.
+- **ETXTBSY in CLI-wrapper tests**: tests exec a freshly written fake `pictl`
+  script; a parallel test's fork can briefly inherit the script's write fd,
+  so exec intermittently failed with `ExecutableFileBusy` (~1 in 10 full
+  runs). Fixed in the `fake_pictl` helper by probe-executing the script until
+  runnable before returning it; verified with 10 consecutive clean full runs.
+- **Integration-test coalescing**: the watcher's `watch` channel coalesces, so
+  a fast turn can collapse Streaming→Idle into one observed change; the
+  end-to-end test accepts any transition sequence that settles back at Idle
+  (a `changed()` returning Idle from an Idle start proves the agent was
+  non-idle in between).
+- **Watch coalescing shaped the tests**: a free-running scripted mock server
+  races through transitions and `changed()` only sees the last one, so the
+  mock pi server is driven step-by-step by the test; the derivation itself is
+  a pure `derive_activity(&RpcSessionState)` function with a direct matrix
+  test (the async tests only cover plumbing).
+
+- [x] `rust/` workspace + `pictl-rs` crate skeleton (compiles with stubs) —
+      both feature sets pass `cargo check`, including the
+      `Widget for &AttachPane` impl via tui-term 0.3.4, validating the
+      vt100/tui-term/ratatui 0.30 composition
+- [x] `FrameCodec` + tty protocol types + unit tests (round-trip, split
+      reads, payload cap, unknown type, resize/hello validation, lenient exit)
+- [x] `TtyClient`/`TtyEvents` with reader task + mock-server tests
+      (handshake/events, connect retry, deadline failure); shared
+      `connect_with_retry` in `connect.rs` (50ms→500ms backoff, retry only on
+      NotFound/ConnectionRefused, matching TS)
+- [x] `SocketRecord` dispatch + unit tests (hello, response, all fork
+      records, upstream events, unknown + malformed → Unknown)
+- [x] `PiSocketClient`/`SocketEvents` + mock-server tests (correlation with
+      racing event, error response → `Error::Rpc`, wrong banner, close fails
+      pending)
+- [x] `ActivityWatcher` (pure `derive_activity` matrix test + step-driven
+      mock-server transition tests)
+- [x] TypeScript: surface `compacting` in `probeAgent` (inspect.ts) +
+      `inspect.test.ts` (idle / streaming / compacting-wins probe tests)
+- [x] `Pictl` CLI wrapper + probe types (fake-bin tests: argv construction,
+      probe JSON parsing incl. socket paths, wait exit-code mapping)
+- [x] `AttachPane` + `Widget` impl (feature `ratatui`; vt100 0.16 moved
+      `set_size` to `Screen`, reached via `parser.screen_mut()`)
+- [x] Integration test (`tests/integration.rs`, `#[ignore]`; requires
+      pictl + pi + API keys and an explicit `PICTL_DIR` scratch dir; compiles,
+      not yet run against a real agent)
+- [x] ratatui example (`examples/attach.rs`, `required-features = ["ratatui"]`:
+      status line with ●/♻/○ indicator + `AttachPane` fill, keystrokes encoded
+      to terminal bytes, `Event::Resize` resizes the pane, Ctrl-Q detaches;
+      input read on a dedicated thread because the ratatui-re-exported
+      crossterm lacks the async `event-stream` feature)
+- [x] Final: `cargo check --all-targets` + `cargo test` clean on both feature
+      sets (34 tests with `ratatui`), `npm run check` + `npm test` clean,
+      post-implementation review (review.md). Review found and fixed two
+      issues: byte-slice truncation of the bad-banner excerpt could panic
+      mid-UTF-8-character (now char-wise), and the example indexed `probes[0]`
+      on a possibly empty vec (now `.first()`)
+- [ ] Run the integration test against a real agent (needs pictl + pi +
+      provider API keys: `PICTL_DIR=$(mktemp -d) cargo test --test
+      integration -- --ignored --nocapture`)
+- [x] Review round 1 (TDC comments, commit 4287988): license → Apache-2.0;
+      files renamed after their primary public entity (`pictl.rs`,
+      `pi_socket_client.rs`, `socket_record.rs`, `frame_codec.rs`,
+      `tty_client.rs`, `activity_watcher.rs`, `attach_pane.rs`,
+      `agent_probe.rs`, `agent_id.rs`, `connect_with_retry.rs`); tests moved
+      to sibling `<module>/tests.rs` files; example detach key → Ctrl-];
+      example input via async `EventStream` (crossterm dev-dep turns on its
+      `event-stream` feature — same crate version ratatui re-exports, so the
+      feature unifies); hand-rolled key encoding replaced with `terminput` +
+      `terminput-crossterm`. Open items: cursor-restore-on-exit hook,
+      `>=` deps question, `Pictl::status` ergonomics, scrollback size, agent
+      fleet example redesign (deferred by reviewer)
+- [x] Review round 2 (TDC comments, commit d9b90f2) + round-1 decisions:
+      modules with subdirectories moved to `<module>/mod.rs`; deps stay caret
+      (reviewer will add a version-ratchet check); `Pictl::new().status`
+      stays; scrollback now `DEFAULT_SCROLLBACK_LINES = 10_000`, configurable
+      via a `scrollback_lines` param on `AttachPane::connect` (vt100
+      allocates lazily), with `scroll_up`/`scroll_down` methods and
+      PgUp/PgDn + scrollback indicator in the example; cursor restore fixed
+      three ways in the example (ShowCursor on clean exit, terminal-restoring
+      panic hook chained in front of ratatui's, SIGINT/SIGTERM/SIGHUP select
+      arms); example redraws drain-before-draw via biased select instead of
+      per event; `send_if_modified` closures factored into a documented
+      `send_if_changed` helper; docs/thoughts/passive-state-tracker.md added.
+      Open items: agent fleet example redesign (with it: `TerminalState`
+      adoption from muninn for undo/reapply of terminal modes, editor
+      shortcut, maybe mouse scrolling)

@@ -27,6 +27,7 @@ const PROBE_CONNECT_DEADLINE_MS = 2_000;
 type AgentStatus =
   | "idle"
   | "streaming"
+  | "compacting"
   | "dormant"
   | "archived"
   | "tombstoned"
@@ -60,12 +61,13 @@ async function probeAgent(agentId: string): Promise<AgentProbe> {
     );
     try {
       const state = await getState(client);
-      return {
-        agentId,
-        status: state.isStreaming ? "streaming" : "idle",
-        record,
-        state,
-      };
+      // Compacting is a more special kind of streaming, so it wins.
+      const status = state.isCompacting
+        ? "compacting"
+        : state.isStreaming
+          ? "streaming"
+          : "idle";
+      return { agentId, status, record, state };
     } finally {
       client.close();
     }
