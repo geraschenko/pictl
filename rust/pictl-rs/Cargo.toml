@@ -2,8 +2,8 @@
 name = "pictl-rs"
 version = "0.1.0"
 edition = "2024"
-description = "Rust client for pictl-managed pi agents: CLI wrapper, tty.sock attach protocol, pi.sock RPC/events"
 license = "Apache-2.0"
+description = "Rust client for pictl-managed pi agents: CLI wrapper, tty.sock attach protocol, pi.sock RPC/events"
 
 [features]
 ratatui = ["dep:ratatui", "dep:vt100", "dep:tui-term"]

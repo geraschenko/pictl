@@ -8,15 +8,12 @@
 import { closeSync, writeSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { numberParser } from "@stricli/core";
-import { SerializeAddon } from "@xterm/addon-serialize";
 import {
   getAgentDir,
   hasTrustRequiringProjectResources,
   ProjectTrustStore,
   SettingsManager,
 } from "@geraschenko/pi-coding-agent";
-import xterm from "@xterm/headless";
-import { cursorTo, cursorToRow, HIDE_CURSOR, SHOW_CURSOR } from "./ansi.ts";
 import {
   commandNoTarget,
   parsedFlag,
@@ -43,12 +40,10 @@ import {
   resolveCallerSourceForPid,
 } from "./audit.ts";
 import { connectWithRetry, type SocketEvent } from "./pi-socket-client.ts";
-import { spawnPty } from "./pty.ts";
+import { PtyScreen } from "./pty-screen.ts";
 import { TtyServer, type AttachmentInfo } from "./tty-server.ts";
 import { fileExists } from "./util.ts";
 
-const PTY_COLS = 80;
-const PTY_ROWS = 24;
 const RPC_CONNECT_DEADLINE_MS = 30_000;
 
 const daemonFlags = {
@@ -106,51 +101,6 @@ function ptyEnv(
   // checks and telemetry).
   env.PI_SKIP_VERSION_CHECK = "1";
   return env;
-}
-
-/**
- * Whether the emulated terminal's cursor is currently hidden (DECTCEM). The
- * public `terminal.modes` API lacks DECTCEM; the internal core service is the
- * only place xterm tracks it. Guarded so an xterm internals change degrades
- * to "cursor visible", not a crash.
- */
-function isCursorHidden(terminal: xterm.Terminal): boolean {
-  const core = (
-    terminal as unknown as {
-      _core?: { coreService?: { isCursorHidden?: boolean } };
-    }
-  )._core;
-  return core?.coreService?.isCursorHidden ?? false;
-}
-
-// Reserving a row for a client hint line is an attach-client policy, so the
-// daemon arguably shouldn't bake it into every snapshot. The computation must
-// stay here — it reads the authoritative xterm buffer (cursor/bottom-row state)
-// that only the daemon has — but the "reserve one row" decision could become a
-// per-client parameter in the tty protocol instead of being hardcoded. Left as
-// a note rather than a refactor: a richer client (e.g. an embedded terminal)
-// can render its hint outside the emulated bounds and not need this at all.
-/**
- * Make the bottom row available for the attach client's hint line. When pi's
- * content reaches the bottom row, append a one-line scroll and re-park the
- * cursor one row higher, so pi's relative redraws stay aligned with the
- * scrolled content and the hint gets a row of its own below everything pi
- * drew. When the bottom row is already empty, the hint can use it as is.
- */
-export function hintRoomSequence(terminal: xterm.Terminal): string {
-  const buffer = terminal.buffer.active;
-  const bottomLine = buffer.getLine(buffer.baseY + terminal.rows - 1);
-  if (
-    bottomLine === undefined ||
-    bottomLine.translateToString().trim() === ""
-  ) {
-    return "";
-  }
-  // cursorY is 0-based relative to the visible screen, so as a 1-based row it
-  // is cursorY + 1 before the scroll and cursorY after it.
-  const parkedRow = Math.max(1, buffer.cursorY);
-  const parkedCol = buffer.cursorX + 1;
-  return `${cursorToRow(terminal.rows)}\n${cursorTo(parkedRow, parkedCol)}`;
 }
 
 /**
@@ -272,7 +222,7 @@ async function daemon(this: CommandContext, flags: DaemonFlags): Promise<void> {
   ]);
 
   const sessionArgs = resume ? await revivalSessionArgs(sessions) : [];
-  const piProcess = spawnPty(
+  const piScreen = new PtyScreen(
     options.piBin,
     [
       "--rpc-socket",
@@ -280,23 +230,8 @@ async function daemon(this: CommandContext, flags: DaemonFlags): Promise<void> {
       ...sessionArgs,
       ...options.spawnArgs,
     ],
-    {
-      name: "xterm-256color",
-      cols: PTY_COLS,
-      rows: PTY_ROWS,
-      cwd: options.cwd,
-      env: ptyEnv(agentId, this.env),
-    },
+    { cwd: options.cwd, env: ptyEnv(agentId, this.env) },
   );
-
-  // allowProposedApi is required by the serialize addon.
-  const terminal = new xterm.Terminal({
-    cols: PTY_COLS,
-    rows: PTY_ROWS,
-    allowProposedApi: true,
-  });
-  const serializeAddon = new SerializeAddon();
-  terminal.loadAddon(serializeAddon);
 
   const record: AgentRecord = {
     id: agentId,
@@ -306,7 +241,7 @@ async function daemon(this: CommandContext, flags: DaemonFlags): Promise<void> {
     piBin: options.piBin,
     spawnArgs: options.spawnArgs,
     daemonPid: proc.pid,
-    piPid: piProcess.pid,
+    piPid: piScreen.pid,
     sessions,
     attachments: [],
     agentDir,
@@ -344,32 +279,10 @@ async function daemon(this: CommandContext, flags: DaemonFlags): Promise<void> {
   };
 
   const ttyServer = new TtyServer({
-    // terminal.write("") is the parse barrier; serializing inside its
-    // callback (not in a then() after it) keeps the snapshot exactly at the
-    // barrier — xterm may parse further queued chunks before a microtask runs.
-    // The serialize addon does not capture cursor visibility at all, so the
-    // snapshot must append whichever sequence mirrors the emulator's current
-    // state: pi normally runs cursor-hidden (omitting this would show a
-    // phantom cursor), but if pi has the cursor visible at snapshot time, the
-    // attacher must show it too.
-    serializeScreen: () =>
-      new Promise((resolve) => {
-        terminal.write("", () =>
-          resolve(
-            serializeAddon.serialize() +
-              hintRoomSequence(terminal) +
-              (isCursorHidden(terminal) ? HIDE_CURSOR : SHOW_CURSOR),
-          ),
-        );
-      }),
-    writeInput: (data) => piProcess.write(data),
-    // The emulator must track the PTY size or snapshots drift from what pi
-    // is rendering. The size itself is computed by TtyServer (min across
-    // attached clients).
-    resize: (cols, rows) => {
-      piProcess.resize(cols, rows);
-      terminal.resize(cols, rows);
-    },
+    serializeScreen: () => piScreen.serializeScreen(),
+    writeInput: (data) => piScreen.write(data),
+    // The size itself is computed by TtyServer (min across attached clients).
+    resize: (cols, rows) => piScreen.resize(cols, rows),
     onAttach: (info) => auditAttachEvent("attach", info),
     onDetach: (info) => auditAttachEvent("detach", info),
     onAttachmentsChanged: (attachments) => {
@@ -378,10 +291,7 @@ async function daemon(this: CommandContext, flags: DaemonFlags): Promise<void> {
     },
   });
 
-  piProcess.onData((data) => {
-    terminal.write(data);
-    ttyServer.broadcastOutput(data);
-  });
+  piScreen.onData((data) => ttyServer.broadcastOutput(data));
 
   await writeAgentRecord(record);
   // The handoff is complete once the options are in agent.json; force also
@@ -414,7 +324,7 @@ async function daemon(this: CommandContext, flags: DaemonFlags): Promise<void> {
     })();
   };
 
-  piProcess.onExit(({ exitCode }) => {
+  piScreen.onExit((exitCode) => {
     proc.stdout.write(`[daemon] pi exited with code ${exitCode}\n`);
     cleanupAndExit(exitCode);
   });
@@ -422,8 +332,8 @@ async function daemon(this: CommandContext, flags: DaemonFlags): Promise<void> {
   // forward as SIGTERM so pi exits cleanly. Forwarding SIGINT verbatim would
   // be wrong — interactive pi treats it as "abort the current turn" and
   // keeps running, leaving a daemon that was asked to die still alive.
-  proc.on("SIGTERM", () => piProcess.kill("SIGTERM"));
-  proc.on("SIGINT", () => piProcess.kill("SIGTERM"));
+  proc.on("SIGTERM", () => piScreen.kill("SIGTERM"));
+  proc.on("SIGINT", () => piScreen.kill("SIGTERM"));
 
   const handleEvent = (event: SocketEvent): void => {
     if (!isSessionChangedEvent(event)) {
@@ -460,7 +370,7 @@ async function daemon(this: CommandContext, flags: DaemonFlags): Promise<void> {
       `could not connect to pi socket: ${String(error)} ` +
         `(log: ${daemonLogPath(agentDir)})`,
     );
-    piProcess.kill("SIGKILL");
+    piScreen.kill("SIGKILL");
     cleanupAndExit(1);
   }
 }

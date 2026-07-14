@@ -5,7 +5,7 @@ Both clients currently derive an agent's working/idle status by calling
 `src/core/inspect.ts` and the Rust side in
 `rust/pictl-rs/src/activity_watcher/mod.rs`. The events themselves
 (`agent_start`, `agent_end`, `compaction_start`, `compaction_end`) tell us
-*that* something changed but not the whole next state (queued message counts,
+_that_ something changed but not the whole next state (queued message counts,
 compaction inside a turn), so each boundary costs a request/response
 round-trip on pi.sock. With many watchers or chatty agents that's wasteful,
 and it's also a race window: the state we fetch may already reflect a later

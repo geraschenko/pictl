@@ -425,7 +425,7 @@ let mut pane = AttachPane::connect(
   records have one representation. `pi-rpc-rs/docs/handoff-unknown-records.md`
   is now partially stale (transport abstraction still pending).
 - **Malformed typed records degrade to `Unknown`** instead of erroring:
-  consistent with the never-hard-error rule; a malformed *response* would
+  consistent with the never-hard-error rule; a malformed _response_ would
   leave its requester hanging, but responses come from pi-rpc-rs-typed
   serialization on the same version, so treating that skew like any other
   unknown record is acceptable.
