@@ -3,6 +3,13 @@
  * runs in, maintains detached screen state via @xterm/headless, and is the
  * sole writer of agent.json. It connects to its own pi.sock as a client to
  * track session replacements.
+ *
+ * This file is the composition root: CLI entry, startup classification,
+ * record ownership + serialized writes, pi's PTY lifecycle, module wiring,
+ * and teardown. Anything with its own internal wiring lives in a sibling
+ * module — the tty.sock attach service (attach server + auditing + the
+ * screen wires) is tty-service.ts, which this file drives only through
+ * TtyServiceOptions and the returned shutdown handle.
  */
 
 import { closeSync, writeSync } from "node:fs";
@@ -19,8 +26,8 @@ import {
   parsedFlag,
   requiredStringFlag,
   type InferFlags,
-} from "./cli.ts";
-import { type CommandContext } from "./targets.ts";
+} from "../cli.ts";
+import { type CommandContext } from "../targets.ts";
 import {
   type AgentRecord,
   agentDirPath,
@@ -33,16 +40,12 @@ import {
   spawnOptionsPath,
   ttySocketPath,
   writeAgentRecord,
-} from "./registry.ts";
-import {
-  auditEnabled,
-  recordAuditEvent,
-  resolveCallerSourceForPid,
-} from "./audit.ts";
-import { connectWithRetry, type SocketEvent } from "./pi-socket-client.ts";
-import { PtyScreen } from "./pty-screen.ts";
-import { TtyServer, type AttachmentInfo } from "./tty-server.ts";
-import { fileExists } from "./util.ts";
+} from "../registry.ts";
+import { auditEnabled } from "../audit.ts";
+import { connectWithRetry, type SocketEvent } from "../pi-socket-client.ts";
+import { PtyScreen } from "../pty-screen.ts";
+import { fileExists } from "../util.ts";
+import { startTtyService, type TtyService } from "./tty-service.ts";
 
 const RPC_CONNECT_DEADLINE_MS = 30_000;
 
@@ -257,49 +260,14 @@ async function daemon(this: CommandContext, flags: DaemonFlags): Promise<void> {
     );
   };
 
-  // Attach auditing never kills the daemon: failures are logged (stdout goes
-  // to daemon.log) and otherwise ignored.
-  const auditAttachEvent = (
-    event: "attach" | "detach",
-    info: AttachmentInfo,
-  ): void => {
-    if (!auditEnabled(this.env)) {
-      return;
-    }
-    const { source, manager } = resolveCallerSourceForPid(info.pid);
-    const auditRecord = {
-      ts: new Date().toISOString(),
-      source,
-      event,
-      pid: info.pid,
-    };
-    void recordAuditEvent(agentDir, auditRecord, manager).catch((error) =>
-      proc.stdout.write(`[daemon] ${event} audit failed: ${String(error)}\n`),
-    );
-  };
-
-  const ttyServer = new TtyServer({
-    serializeScreen: () => piScreen.serializeScreen(),
-    writeInput: (data) => piScreen.write(data),
-    // The size itself is computed by TtyServer (min across attached clients).
-    resize: (cols, rows) => piScreen.resize(cols, rows),
-    onAttach: (info) => auditAttachEvent("attach", info),
-    onDetach: (info) => auditAttachEvent("detach", info),
-    onAttachmentsChanged: (attachments) => {
-      record.attachments = attachments;
-      queueRecordWrite();
-    },
-  });
-
-  piScreen.onData((data) => ttyServer.broadcastOutput(data));
-
   await writeAgentRecord(record);
   // The handoff is complete once the options are in agent.json; force also
   // covers revival, where any spawn file present is a stale leftover.
   await rm(spawnOptionsPath(agentDir), { force: true });
 
-  await ttyServer.listen(ttySocketPath(agentDir));
-
+  // Defined before the tty service starts, so the failure path below can run
+  // it — hence the optional chaining on the still-possibly-undefined handle.
+  let ttyService: TtyService | undefined;
   let exiting = false;
   const cleanupAndExit = (code: number): void => {
     if (exiting) {
@@ -309,7 +277,7 @@ async function daemon(this: CommandContext, flags: DaemonFlags): Promise<void> {
     void (async () => {
       // shutdown() suppresses tty hooks synchronously, so no attachment
       // updates can be enqueued after this point; the clear below is final.
-      await ttyServer.shutdown(`pi exited (code ${code})`);
+      await ttyService?.shutdown(`pi exited (code ${code})`);
       // Clean shutdown clears the attachment list; a crash leaves stale
       // entries, which readers must ignore for non-running agents. Queued
       // (not written directly) so it serializes behind in-flight writes.
@@ -323,6 +291,24 @@ async function daemon(this: CommandContext, flags: DaemonFlags): Promise<void> {
       proc.exit(code);
     })();
   };
+
+  try {
+    ttyService = await startTtyService({
+      agentDir,
+      piScreen,
+      auditEnabled: auditEnabled(this.env),
+      onAttachmentsChanged: (attachments) => {
+        record.attachments = attachments;
+        queueRecordWrite();
+      },
+      log: (message) => proc.stdout.write(`[daemon] ${message}\n`),
+    });
+  } catch (error) {
+    failStartup(`could not bind tty socket: ${String(error)}`);
+    piScreen.kill("SIGKILL");
+    cleanupAndExit(1);
+    return;
+  }
 
   piScreen.onExit((exitCode) => {
     proc.stdout.write(`[daemon] pi exited with code ${exitCode}\n`);

@@ -2,7 +2,7 @@ import { buildApplication, buildRouteMap, text_en } from "@stricli/core";
 import { attachRoute } from "./attach.ts";
 import { type CommandContext } from "./targets.ts";
 import { completionRoute } from "./completion.ts";
-import { internalRoutes } from "./daemon.ts";
+import { internalRoutes } from "./daemon/daemon.ts";
 import { listRoute, statusRoute } from "./inspect.ts";
 import { formatRoute } from "../format/command.ts";
 import { gcRoute, lifecycleRoutes } from "./lifecycle.ts";

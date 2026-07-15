@@ -282,17 +282,22 @@ if `spec.audited` and `auditEnabled(env)`, call
 mid-command) calls `recordAuditEvent` itself right after creating the agent
 dir.
 
-### Daemon (`src/core/daemon.ts`)
+### Daemon (`src/core/daemon/tty-service.ts`)
 
-Implements the three new hooks:
+The tty service implements the three new hooks (the composition root,
+`src/core/daemon/daemon.ts`, passes it the audit toggle — `auditEnabled(env)`
+evaluated once at startup, consistent with the frozen-at-spawn edge case
+below — and the record-facing attachment callback):
 
-- `onAttach`/`onDetach`: when `auditEnabled(process.env)`,
+- `onAttach`/`onDetach`: call `auditAttachEvent` (in `audit.ts`, next to the
+  primitives it composes), which when auditing is enabled runs
   `resolveCallerSourceForPid(hello.pid)` and `recordAuditEvent`. Computing
   the source daemon-side keeps foreign tty.sock clients trivial (they report
   only their pid) and identity logic in one implementation. Failures are
   logged to daemon.log and otherwise ignored — attach auditing never kills
   the daemon.
-- `onAttachmentsChanged`: update `record.attachments` and `writeAgentRecord`.
+- `onAttachmentsChanged`: daemon.ts updates `record.attachments` and
+  `writeAgentRecord`.
 
 On startup the daemon writes `attachments: []`; on clean shutdown it clears
 the list.
@@ -366,7 +371,8 @@ the list.
   `--bg-spare`/`daemonized` detection is team-specific and not needed here.
   The skill is a standalone script and cannot import from src/, so the logic
   is duplicated knowingly; consider extracting later if a third user appears.
-- **PICTL_ID**: set for pi processes by the daemon (`daemon.ts:97`) and
+- **PICTL_ID**: set for pi processes by the daemon (`ptyEnv` in
+  `daemon/daemon.ts`) and
   inherited by their bash subprocesses, which is how pictl invocations from
   a pi agent's tools get the `pictl:` source.
 - **Reading a peer's env**: `/proc/<pid>/environ` is the exec-time

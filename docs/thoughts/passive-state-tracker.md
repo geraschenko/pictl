@@ -51,3 +51,73 @@ test vectors if practical). Consumers then read state locally:
   can silently drift when pi changes. A cheap safeguard: in debug builds (or
   a test mode), occasionally issue `get_state` and assert it matches the
   folded state.
+
+## Derisking findings (2026-07-15, pi 0.80.6-fork.0)
+
+Source inspection of the shipped pi dist (unminified JS + .d.ts; file refs
+under `node_modules/@geraschenko/pi-coding-agent/`). Verdict: **the fold is
+possible for about half the fields as-is; the rest change with no socket
+event and need pi-side event additions (we control the fork) or targeted
+refreshes.**
+
+Foldable exactly today:
+
+- `isStreaming` — `agent_start` → true, `agent_settled` → false. NOT
+  `agent_end`: retries/continuations keep the run active; only
+  `agent_settled` means idle (`dist/core/agent-session.js:783,793-800`).
+- `thinkingLevel` — `thinking_level_changed{level}` carries the value;
+  `setThinkingLevel` is the single funnel, incl. model-switch re-clamping
+  (`agent-session.js:1327-1341`).
+- `sessionName` — `session_info_changed{name}`; `setSessionName` is the only
+  writer (`agent-session.js:2301-2306`).
+- `sessionId` / `sessionFile` — `session_changed`; sent per client at connect
+  and broadcast on session replacement (`rpc-socket-mode.js:157-158,183-189`).
+- `pendingMessageCount` — `queue_update{steering[],followUp[]}` carries full
+  arrays (emitted on enqueue, consumption, and clear;
+  `agent-session.js:319,326,1067,1083,1196`). Caveat: `sendCustomMessage`
+  steering bypasses these arrays entirely.
+- `isCompacting` — `compaction_start`/`compaction_end` pair on every
+  manual/auto path including error/abort. Exception: `navigate_tree` branch
+  summarization sets the compacting flag with no compaction events — only
+  `tree_navigated` fires, at the end (`agent-session.js:638-642,2358,2490`).
+
+Not foldable — change with NO socket event:
+
+- `model` — `set_model`/`cycle_model` (any client, or TUI Ctrl+P / `/model`)
+  emit only the extension-runner `model_select`, never a socket broadcast
+  (`agent-session.js:1231-1240,1252,1284,1307`); registry refresh also swaps
+  it silently (`1868-1878`).
+- `steeringMode` / `followUpMode` — setters write agent + settings, no emit
+  (`agent-session.js:1395-1406`); `/reload` re-syncs silently (`2107`).
+- `autoCompactionEnabled` — a settings write, no emit (`1790-1792`).
+- `messageCount` — worst field: bash results push to `state.messages` with
+  no event at all (`agent-session.js:2261,2287-2293`); compaction replaces
+  messages wholesale (`1488,1734`) and `compaction_end` carries no count;
+  retry/overflow drop the trailing error message (`1606,1759,2162-2165`);
+  `tree_navigated` rebuilds messages but carries only leaf ids (`2470`).
+
+Ordering: per-client, responses and events share one FIFO with in-order
+writes, and `_emit` enqueues synchronously at emit time — so a fold over
+events alone is race-free (`rpc-socket-mode.js:74-134`;
+`agent-session.js:266-269`). But a `get_state` response can be up to ~one
+microtask stale relative to events already on the wire (the async handler
+inserts a microtask between snapshot and enqueue,
+`rpc-socket-mode.js:206-215`), and concurrent commands' responses are not
+serialized (`160-162`). All value-carrying events are absolute (not deltas),
+so re-applying an event already reflected in the snapshot is harmless.
+
+Connect/cross-client: pi sends only `hello` + `session_changed` on connect —
+no snapshot, so the initial `get_state` stays. All session events broadcast
+to every client regardless of originator (TUI and RPC share one
+`AgentSession`, `dist/main.js:673-699`) — but the silent mutations above are
+silent for everyone, including TUI-user changes.
+
+Path to a complete fold (pi-side, in our fork): broadcast `model_select` and
+add `steering_mode_changed` / `follow_up_mode_changed` /
+`auto_compaction_changed` events; either event bash-result message appends
+and put the new message count on state-rewriting events (`compaction_end`,
+`tree_navigated`), or drop `messageCount` from the tracked state if no
+consumer needs it. Interim recipe without pi changes: fold the exact fields,
+refresh on `session_changed` (mandatory — resets nearly everything),
+`compaction_end`, and `tree_navigated`, and accept documented staleness on
+the four silent fields.

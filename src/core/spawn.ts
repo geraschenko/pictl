@@ -105,7 +105,7 @@ async function readAll(stream: Readable): Promise<string> {
  * Everything else the daemon needs it derives itself: the agent dir from the
  * id (PICTL_DIR is inherited), and the spawn-time configuration from
  * spawn-options.json (initial spawn) or agent.json (revival) — see the
- * startup classification in daemon.ts.
+ * startup classification in daemon/daemon.ts.
  */
 export async function launchDaemon(agentId: string): Promise<void> {
   const agentDir = agentDirPath(agentId);
