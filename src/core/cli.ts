@@ -85,10 +85,7 @@ export async function recordCommandAudit(
   if (!auditEnabled(env)) {
     return;
   }
-  const { source, manager } = resolveCallerSource(
-    env.PICTL_ID,
-    process.ppid,
-  );
+  const { source, manager } = resolveCallerSource(env.PICTL_ID, process.ppid);
   const ts = new Date().toISOString();
   for (const agentDir of agentDirs) {
     await recordAuditEvent(agentDir, { ts, source, argv: [...argv] }, manager);

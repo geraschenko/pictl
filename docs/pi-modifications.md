@@ -187,46 +187,6 @@ Why pictl cares:
 - supervisors can use inactivity/watchdog logic without pretending they can resolve the UI themselves;
 - the TUI remains the single place where rich extension UI is displayed and answered.
 
-## Durable session visibility: `get_entries` and `get_tree`
-
-(Upstream PR: https://github.com/earendil-works/pi/pull/6078)
-
-Existing RPC commands exposed current conversation messages, but not the underlying session entry tree.
-
-That is not enough for robust orchestration:
-
-- `get_messages` returns the current in-context path, not the full append-only session history;
-- compaction can hide earlier messages from the current context;
-- abandoned branches are invisible;
-- events are ephemeral and cannot be used for crash recovery;
-- a supervisor needs a durable cursor it can persist and resume from.
-
-The fork adds read-only RPC commands:
-
-```json
-{"type":"get_entries"}
-```
-
-```json
-{"type":"get_entries","since":"<entry-id>"}
-```
-
-```json
-{"type":"get_tree"}
-```
-
-`get_entries` returns session entries in append order plus the current `leafId`. With `since`, it returns entries strictly after the specified entry id. If the entry id is not in the current session, the command returns an error.
-
-`get_tree` returns the session tree plus the current `leafId`.
-
-Why pictl needs this:
-
-- `pictl tail --since <entry-id>` can be implemented as durable catch-up rather than event replay;
-- workflow scripts can persist an entry cursor and resume after crashes;
-- clients can detect branch movement and compaction through session structure instead of screen output.
-
-Cursor caveat: entry ids are session-scoped. If the active session changes, an old cursor may no longer be meaningful. pictl treats that as client policy rather than trying to interweave multiple session files.
-
 ## Tree navigation over RPC: `navigate_tree` and `tree_navigated`
 
 Interactive pi has `/tree`, which moves the current leaf within the same session. Before the fork, RPC clients could inspect a tree after `get_tree`, but could not perform the equivalent operation. The available RPC branch operations, such as `fork` and `clone`, create new sessions instead of moving within the current one.

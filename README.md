@@ -4,7 +4,12 @@
 
 `pictl` aims to let humans, agents, scripts, and code interact with live pi instances _simultaneously_, each on their own terms. Humans can attach with the stock pi TUI, and agents/scripts get ergonomic (but unfettered) access to the RPC interface. You don't have to give up your `/tree`, and they aren't forced to `tmux capture-pane`.
 
-Like pi, `pictl` is meant to be minimal, extensible, and composable.
+Like pi, `pictl` is meant to be minimal and composable. Its main components and associated subcommands are:
+
+- **Lifecycle management** (`spawn`/`archive`/`list`/`status`/…). Each agent runs as a background process, automatically resumed when needed. There is no central orchestrator; each agent's daemon manages its own entry in an [on-disk registry](docs/architecture.md#pictl_dir-as-the-registry).
+- **CLI wrappers for all RPC commands** (`prompt`/`set-model`/`abort`/`compact`/…). `prompt` streams the response; everything else returns the RPC response as JSON.
+- **Monitoring** with `tail` and `wait`. `prompt` and `tail` can emit formatted messages (default), session entries, or the raw RPC stream — human-readable by default, `--json` for machines. See [Getting fancy](#getting-fancy-with-pictl-prompttailformat).
+- **TUI access** with `attach`. You get pi's stock interface, including any custom UI extensions.
 
 ## Installation
 
@@ -12,6 +17,8 @@ Like pi, `pictl` is meant to be minimal, extensible, and composable.
 npm install -g @geraschenko/pictl
 pictl --version
 ```
+
+`pictl` bundles its own lightly modified pi, so you don't need pi installed. See [`docs/pi-modifications.md`](docs/pi-modifications.md) for what's changed.
 
 > [!NOTE]
 > `pictl` runs on Linux and macOS only; it uses Unix domain sockets and has no
@@ -32,7 +39,7 @@ echo "$PICTL_TARGET"
 ```
 
 - If you don't set `$PICTL_TARGET`, commands that require a target need `--target PREFIX` or `-t PREFIX`. Any unique prefix of the agent id is accepted.
-- If you want to pass extra args to `pi`, put them after `--` when you spawn the agent, like this: `pictl spawn -- -e my_extension.ts`
+- If you want to pass extra args to `pi`, put them after `--` when you spawn the agent, like this: `pictl spawn -- -e my_extension.ts`. To "wrap" an existing pi session, exit the session and run `pictl spawn -- --resume <session-id>` (NOTE: the agent id is _different_ from the session id).
 
 **Attach to the TUI** in another terminal if you want to follow along in "regular pi view" (recommended).
 
@@ -63,7 +70,7 @@ pictl navigate-tree 8c5cb595
 
 > [!NOTE]
 >
-> - For all available RPC commands, see pi's [`rpc-types.ts`](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/src/modes/rpc/rpc-types.ts), or run `pictl -H`. The tweaked version of pi used by `pictl` also includes the commands `get-entries`, `get-tree`, and `navigate-tree`, which stock pi does not.
+> - For all available RPC commands, see pi's [`rpc-types.ts`](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/src/modes/rpc/rpc-types.ts), or run `pictl -H`. The tweaked version of pi used by `pictl` also includes the command `navigate-tree`, which stock pi does not.
 > - The help also includes details about subcommand arguments, e.g. `pictl set-model -H` to learn about arguments of `set-model`.
 
 **Manage your agents**

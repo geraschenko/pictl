@@ -75,7 +75,7 @@ The project is still early, so details may change, but the architectural directi
 - for semantic control over agents, prefer `pictl` as the shell SDK over `pi.sock`;
 - for terminal attach, clients that need native terminal integration should speak to `tty.sock` directly.
 
-pictl is meant to expose the full useful interface of `pi.sock` while centralizing registry lookup, daemon spawning, dormant-agent revival, conversion from events to durable session-entry streams, and wait/stop-condition logic. Other language SDKs for semantic agent control may simply wrap pictl to get a native feel in that language.
+pictl is meant to expose the full useful interface of `pi.sock` while centralizing registry lookup, daemon spawning, dormant-agent revival, conversion from events to durable session-entry streams, and wait/stop-condition logic. Other language SDKs for semantic agent control may simply wrap pictl to get a native feel in that language, as the Rust client's `Pictl` type does.
 
 However, a rich terminal client cannot faithfully treat `pictl attach` as a reusable bidirectional byte-stream API. `pictl attach` assumes it owns a real local TTY: it switches raw mode, renders to stdout, handles resize signals, implements a detach key, restores terminal state, and exits the process on completion. A client could spawn it inside a PTY, but that is controlling another terminal frontend, not speaking the attach protocol. Native terminal clients should use `tty.sock`.
 
@@ -129,7 +129,7 @@ pictl is meant to be the language-neutral shell interface to this system.
 - humans can use it directly, either non-interactively or with `pictl attach`
 - agents can use it to spawn or discover other agents, communicate with them, and send RPC commands. There's a draft skill in [skills/pictl](../skills/pictl/). Note that allowing an agent to call `navigate-tree` on _itself_ requires special attention; see [extensions/navigate-tree.ts](../extensions/navigate-tree.ts) if you want to do that.
 - scripts can use it directly. Typescript interaction with pi should probably happen through extensions, but non-typescript languages can shell out to `pictl` to get easy access to the RPC interface. Ideally _every_ RPC interaction can be cleanly mediated by `pictl`, but if it turns out that's infeasible, clients could shell out to (or duplicate) `pictl` agent management commands and talk to `pi.sock` directly for RPC interactions.
-- direct `tty.sock` clients can bypass it when they need native terminal integration. I have a ratatui-based TUI app that I'd like to use pictl, so expect a rust client for `tty.sock` soon.
+- direct `tty.sock` clients can bypass it when they need native terminal integration. The Rust client [`rust/pictl-rs`](../rust/pictl-rs/) works this way: lifecycle and inspection shell out to the `pictl` CLI, while the attach protocol and the RPC/event protocol are spoken natively over the agent's sockets. Its `ratatui` feature provides an embeddable attach-pane widget.
 
 The design goal is that anything a human can do by hand should have a corresponding scriptable operation, without making the underlying agent less interactive or less attachable. Every pi RPC command has a corresponding pictl subcommand.
 

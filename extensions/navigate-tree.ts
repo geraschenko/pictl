@@ -134,10 +134,6 @@ export default function navigateTreeExtension(pi: ExtensionAPI): void {
       const navOptions = label !== undefined ? { label } : {};
       void (async () => {
         try {
-          // TODO: switch to ctx.waitForSettled() once it lands in the pinned pi
-          // (docs/specs/self-navigation-extension.md → Dependencies). waitForIdle
-          // resolves at the end of a single run and races auto-retry/compaction;
-          // waitForSettled resolves only at full session quiescence.
           await ctx.waitForIdle();
           // In interactive mode, navigateTree drops the target message's text into
           // an empty input box (good when a human picks a node to edit, confusing
