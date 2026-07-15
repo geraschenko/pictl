@@ -94,7 +94,7 @@ function ptyEnv(
       env[key] = value;
     }
   }
-  env.PI_AGENT_ID = agentId;
+  env.PICTL_ID = agentId;
   // pictl pins pi to its bundled dependency, so pi's self-update check only
   // ever reports an update the user cannot act on. Suppress just that check
   // (narrower than PI_OFFLINE, which would also disable extension-update

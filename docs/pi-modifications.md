@@ -268,6 +268,16 @@ Why both pieces are needed:
 
 The guard against navigating while streaming or compacting lives in `AgentSession.navigateTree`, so it applies consistently to TUI, extension, stdio RPC, and socket RPC callers.
 
+### Self-navigation requires an extension
+
+`navigate_tree` requires the assistant to be idle, since navigation mid-stream would cause chaos. This means that an agent can't use `pictl navigate-tree` on _itself_ to manage its own context, because it's not idle so long as the command is running. If you want self-navigation, use the [navigate-tree extension](../extensions/navigate-tree.ts), which adds a `/navigate-tree` command that waits until the assistant is next idle to do the navigation, and allows injecting a prompt to run after tree navigation so the agent continues working. The agent invokes it on itself like this:
+
+```sh
+pictl prompt -t $PICTL_ID "/navigate-tree <target-id> --continue <what to do next on the new branch>"
+```
+
+`PICTL_ID` is set in the environment of the pi process, so an agent can use it to determine its own agent id. Note that the extension lives in this repo and is not shipped in the npm package; load it like any pi extension: `pictl spawn -- -e path/to/navigate-tree.ts`.
+
 ## Shared command handling
 
 The fork factors RPC command execution into a shared command handler used by both stdio RPC mode and socket RPC mode.

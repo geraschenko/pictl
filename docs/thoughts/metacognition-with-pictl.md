@@ -48,7 +48,7 @@ The default should often be no intervention unless a trigger fires. Otherwise me
 
 ## Capability: an agent controls itself with `pictl`
 
-A spawned agent can know its own id, usually through `PI_AGENT_ID`. That lets it inspect or control itself with ordinary `pictl` commands.
+A spawned agent can know its own id, usually through `PICTL_ID`. That lets it inspect or control itself with ordinary `pictl` commands.
 
 ### Possible uses
 
@@ -180,7 +180,7 @@ The provenance fields are important because summaries become memory. A branch su
 - A durable local state file consumed by a daemon-like workflow runner.
 - A `navigate-tree` API extension that atomically carries a continuation message.
 
-The last option is **implemented**: the `/navigate-tree` pi extension (`extensions/navigate-tree.ts`; spec: `docs/specs/self-navigation-extension.md`). It exists because `pictl -t $PI_AGENT_ID navigate-tree` cannot work from inside a turn — that command runs while the agent is streaming, and `navigate_tree` is rejected during streaming. Instead the agent runs `pictl prompt "/navigate-tree <entry> --continue <summary and next action>"`; the slash command is accepted inline, returns immediately, defers navigation until the run settles, and then sends the continuation on the new branch. Whether to bundle the extension into pictl-spawned agents is still open.
+The last option is **implemented**: the `/navigate-tree` pi extension (`extensions/navigate-tree.ts`; spec: `docs/specs/self-navigation-extension.md`). It exists because `pictl -t $PICTL_ID navigate-tree` cannot work from inside a turn — that command runs while the agent is streaming, and `navigate_tree` is rejected during streaming. Instead the agent runs `pictl prompt "/navigate-tree <entry> --continue <summary and next action>"`; the slash command is accepted inline, returns immediately, defers navigation until the run settles, and then sends the continuation on the new branch. Whether to bundle the extension into pictl-spawned agents is still open.
 
 The important invariant: continuation should be explicit, durable, and inspectable before the context surgery happens.
 

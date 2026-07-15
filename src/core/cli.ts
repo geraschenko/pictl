@@ -86,7 +86,7 @@ export async function recordCommandAudit(
     return;
   }
   const { source, manager } = resolveCallerSource(
-    env.PI_AGENT_ID,
+    env.PICTL_ID,
     process.ppid,
   );
   const ts = new Date().toISOString();

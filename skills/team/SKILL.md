@@ -11,7 +11,7 @@ team lets a manager agent run a team of worker pi agents without babysitting the
 - **Workers are ordinary pi agents.** Spawn, converse with, and archive them with raw `pictl` (see the pictl skill). `team` only handles async messaging and result collection.
 - `team dispatch` sends a message to a worker and returns immediately with a job id. When the worker's reply is complete, the result lands in your inbox.
 - **One worker = one serial queue.** Dispatches to the same worker run one after another in that worker's single conversation. For independent parallel tasks, spawn one worker each.
-- If you are a pi agent (`$PI_AGENT_ID` set) or an agent running in a tmux pane, you are **woken with the ready list** once you have been quiet for a moment — results never barge in mid-thought. Otherwise, poll `team ready`.
+- If you are a pi agent (`$PICTL_ID` set) or an agent running in a tmux pane, you are **woken with the ready list** once you have been quiet for a moment — results never barge in mid-thought. Otherwise, poll `team ready`.
 
 ## Commands
 
@@ -25,7 +25,7 @@ team lets a manager agent run a team of worker pi agents without babysitting the
 <skill-dir>/team cancel <id>                 # stop waiting for a result (does NOT stop the worker)
 ```
 
-On non-Linux systems without `$PI_AGENT_ID`, call `team` only as a plain simple command — never in a pipeline or `$(...)` (see Caveats).
+On non-Linux systems without `$PICTL_ID`, call `team` only as a plain simple command — never in a pipeline or `$(...)` (see Caveats).
 
 `team start` is optional setup (`dispatch` creates the inbox automatically); run it when you want your inbox path, e.g. for debugging. To stop a worker's actual work, use `pictl abort -t <worker>`; `team cancel` only abandons the local wait.
 
@@ -75,7 +75,7 @@ Prompt knobs that sharpen a review: "Red-team this for hidden assumptions and un
 
 ## Caveats
 
-- **Without `$PI_AGENT_ID`** (e.g. a non-pi manager), your inbox is scoped to your session process. On Linux this is stable across invocations and pipelines/`$(team ...)` are safe; on other systems, invoke `team` only as a plain simple command — a pipeline or subshell silently derives the wrong inbox (a mis-routed `dispatch` loses work), and job ids are always visible via `team status`/`team ready` so you never need to capture `dispatch` output. If `team` reports it cannot determine your tmux pane, follow its instructions.
+- **Without `$PICTL_ID`** (e.g. a non-pi manager), your inbox is scoped to your session process. On Linux this is stable across invocations and pipelines/`$(team ...)` are safe; on other systems, invoke `team` only as a plain simple command — a pipeline or subshell silently derives the wrong inbox (a mis-routed `dispatch` loses work), and job ids are always visible via `team status`/`team ready` so you never need to capture `dispatch` output. If `team` reports it cannot determine your tmux pane, follow its instructions.
 - Dispatched messages are spooled to files that are not garbage-collected; long-running managers accumulate them in a per-inbox directory beside the inbox.
 - One inbox per manager; there is no way to share an inbox or point at someone else's.
 - If a command fails with an error mentioning `docket`, the backend queue tool is missing from `PATH` — it must be available both where you run `team` and in the environment dispatched jobs run in (likewise `pictl`).

@@ -79,12 +79,12 @@ function walkToManagerPid(startPid) {
   }
 }
 
-// The manager's identity determines its inbox: PI_AGENT_ID if set (stable across
+// The manager's identity determines its inbox: PICTL_ID if set (stable across
 // restarts), else the manager pid from the ancestry walk. Deliberately no
 // override — honoring DOCKET_DIR would glue a spawned agent to its manager's
 // inbox.
 function resolveDocketDir(env, ppid) {
-  const key = env.PI_AGENT_ID ?? String(walkToManagerPid(ppid).pid);
+  const key = env.PICTL_ID ?? String(walkToManagerPid(ppid).pid);
   return join(dataHome(env), "team", keyHash(key));
 }
 
@@ -113,8 +113,8 @@ function tmuxNotifyHook(socket, pane) {
 
 function notifyHook(env, opts) {
   if (opts.noNotify) return undefined;
-  if (env.PI_AGENT_ID !== undefined) {
-    const id = shellQuote(env.PI_AGENT_ID);
+  if (env.PICTL_ID !== undefined) {
+    const id = shellQuote(env.PICTL_ID);
     // The no-activity:1 gate delays the wake until the manager has been quiet
     // for 1s. After the gate clears, the manager may begin a new turn before
     // the prompt lands; a plain prompt would then bounce with "busy", so the
@@ -161,7 +161,7 @@ function ensureDocket(dir, env, opts) {
 // ancestry runs through a shared daemon, so no automatic route exists).
 // Once the docket exists, no flag is ever needed again (hook stickiness).
 function checkDocketCreatable(dir, env, ppid, opts) {
-  if (env.PI_AGENT_ID !== undefined || existsSync(dir)) return;
+  if (env.PICTL_ID !== undefined || existsSync(dir)) return;
   const info = walkToManagerPid(ppid);
   if (info.orphaned) {
     throw new Error("manager identity resolves to an orphaned shell; refusing to create an inbox that could not be re-derived");

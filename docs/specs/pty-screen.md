@@ -91,7 +91,7 @@ const piScreen = new PtyScreen(
 // signal forwarding: piScreen.kill("SIGTERM")
 ```
 
-`ptyEnv` stays in daemon.ts — the env content (PI_AGENT_ID,
+`ptyEnv` stays in daemon.ts — the env content (PICTL_ID,
 PI_SKIP_VERSION_CHECK) is pi policy, not pty mechanics.
 
 ## Edge cases / invariants to preserve

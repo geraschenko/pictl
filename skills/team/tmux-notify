@@ -19,7 +19,7 @@ tmuxCmd() {
 # that dropped back to a shell would *execute* the payload. `node` is
 # deliberately excluded from the allowlist: plain `pi` reports as `pi`, and
 # the one agent that reports `node` — a `pictl attach` client — has
-# $PI_AGENT_ID set and gets a pictl hook instead of this one.
+# $PICTL_ID set and gets a pictl hook instead of this one.
 cmd=$(tmuxCmd display-message -p -t "$target" '#{pane_current_command}') || exit 0
 case "$cmd" in pi|claude|codex) ;; *) exit 0 ;; esac
 

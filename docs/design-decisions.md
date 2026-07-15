@@ -84,7 +84,7 @@ An agent can participate in multiple workflows simultaneously (e.g. a worker mid
 
 - The agent registry is flat and global; agent identity is the agent id.
 - A workflow is a directory whose state maps role names → agent ids. Workflows are _views/groupings over_ agents, not containers of them. Killing a workflow does not necessarily kill its agents (per-workflow policy).
-- Spawned agents receive `PI_AGENT_ID` (self-identification, needed by the inter-agent messaging skill) and optionally `PI_WORKFLOW_DIR` as a _default name-resolution context_, not an identity. `pictl prompt reviewer "..."` resolves through the workflow context; `pictl prompt <agent-id> "..."` addresses globally; `--workflow <dir>` selects a non-default context. The exact workflow-dir layout is not finalized — design it with the SDK, not in pictl v1.
+- Spawned agents receive `PICTL_ID` (self-identification, needed by the inter-agent messaging skill) and optionally `PI_WORKFLOW_DIR` as a _default name-resolution context_, not an identity. `pictl prompt reviewer "..."` resolves through the workflow context; `pictl prompt <agent-id> "..."` addresses globally; `--workflow <dir>` selects a non-default context. The exact workflow-dir layout is not finalized — design it with the SDK, not in pictl v1.
 
 ## Catch-up is cursor-based over session entries, not event channels
 

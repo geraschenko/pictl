@@ -4,7 +4,7 @@
 
 ## Problem
 
-`team` v1's non-pi tier (no `$PI_AGENT_ID`) has two limits, both observed live (2026-07-04, this repo's own sessions):
+`team` v1's non-pi tier (no `$PICTL_ID`) has two limits, both observed live (2026-07-04, this repo's own sessions):
 
 1. **Identity is fragile.** The inbox key is `process.ppid` — the invoking shell. In harnesses that give every tool call a fresh shell (Claude Code's Bash tool, verified), each call derives a _different_ inbox, so multi-step `team` flows must fit inside a single shell invocation. Pipelines, subshells, and `$(team …)` mis-derive for the same reason.
 2. **No push.** Non-pi managers poll. But a terminal-resident agent (pi, claude, or codex running in a tmux pane) has a perfectly good delivery channel: text typed into its pane arrives as a user message.
@@ -27,7 +27,7 @@ Why this exact rule (each clause is load-bearing, established empirically 2026-0
 
 New `notifyHook` resolution order:
 
-1. `$PI_AGENT_ID` set → the v1 pictl hook. **Unchanged.**
+1. `$PICTL_ID` set → the v1 pictl hook. **Unchanged.**
 2. else, if a tmux pane is discovered (below) → the tmux hook.
 3. else → no hook; the manager polls. **v1 behavior.**
 
@@ -42,7 +42,7 @@ One automatic route, one explicit route (revised per user review 2026-07-06):
 
 ### Daemonized-claude detection
 
-When `team` must create the docket (`start`, or a `dispatch` whose derived docket does not yet exist) and case 2 applies (no `$PI_AGENT_ID`), and the ancestry walk passed a process whose cmdline contains `--bg-spare`, and no pane is known (no env route, no explicit flag): **do not create the docket**. Exit 1 with instructions telling the agent to ask the user for the pane identifier and re-run (the printed instructions spell the command with the script's absolute path — `team` is not on `PATH`, so bare `team start` would fail if retyped literally; reviewer finding 2026-07-06):
+When `team` must create the docket (`start`, or a `dispatch` whose derived docket does not yet exist) and case 2 applies (no `$PICTL_ID`), and the ancestry walk passed a process whose cmdline contains `--bg-spare`, and no pane is known (no env route, no explicit flag): **do not create the docket**. Exit 1 with instructions telling the agent to ask the user for the pane identifier and re-run (the printed instructions spell the command with the script's absolute path — `team` is not on `PATH`, so bare `team start` would fail if retyped literally; reviewer finding 2026-07-06):
 
 - `team start --pane <target>` — bake the tmux hook for `<target>` (a tmux pane id like `%133` or target like `muninn:0.0`, passed verbatim as the hook's `-t` argument, default server);
 - `team start --no-notify` — create the docket with no hook; the manager polls.
@@ -77,7 +77,7 @@ tmux paste-buffer -p -d -b "team-notify-$$" -t "$target"
 tmux send-keys -t "$target" Enter
 ```
 
-- **Guard:** deliver only if the pane still runs an interactive agent: `pane_current_command` in `pi|claude|codex`. Not `node`: plain `pi` reports as `pi` (verified), and the one agent that reports `node` — a `pictl attach` client — has `$PI_AGENT_ID` set and never reaches this tier. A stale hook whose pane has dropped back to a shell is blocked here (delivering would _execute_ the payload). The guard is re-checked after the quiet gate (reviewer finding 2026-07-06): the gate can wait minutes, and the initial check would be stale by delivery time.
+- **Guard:** deliver only if the pane still runs an interactive agent: `pane_current_command` in `pi|claude|codex`. Not `node`: plain `pi` reports as `pi` (verified), and the one agent that reports `node` — a `pictl attach` client — has `$PICTL_ID` set and never reaches this tier. A stale hook whose pane has dropped back to a shell is blocked here (delivering would _execute_ the payload). The guard is re-checked after the quiet gate (reviewer finding 2026-07-06): the gate can wait minutes, and the initial check would be stale by delivery time.
 - **Quiet gate:** full-screen `capture-pane` once per second until two consecutive captures are identical; cap 600 iterations, **deliver anyway at the cap** (decision 2026-07-06). Full-screen matters: partial captures can look static mid-turn (observed with `tail -5`), while the full screen churns every second (spinner glyph, timer, token counter — verified even during a quiet `sleep` tool call, so early fire requires the animation to repeat a frame across consecutive captures).
 - **Early fire accepted** (decision 2026-07-06): if it happens, the wake lands as a queued user message — disruptive, never lost.
 - **Delivery:** `load-buffer` + `paste-buffer -p` (bracketed paste; multi-line payload arrives intact and is never shell-parsed by `send-keys`), then `send-keys Enter` to submit. Verified end-to-end against a live Claude Code pane (2026-07-05): held while streaming, delivered a two-line payload as a clean user message once quiet.
@@ -86,11 +86,11 @@ tmux send-keys -t "$target" Enter
 
 ## Success criteria
 
-- A pi/claude/codex agent running **directly in a tmux pane** without `$PI_AGENT_ID` is woken — the ready menu is typed into its own session after it goes quiet — with zero configuration.
+- A pi/claude/codex agent running **directly in a tmux pane** without `$PICTL_ID` is woken — the ready menu is typed into its own session after it goes quiet — with zero configuration.
 - In a **fresh-shell-per-call harness** (Linux), the inbox is stable across separate tool calls, and `$(team …)`/pipelines derive the same inbox as a plain call.
 - A **daemonized claude** (a `--bg-spare` ancestor) is _stopped at docket creation_ and told to ask its user for a pane, then `team start --pane <target>` wires push into that pane, or `team start --no-notify` opts into polling. No _automatic_ route can pick a wrong pane (the env route reads the manager's own `$TMUX_PANE`); an explicit `--pane` is trusted as given, with the hook's pane guard as the only backstop against a mistyped target.
 - A **non-tmux terminal** (no `$TMUX`, no `--bg-spare` ancestor) gets a poll-only docket automatically — exact v1 behavior.
-- The pi tier (`$PI_AGENT_ID`) is byte-for-byte unchanged.
+- The pi tier (`$PICTL_ID`) is byte-for-byte unchanged.
 
 ## Type Design
 
@@ -98,7 +98,7 @@ Approved 2026-07-06. Everything not listed (`keyHash`, `shellQuote`, the six sub
 
 ```ts
 interface TeamEnv {
-  PI_AGENT_ID?: string;
+  PICTL_ID?: string;
   XDG_DATA_HOME?: string;
   HOME?: string;
   TMUX?: string;       // "socket,pid,session" — socket = first comma-field
@@ -137,7 +137,7 @@ interface StartOpts {
 }
 
 // Resolution order: opts.noNotify -> undefined (explicit choice beats all);
-// else PI_AGENT_ID -> pictl hook (unchanged); else opts.pane -> tmux hook;
+// else PICTL_ID -> pictl hook (unchanged); else opts.pane -> tmux hook;
 // else tmuxPane(env) -> tmux hook; else undefined (poll).
 // opts comes from start's flags; {} elsewhere.
 function notifyHook(env: TeamEnv, opts: StartOpts): string | undefined;
@@ -192,7 +192,7 @@ All of this was established against live sessions on `muninn`; the prototype hoo
 3. **Walk stability:** two _separate_ harness tool calls derive the same inbox; `x=$(<skill-dir>/team start)` derives the same inbox as a plain call.
 4. **Non-tmux degradation:** with no tmux env and no `--bg-spare` ancestor, `team start` installs no hook and prints the same dir across calls (via the walk); polling works.
 5. **Guard:** point a hook at a pane running plain bash; complete a job; verify nothing is typed (guard exits) and the result stays takeable.
-6. **pi tier regression:** with `$PI_AGENT_ID` set, the baked hook is byte-identical to v1's.
+6. **pi tier regression:** with `$PICTL_ID` set, the baked hook is byte-identical to v1's.
 
 # WORK LOG
 
@@ -212,7 +212,7 @@ Run on the daemonized-claude session itself, with `XDG_DATA_HOME` sandboxed per 
 
 1. **Daemonized detection (explicit route):** on a fresh identity, `team start` (and by inspection `dispatch`) exits 1 with the ask-the-user instructions and creates nothing. `team start --no-notify` creates a hookless docket; a later flag-less `team start` in a _separate tool call_ prints the same dir with no error (stickiness + walk stability).
 2. **Walk stability:** plain, `$(team start)`, and `team start | cat` all derive the identical dir — the pipeline/subshell hazard is retired on Linux.
-3. **Hook shapes:** env route (`TMUX`/`TMUX_PANE` synthetic) bakes `tmux -S <socket>` throughout; `--pane` bakes bare `tmux`; both match the SPEC block byte-for-byte modulo quoting. pi tier (`PI_AGENT_ID` set) is byte-identical to v1.
+3. **Hook shapes:** env route (`TMUX`/`TMUX_PANE` synthetic) bakes `tmux -S <socket>` throughout; `--pane` bakes bare `tmux`; both match the SPEC block byte-for-byte modulo quoting. pi tier (`PICTL_ID` set) is byte-identical to v1.
 4. **Live delivery end-to-end:** scratch tmux session running a fake `pi` (a copy of `cat`, so `pane_current_command` = `pi`); `team start --pane` + real worker dispatch → on turn end the hook fired, gate cleared, and the ready menu was pasted + submitted into the pane.
 5. **Guard:** a second docket pointed at a `bash` pane received a completed job's notify; nothing was typed and the result stayed listed in `team ready` and takeable. (Same run also confirmed a job whose command exits non-zero still completes, notifies, and is takeable.)
 6. **Non-tmux degradation:** a manager whose parent is a non-shell process without `--bg-spare` (node harness) gets a poll-only docket, no hook, exit 0.
@@ -222,7 +222,7 @@ Incident during testing, not a bug: sandboxing `XDG_DATA_HOME` also relocates pi
 ## Post-review revisions (2026-07-07, user review of the implementation)
 
 - [x] **Hook extracted to `skills/team/tmux-notify`** (user TDC: inline bash is ugly): the baked hook is now a one-line absolute-path invocation of the skill-shipped script; SPEC updated. Re-verified: hook shapes for both routes, `sh -n`, and live end-to-end delivery through the script into a scratch pane.
-- [x] **`--no-notify` now overrides `$PI_AGENT_ID`** (user TDC, resolved 2026-07-07). The naive reorder alone would have been silently undone: v1's `ensureDocket` re-installed the hook on _every_ `start`/`dispatch` (an upgrade-propagation nicety with no other purpose — user confirmed dropping it), so the paired change gates `--notify` to docket creation or an explicit `start --pane`. Verified live: pi-tier creation installs the hook; a sentinel written to `notify` survives flag-less `start`; `--pane` re-wires an existing docket; `--no-notify` with `$PI_AGENT_ID` creates hookless and _stays_ hookless across later flag-less pi calls. Known limits (recorded in SPEC): hook text no longer auto-upgrades; `--no-notify` cannot clear an existing hook. Note `--pane` still does _not_ override `$PI_AGENT_ID` (spec'd resolution order — pi agents have the better pictl channel).
+- [x] **`--no-notify` now overrides `$PICTL_ID`** (user TDC, resolved 2026-07-07). The naive reorder alone would have been silently undone: v1's `ensureDocket` re-installed the hook on _every_ `start`/`dispatch` (an upgrade-propagation nicety with no other purpose — user confirmed dropping it), so the paired change gates `--notify` to docket creation or an explicit `start --pane`. Verified live: pi-tier creation installs the hook; a sentinel written to `notify` survives flag-less `start`; `--pane` re-wires an existing docket; `--no-notify` with `$PICTL_ID` creates hookless and _stays_ hookless across later flag-less pi calls. Known limits (recorded in SPEC): hook text no longer auto-upgrades; `--no-notify` cannot clear an existing hook. Note `--pane` still does _not_ override `$PICTL_ID` (spec'd resolution order — pi agents have the better pictl channel).
 - [x] **Spool made per-docket** (user request 2026-07-07): `<dataHome>/team/messages/<hash>/` instead of one shared `messages/` pool. Kept _beside_ the docket dir, not inside it, honoring v1's "docket owns its directory's layout" constraint. v1 spec annotated as partially superseded (pointer at its top).
 - [x] **Reviewer round 2 (2026-07-06, fresh-context reviewer via the skill itself — the dispatch/wake/take loop worked end-to-end on the daemonized `--pane` route):** accepted three findings: (1) tmux-notify's guard was stale by delivery time — the quiet gate can wait minutes — so the guard is re-checked immediately before delivery; (2) the daemonized error's re-run instructions said bare `team start`, which fails retyped literally since `team` is not on `PATH` — now printed with the script's absolute path; (3) the SPEC's "no delivery to a wrong pane is possible in any path" overclaimed — softened (an explicit `--pane` is trusted as given). Declined: documenting `--pane`/`--no-notify` in SKILL.md's command block — deliberate progressive disclosure; the error message is the single source of truth and the Caveats bullet points to it. Speculative concerns (no `--socket` escape hatch, walk's catch-all falling back to raw ppid, shell allowlist gaps) noted as known spec'd tradeoffs.
 - [x] **`team gc` added (2026-07-08, user request; no separate spec — design agreed in conversation):** global cleanup across all inboxes under `<dataHome>/team/`. Cleanup split by ownership: `docket gc` (added to docket for this, with `docket status/ready --json`; see handoff docs in the docket repo) owns all age/state policy per inbox — old taken/canceled jobs, whole-docket deletion when stale — and `team gc` loops it over every inbox, forwarding `--dry-run`/`--older-than`, then deletes spool dirs (`messages/<hash>/`) with no sibling inbox. The sibling-existence rule composes with `--dry-run` for free (docket keeps the inbox, so team keeps its spool); pre-existing orphans honor dry-run explicitly. No identity machinery — works from any shell. Not documented in SKILL.md (user decision; near-term it is run manually). Verified in a sandbox data home: dry-run reports without deleting; a real run deletes stale inbox, its spool, and a pre-existing orphan in one pass.
@@ -254,5 +254,5 @@ Where these conflict with the derisk entries below, these win (the SPEC reflects
 - Daemonized harnesses get **no notify — they poll**; no override flag/env (a leaked override would wire a sub-manager's wakes into its manager's pane, echoing the v1 `DOCKET_DIR` hazard).
 - Gate cap **600 s, deliver anyway** at the cap.
 - **Early fire accepted**: spinner churn makes it rare; a premature wake queues as a user message, never lost.
-- Guard allowlist **`pi|claude|codex`** — no `node` (only `pictl attach` presents as `node`, and it has `$PI_AGENT_ID`).
+- Guard allowlist **`pi|claude|codex`** — no `node` (only `pictl attach` presents as `node`, and it has `$PICTL_ID`).
 - Delivery via **bracketed paste + Enter**, payload `docket ready`, buffer name uniquified.

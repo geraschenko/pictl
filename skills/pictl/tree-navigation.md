@@ -58,7 +58,7 @@ Labels are metadata for tree display and do not change LLM context.
 
 ## Self-navigation
 
-An agent **cannot** navigate its own tree with `pictl navigate-tree -t $PI_AGENT_ID ...`: that command runs while the agent's turn is streaming, and `navigate_tree` is rejected during streaming. The `/navigate-tree` pi extension (`extensions/navigate-tree.ts`) exists for this case. The agent runs:
+An agent **cannot** navigate its own tree with `pictl navigate-tree -t $PICTL_ID ...`: that command runs while the agent's turn is streaming, and `navigate_tree` is rejected during streaming. The `/navigate-tree` pi extension (`extensions/navigate-tree.ts`) exists for this case. The agent runs:
 
 ```bash
 pictl prompt "/navigate-tree <target-id> --continue <recovery summary and next action>"

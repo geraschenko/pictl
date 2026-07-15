@@ -27,7 +27,7 @@ test("auditEnabled is false only for PICTL_AUDIT=0 or off", () => {
   assert.equal(auditEnabled({ PICTL_AUDIT: "off" }), false);
 });
 
-test("a PI_AGENT_ID caller resolves to a pictl source with no manager", () => {
+test("a PICTL_ID caller resolves to a pictl source with no manager", () => {
   assert.deepEqual(resolveCallerSource("agent-1", 12345), {
     source: "pictl:agent-1",
   });
@@ -104,13 +104,13 @@ test(
 );
 
 test(
-  "resolveCallerSourceForPid reads PI_AGENT_ID from the target's environ",
+  "resolveCallerSourceForPid reads PICTL_ID from the target's environ",
   { skip: !hasProc },
   async () => {
     await withChild(
       spawnStdinWaiter(process.execPath, ["-e", "process.stdin.resume()"], {
         ...process.env,
-        PI_AGENT_ID: "environ-test",
+        PICTL_ID: "environ-test",
       }),
       (child) => {
         assert.deepEqual(resolveCallerSourceForPid(child.pid!), {
@@ -126,7 +126,7 @@ test(
   { skip: !hasProc },
   async () => {
     const env = { ...process.env };
-    delete env.PI_AGENT_ID;
+    delete env.PICTL_ID;
     await withChild(
       spawnStdinWaiter(process.execPath, ["-e", "process.stdin.resume()"], env),
       (child) => {

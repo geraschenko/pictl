@@ -76,7 +76,7 @@ Start with a lightweight Markdown note. Do not add fields until there is infrast
 Suggested header:
 
 - title: short human-readable title
-- agent_id: `PI_AGENT_ID`
+- agent_id: `PICTL_ID`
 - entry_id: entry where the suggestion was made
 - task: one-line user task/context
 - impact: annoyance | reliability | safety | cost | speed | maintainability

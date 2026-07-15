@@ -8,7 +8,7 @@ A running agent cannot navigate **its own** conversation tree from inside a turn
 The natural thing for the agent to try —
 
 ```
-pictl -t $PI_AGENT_ID navigate-tree <targetId>
+pictl -t $PICTL_ID navigate-tree <targetId>
 ```
 
 — issues the `navigate_tree` RPC, which is **rejected while the session is

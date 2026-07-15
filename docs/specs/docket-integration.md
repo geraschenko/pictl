@@ -23,14 +23,14 @@ docket's interface is string-command-based, and that creates exactly two frictio
 
 Each manager owns exactly one docket (its inbox for all worker replies). The docket **directory is derived from the manager's identity**, so every `team` call — and a _restarted_ pi manager — recovers the same inbox with zero env and zero memory. Identity resolution (see Type Design → `resolveDocketDir`):
 
-1. `$PI_AGENT_ID` set → key = `$PI_AGENT_ID`; the docket is at `<dataHome>/team/<hash(key)>`; **notify (push) is wired.**
+1. `$PICTL_ID` set → key = `$PICTL_ID`; the docket is at `<dataHome>/team/<hash(key)>`; **notify (push) is wired.**
 2. else → key = `String(ppid)` — the pid of the parent process that invokes `team`, i.e. the agent's session process; docket at `<dataHome>/team/<hash(key)>`; **notify is NOT wired** — the manager polls `team ready`/`team take` manually.
 
-Presence of `$PI_AGENT_ID` decides _both_ the key source and whether push is wired — one signal, no mode flag. `<dataHome>` = `$XDG_DATA_HOME` or `~/.local/share`.
+Presence of `$PICTL_ID` decides _both_ the key source and whether push is wired — one signal, no mode flag. `<dataHome>` = `$XDG_DATA_HOME` or `~/.local/share`.
 
 There is deliberately **no override** — no `--docket` flag and no `$DOCKET_DIR` respect. The inbox is _always_ derived from identity; an escape hatch would undermine exactly the wrapping `team` exists to provide, and honoring `$DOCKET_DIR` would be an active hazard: docket sets `DOCKET_DIR` for dispatched jobs and notify hooks, and env inherits through spawns, so a leaked `DOCKET_DIR` would glue an agent to its _manager's_ inbox — a team member couldn't make its own team, breaking the decentralized/nested-teams success criterion. For debugging or inspecting _another_ manager's inbox, use raw `docket --docket <dir>` (`team start` prints the dir).
 
-**Why `ppid`, not the helper's own pid, not cwd, not git state.** The helper's own pid is fresh on every invocation. cwd and git state can change over a session (the agent may `cd` or switch branches), silently splitting the inbox. The **parent pid is invariant for the whole session** — verified empirically: across two separate command invocations the helper's own pid changed but `$PPID` was identical, pointing at the persistent host/session process. This gives a non-pictl manager (e.g. Claude Code, no `$PI_AGENT_ID`) a stable, session-scoped inbox for free. It is _not_ resumable across a restart of the session process — which is correct, since a non-pictl manager has no cross-restart identity and none was requested.
+**Why `ppid`, not the helper's own pid, not cwd, not git state.** The helper's own pid is fresh on every invocation. cwd and git state can change over a session (the agent may `cd` or switch branches), silently splitting the inbox. The **parent pid is invariant for the whole session** — verified empirically: across two separate command invocations the helper's own pid changed but `$PPID` was identical, pointing at the persistent host/session process. This gives a non-pictl manager (e.g. Claude Code, no `$PICTL_ID`) a stable, session-scoped inbox for free. It is _not_ resumable across a restart of the session process — which is correct, since a non-pictl manager has no cross-restart identity and none was requested.
 
 **Accepted limitation of case 2 (v1, robustness level (a)):** the implementation reads **`process.ppid`** plainly. This is correct when the per-call `sh -c "team …"` **exec's** the helper (a single simple command with optional redirections — the normal case). If the agent wraps a `team` call in a **pipeline, subshell, or command substitution** (`team ready | …`, `id=$(team dispatch …)`), the extra fork makes `process.ppid` point at the ephemeral per-call shell, deriving a _different_ inbox. For read-only calls this is a harmless stray empty docket; for `dispatch` it is **not** harmless — the job lands in an inbox nobody checks. The skill prose therefore says: under the fallback, invoke `team` only as a plain simple command; never capture its stdout via `$(…)` (job ids are visible via `team status`/`team ready` anyway).
 
@@ -38,7 +38,7 @@ There is deliberately **no override** — no `--docket` flag and no `$DOCKET_DIR
 
 Every value interpolated into a `sh -c` command string (agent ids, the message-file path) is wrapped with `shellQuote` (see Type Design) — the message _content_ never passes through a shell, but the path and ids do.
 
-**Notify hook** (baked by `team` when `$PI_AGENT_ID` is set; `<ID>` = `shellQuote($PI_AGENT_ID)`):
+**Notify hook** (baked by `team` when `$PICTL_ID` is set; `<ID>` = `shellQuote($PICTL_ID)`):
 
 ```
 pictl wait -t <ID> --until no-activity:1; docket ready | pictl prompt -t <ID> --streaming-behavior follow-up -
@@ -70,7 +70,7 @@ All subcommands resolve the docket dir via `resolveDocketDir` (above). `start` a
 
 **Shared inboxes are unsupported.** Each manager's inbox is derived from its own identity; there is no way (and no reason) to point `team` at someone else's.
 
-- `team start` — ensure the docket exists (`docket init <dir>`), install/refresh the notify hook iff `$PI_AGENT_ID` is set, and **print the docket dir**. Idempotent. Explicit setup entry point; also handy for the manager/debugger to learn its inbox path.
+- `team start` — ensure the docket exists (`docket init <dir>`), install/refresh the notify hook iff `$PICTL_ID` is set, and **print the docket dir**. Idempotent. Explicit setup entry point; also handy for the manager/debugger to learn its inbox path.
 - `team dispatch <worker> [<message>|-]` — read the message from the arg or (if `-`/omitted) stdin; write it to an absolute message file; ensure the docket; run `docket dispatch "pictl prompt -t <W> --streaming-behavior follow-up - < <F>"` (`<W>`/`<F>` shell-quoted, see wiring); print the docket job id. `<worker>` is a pi agent id (from a prior `pictl spawn`).
 - `team ready` — passthrough to `docket ready` (with resolved `--docket`). The ready menu.
 - `team take <id>` — passthrough to `docket take <id>`. Prints one worker's reply; marks it taken. Accepts a unique id prefix.
@@ -92,8 +92,8 @@ What stays **raw pictl** in the skill prose (not wrapped): `pictl spawn` a worke
 
 - A manager can dispatch ongoing work to worker pi agents (spawned in any cwd) over time — not one static batch — and, when it is not mid-thought, be woken with a `ready` menu, then take results in the order it chooses.
 - **Decentralized:** no privileged main agent. Any agent can own a docket and also be a worker for others; graphs of agents fall out; no "team" registry.
-- **Resumable (pi case):** killing and restarting the orchestration mid-flight loses neither completed-untaken results nor in-flight jobs (the phase-4 acceptance test). Guaranteed because the pi manager's inbox is derived from `$PI_AGENT_ID`.
-- **Graceful degradation:** a non-pictl manager (no `$PI_AGENT_ID`) uses the _same_ commands; it simply isn't pushed and polls `team ready`/`team take`. Its inbox is session-scoped (`ppid`-derived).
+- **Resumable (pi case):** killing and restarting the orchestration mid-flight loses neither completed-untaken results nor in-flight jobs (the phase-4 acceptance test). Guaranteed because the pi manager's inbox is derived from `$PICTL_ID`.
+- **Graceful degradation:** a non-pictl manager (no `$PICTL_ID`) uses the _same_ commands; it simply isn't pushed and polls `team ready`/`team take`. Its inbox is session-scoped (`ppid`-derived).
 - The skill folds fresh-context review in as one documented use of the pattern (`reviewer.md` kept alongside it, per user decision).
 
 ## Type Design
@@ -102,13 +102,13 @@ Language: **Node** — deliberately _not_ bash, because the wrapper exists preci
 
 ```ts
 interface TeamEnv {
-  PI_AGENT_ID?: string;
+  PICTL_ID?: string;
   XDG_DATA_HOME?: string;
   HOME?: string;
 }
 
 // dataHome = env.XDG_DATA_HOME ?? join(env.HOME, ".local/share")
-// join(dataHome, "team", hash(env.PI_AGENT_ID ?? String(ppid))). No override.
+// join(dataHome, "team", hash(env.PICTL_ID ?? String(ppid))). No override.
 function resolveDocketDir(env: TeamEnv, ppid: number): string;
 
 // Filesystem-safe, short, deterministic (e.g. sha256 hex, first 16 chars).
@@ -119,7 +119,7 @@ function keyHash(key: string): string;
 // agent ids and the message-file path.
 function shellQuote(s: string): string;
 
-// The notify hook string (above), or undefined when env.PI_AGENT_ID is absent.
+// The notify hook string (above), or undefined when env.PICTL_ID is absent.
 function notifyHook(env: TeamEnv): string | undefined;
 
 // `docket init <dir> [--notify <hook>]`. Creates dir's parent if needed.
@@ -166,9 +166,9 @@ Consequence for the implementation form: with no package/build step available, t
 1. Manager `M` (pi) runs `team start` — inits its inbox, installs the notify hook.
 2. `M` `pictl spawn`s workers (possibly different cwds) and `team dispatch`es several tasks over time.
 3. As each worker finishes, `M` is woken — but only once quiet — with the `ready` menu, and `team take`s results in its chosen order.
-4. Kill and restart the orchestration mid-flight; confirm no completed-untaken result and no in-flight job is lost (`M`'s inbox re-derives from `$PI_AGENT_ID`).
+4. Kill and restart the orchestration mid-flight; confirm no completed-untaken result and no in-flight job is lost (`M`'s inbox re-derives from `$PICTL_ID`).
 5. A fresh-context reviewer dispatched the same way returns a critique `M` takes and acts on (the `reviewer.md` replacement path).
-6. Non-pi degradation: with `$PI_AGENT_ID` unset, `team start`/`dispatch`/`ready`/`take` operate on a `ppid`-derived inbox with no notify; the same commands work by polling.
+6. Non-pi degradation: with `$PICTL_ID` unset, `team start`/`dispatch`/`ready`/`take` operate on a `ppid`-derived inbox with no notify; the same commands work by polling.
 7. Busy-worker dispatch: dispatch a second task to a worker that is mid-turn; confirm the job queues (no error capture), its `take` contains the queued reply (possibly preceded by the in-flight turn's tail), and nothing is truncated.
 
 # WORK LOG
@@ -192,7 +192,7 @@ Consequence for the implementation form: with no package/build step available, t
 - **`ChildExit` error class** carries a failed child's exit code to the single top-level handler, which distinguishes usage errors (2), child failures (child's code), and runtime errors (1).
 - **`keyHash`** = sha256 hex, first 16 chars, per the spec's suggestion.
 - **SKILL.md audited against the writing-great-skills guidance** (user request): the description was rewritten from a mechanics summary to trigger phrasing, one trigger per branch (delegate/parallelize work; async message + collect; fresh-context review). Deliberately _not_ done: disclosing the review worked-example to a sibling file — the spec folds it into the skill as a worked example, the file is not sprawl at ~77 lines, and the example teaches the dispatch pattern to every branch.
-- **SKILL.md refined after a dispatched fresh-context review** (which was itself acceptance step 5): invocation-by-path made explicit (script not on PATH); "one worker = one serial queue, spawn one worker per parallel task"; `team start` described as optional (dispatch auto-creates the inbox); non-pi caveat now notes ids are always recoverable via `status`/`ready` and that `$(…)` is safe when `$PI_AGENT_ID` is set.
+- **SKILL.md refined after a dispatched fresh-context review** (which was itself acceptance step 5): invocation-by-path made explicit (script not on PATH); "one worker = one serial queue, spawn one worker per parallel task"; `team start` described as optional (dispatch auto-creates the inbox); non-pi caveat now notes ids are always recoverable via `status`/`ready` and that `$(…)` is safe when `$PICTL_ID` is set.
 
 ## Live-use iteration (2026-07-04)
 
@@ -210,16 +210,16 @@ All steps performed against real spawned agents (since archived); inboxes isolat
 1. **start**: pi-identity inbox created; `notify` file contains exactly the spec'd hook string (quoted id, `no-activity:1`, `;`, follow-up inject). Idempotent; same dir on re-run.
 2. **dispatch over time**: two workers, two dispatches; job ids printed; `status` showed both running.
 3. **Quiet-gated wake + chosen-order take**: the manager's transcript shows the ready menu injected as new user turns only after it went idle. Both results taken in reverse dispatch order via unique id prefixes; `ready` empties.
-4. **Restart resumability**: results and in-flight jobs collected from a _different_ shell with only `$PI_AGENT_ID` set — the inbox re-derives; nothing lost.
+4. **Restart resumability**: results and in-flight jobs collected from a _different_ shell with only `$PICTL_ID` set — the inbox re-derives; nothing lost.
 5. **Fresh-context reviewer path**: a read-only reviewer dispatched via `team` reviewed `SKILL.md`, its critique was taken and acted on (edits above), and a follow-up dispatch returned "APPROVED".
-6. **Non-pi degradation**: with `$PI_AGENT_ID` unset, the ppid-derived inbox worked by polling. The documented `$(team …)` hazard reproduced live: a `take` inside command substitution derived a different inbox and failed loudly ("not a docket") — for reads it errors rather than silently misbehaving.
+6. **Non-pi degradation**: with `$PICTL_ID` unset, the ppid-derived inbox worked by polling. The documented `$(team …)` hazard reproduced live: a `take` inside command substitution derived a different inbox and failed loudly ("not a docket") — for reads it errors rather than silently misbehaving.
 7. **Busy-worker dispatch**: second dispatch to a mid-turn worker queued (job stayed `running`, no error capture). Both captures contained both replies — the first ran through the drained follow-up (queued follow-ups drain before `agent_end`), the second included the in-flight turn's tail — exactly the documented interleaving; nothing truncated.
 
 Observed capture detail (harmless, worth knowing): captures may include formatted `[control: session changed …]` and `[control: queue update steering=N follow-up=N]` lines in addition to the trailing `[cursor: …]` line.
 
 Additional probes beyond the 7 steps:
 
-- **Quote-hostility**: with `PI_AGENT_ID="it's a 'test' $id \`x\`"`the notify hook was correctly single-quoted, and a message containing`$(hostname)`, backticks, and mixed quotes round-tripped verbatim through spool →`sh -c`→`pictl prompt`.
+- **Quote-hostility**: with `PICTL_ID="it's a 'test' $id \`x\`"`the notify hook was correctly single-quoted, and a message containing`$(hostname)`, backticks, and mixed quotes round-tripped verbatim through spool →`sh -c`→`pictl prompt`.
 - **Failed notify is non-fatal** (confirmed live): that fake manager id meant the hook's `pictl wait`/`prompt` failed on every completion; the result stayed ready and was taken by polling.
 - **Error paths**: `cancel` on a ready job and `take` on a nonexistent inbox propagate docket's stderr and exit code; `XDG_DATA_HOME`+`HOME` both unset exits 1 with a clear message; all usage errors exit 2.
 
@@ -234,7 +234,7 @@ Additional probes beyond the 7 steps:
 
 - Skill is a **new sibling** to `skills/pictl/` about communicating with a **team**; leading word "team"; docket is the hidden backend. `skills/pictl/SKILL.md` overhaul deferred. Still replaces the reviewer workflow.
 - Dropped "secretary" (implies decision-making) for **team** (dumb queue / talking to your workers). The wrapper must **not** be named `docket` — that collides with the CLI it drives (PATH shadowing; the same verb meaning two different things).
-- **Manager identity determines the inbox dir**: `--docket`/`$DOCKET_DIR` verbatim; else `$PI_AGENT_ID` (notify wired); else `String(ppid)` (no notify). One signal (`$PI_AGENT_ID`) picks both the key and whether push is wired.
+- **Manager identity determines the inbox dir**: `--docket`/`$DOCKET_DIR` verbatim; else `$PICTL_ID` (notify wired); else `String(ppid)` (no notify). One signal (`$PICTL_ID`) picks both the key and whether push is wired.
 - `ppid` chosen over the helper's own pid (fresh per call), cwd, and git state (both can change mid-session). Parent pid verified invariant across separate invocations.
 - Robustness level **(a)**: read `$PPID` plainly; a piped/subshelled `team` call yields a harmless stray empty inbox; prose says don't pipe `team`.
 - Notify gate `no-activity:1`; wake payload `docket ready`; inject `--streaming-behavior follow-up` (gate→inject busy race; document at the hook).
@@ -255,7 +255,7 @@ Where these conflict with earlier decision entries above, these win (the SPEC se
 - ppid-fallback caveat strengthened: implementation uses `process.ppid`; pipelines, subshells, _and command substitution_ mis-derive the inbox, and a mis-derived `dispatch` loses work (not harmless). Prose: plain simple commands only; never `$(team …)` under the fallback.
 - CLI grammar pinned: `--docket <dir>` recognized anywhere in argv; unknown flags/subcommands/arity are usage errors. Error policy: fail fast to stderr — usage errors exit 2, runtime errors exit 1; child failures propagate the child's exit code; error if `$XDG_DATA_HOME` and `$HOME` both unset.
 - Notify hook keeps `;` (not `&&`) deliberately: attempt delivery even if the quiet-gate wait fails; a failed notify is non-fatal (results stay ready).
-- Shared inboxes declared unsupported in v1; last `team start` with `$PI_AGENT_ID` wins the notify hook.
+- Shared inboxes declared unsupported in v1; last `team start` with `$PICTL_ID` wins the notify hook.
 - PATH assumption documented: `docket` and `pictl` must be on PATH where `team` runs and where docket's daemon runs hooks/jobs.
 - Busy-worker capture semantics verified against pi's agent-session (round 2): queued follow-ups drain _before_ `agent_end`, so a busy-worker dispatch is never truncated; the capture does include the tail of the in-flight turn (and interleaves when several dispatches queue on one worker). Documented, not designed away — extra context, never lost replies.
 - `dispatch` always requires `<dataHome>` for its message spool, even with explicit `--docket` (we never spool into the docket dir — docket owns that layout). Usage errors exit 2, matching docket/pictl; runtime errors exit 1; child exit codes propagate. `shellQuote` pinned to exact POSIX single-quoting.

@@ -14,7 +14,7 @@ Read branch references as needed:
 ## Core rules
 
 - Do **not** purge, force-kill, or take over agents you did not create unless the user explicitly asks.
-- When spawning subagents, give them clear role instructions and tell them relevant agent ids, including your own `$PI_AGENT_ID`.
+- When spawning subagents, give them clear role instructions and tell them relevant agent ids, including your own `$PICTL_ID`.
 - Spawn review agents read-only by default (`-- --tools read,grep,find,ls`) unless edits or tests are explicitly needed.
 - Always message with `pictl prompt`, never raw `steer`/`follow-up`. For a single agent, `prompt` and read its streamed output; you do not need `-d` or `wait`.
 - `pictl prompt` streams formatted output by default and emits a final cursor. Add `--json` for machine-readable JSONL.
@@ -25,7 +25,7 @@ Read branch references as needed:
 Agents commonly need peers working in the same directory:
 
 ```bash
-echo "$PI_AGENT_ID"         # your own agent id, if pictl spawned you
+echo "$PICTL_ID"         # your own agent id, if pictl spawned you
 pictl list --cwd .          # human-readable agents in this cwd
 pictl list --cwd . --json   # machine-readable agents in this cwd
 pictl status -t <agent>     # details for one agent
@@ -77,7 +77,7 @@ For continuous or crash-resumable scripts, use `pictl tail`; see [orchestration.
 
 ```bash
 worker=$(pictl spawn --tag worker)
-pictl prompt -t "$worker" "You are my worker agent. My agent id is $PI_AGENT_ID. Please ..."
+pictl prompt -t "$worker" "You are my worker agent. My agent id is $PICTL_ID. Please ..."
 ```
 
 Use `--tag` to make helpers discoverable. For fresh-context peer review, use [reviewer.md](reviewer.md). For conversation-tree rewinds, use [tree-navigation.md](tree-navigation.md).

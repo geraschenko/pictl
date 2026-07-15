@@ -32,7 +32,7 @@ directly. The goal is understanding, not enforcement.
 **Caller source** (`CallerSource`): a string identifying who a command or
 attachment came from.
 
-- `pictl:<agent-id>` — the caller has `PI_AGENT_ID` in its environment, i.e.
+- `pictl:<agent-id>` — the caller has `PICTL_ID` in its environment, i.e.
   it is (a descendant of) a pictl-managed pi agent. Stable across that
   agent's process restarts.
 - `<comm>:<pid>` — otherwise, the _manager process_ found by walking up the
@@ -121,7 +121,7 @@ export function resolveCallerSource(
 
 /**
  * The same resolution for another live process (the daemon's view of a
- * tty.sock client): PI_AGENT_ID from /proc/<pid>/environ, walk from that
+ * tty.sock client): PICTL_ID from /proc/<pid>/environ, walk from that
  * pid's ppid (from /proc/<pid>/stat). Falls back to "process:<pid>" when
  * /proc is unavailable.
  */
@@ -274,7 +274,7 @@ export interface CommandContext extends StricliCommandContext {
 
 `commandOneTarget` / `commandMultiTarget` wrappers: after `resolveTargets`,
 if `spec.audited` and `auditEnabled(env)`, call
-`resolveCallerSource(env.PI_AGENT_ID, process.ppid)` once and
+`resolveCallerSource(env.PICTL_ID, process.ppid)` once and
 `recordAuditEvent` for each target's agentDir, then invoke `spec.func`.
 `runCliApp` stores argv on the context.
 
@@ -366,7 +366,7 @@ the list.
   `--bg-spare`/`daemonized` detection is team-specific and not needed here.
   The skill is a standalone script and cannot import from src/, so the logic
   is duplicated knowingly; consider extracting later if a third user appears.
-- **PI_AGENT_ID**: set for pi processes by the daemon (`daemon.ts:97`) and
+- **PICTL_ID**: set for pi processes by the daemon (`daemon.ts:97`) and
   inherited by their bash subprocesses, which is how pictl invocations from
   a pi agent's tools get the `pictl:` source.
 - **Reading a peer's env**: `/proc/<pid>/environ` is the exec-time
