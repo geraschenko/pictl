@@ -30,6 +30,7 @@ import { oneTarget, type CommandContext } from "./targets.ts";
 import { ensureAgentRunning } from "./lifecycle.ts";
 import { piSocketPath } from "./registry.ts";
 import { connectWithRetry, type PiSocketClient } from "./pi-socket-client.ts";
+import { readStdin } from "./read-input.ts";
 import { oneOf, UsageError } from "./util.ts";
 import {
   parseStreamOutputType,
@@ -125,16 +126,6 @@ async function imagesFromFlags(
   return { images };
 }
 
-async function readStdin(
-  stdin: AsyncIterable<Buffer | string>,
-): Promise<string> {
-  let data = "";
-  for await (const chunk of stdin) {
-    data += chunk.toString();
-  }
-  return data.replace(/\n$/, "");
-}
-
 async function messageFrom(
   context: CommandContext,
   positional: string,
@@ -143,8 +134,10 @@ async function messageFrom(
     return positional;
   }
   // Reading prompt text from stdin is Node-specific; Stricli's process type
-  // intentionally only models portable stdio.
-  return readStdin((context.process as NodeJS.Process).stdin);
+  // intentionally only models portable stdio. The trailing newline is the
+  // shell's, not the prompt's.
+  const text = await readStdin((context.process as NodeJS.Process).stdin);
+  return text.replace(/\n$/, "");
 }
 
 function printResponse(

@@ -1,10 +1,9 @@
-import { readFile } from "node:fs/promises";
 import type {
   SessionEntry,
   SessionTreeNode,
 } from "@geraschenko/pi-coding-agent";
+import { parseJsonInput, parseJsonlInput } from "../core/read-input.ts";
 import type { MessageStreamRecord } from "../core/stream-types.ts";
-import type { CommandContext } from "../core/targets.ts";
 import { UsageError } from "../core/util.ts";
 import type { EntriesInput, TreeInput } from "./types.ts";
 
@@ -34,16 +33,6 @@ const CONTROL_KINDS = new Set([
   "session_changed",
   "queue_update",
 ]);
-
-async function readStdin(
-  stdin: AsyncIterable<Buffer | string>,
-): Promise<string> {
-  let data = "";
-  for await (const chunk of stdin) {
-    data += chunk.toString();
-  }
-  return data;
-}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -208,39 +197,6 @@ function decodeTreeNode(value: unknown): SessionTreeNode {
       labelTimestamp: value.labelTimestamp,
     }),
   };
-}
-
-export async function readInputFile(
-  context: CommandContext,
-  file: string | undefined,
-): Promise<string> {
-  if (file === undefined || file === "-") {
-    return await readStdin((context.process as NodeJS.Process).stdin);
-  }
-  return await readFile(file, "utf8");
-}
-
-export function parseJsonInput(input: string): unknown {
-  try {
-    return JSON.parse(input) as unknown;
-  } catch (error) {
-    throw new UsageError(
-      `invalid JSON: ${error instanceof Error ? error.message : String(error)}`,
-    );
-  }
-}
-
-export function parseJsonlInput(input: string): readonly unknown[] {
-  const lines = input.split(/\r?\n/u).filter((line) => line.trim() !== "");
-  return lines.map((line, index) => {
-    try {
-      return JSON.parse(line) as unknown;
-    } catch (error) {
-      throw new UsageError(
-        `invalid JSONL line ${index + 1}: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
-  });
 }
 
 export function decodeMessageStreamRecord(value: unknown): MessageStreamRecord {

@@ -7,6 +7,7 @@ import {
   stringArg,
   type InferFlags,
 } from "../core/cli.ts";
+import { readInputFile } from "../core/read-input.ts";
 import type { CommandContext } from "../core/targets.ts";
 import { UsageError } from "../core/util.ts";
 import { formatEntriesInput, formatEntryJsonl } from "./entries.ts";
@@ -15,7 +16,6 @@ import {
   parseEntriesInput,
   parseMessageRecords,
   parseTreeInput,
-  readInputFile,
 } from "./input.ts";
 import { formatMessageRecords } from "./messages.ts";
 import { formatTreeInput } from "./tree.ts";
