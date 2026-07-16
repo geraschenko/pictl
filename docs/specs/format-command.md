@@ -222,7 +222,10 @@ Existing `streamTail` and `streamPrompt` behavior changes only for entry-mode st
 ### `src/format/types.ts`
 
 ```ts
-import type { SessionEntry, SessionTreeNode } from "@geraschenko/pi-coding-agent";
+import type {
+  SessionEntry,
+  SessionTreeNode,
+} from "@geraschenko/pi-coding-agent";
 
 export type ToolResultDisplayMode = "summary" | "none" | "full";
 
@@ -347,59 +350,39 @@ export function formatEntry(
   options: EntryFormatOptions,
 ): string;
 
-export function summarizeEntry(
-  entry: SessionEntry,
-  maxChars?: number,
-): string;
+export function summarizeEntry(entry: SessionEntry, maxChars?: number): string;
 ```
 
 `formatEntriesInput` and `formatEntryJsonl` call `formatEntry` for each entry in input order.
 
-### `src/format/tree.ts`
+### `src/format/tree-layout.ts` and `src/format/tree.ts`
+
+The generic tree-layout interface and its extraction from `tree.ts` are
+specified by [tree-layout-extraction.md](tree-layout-extraction.md), which
+supersedes this spec's original `FlatTreeNode`, `flattenTreeForFormat`, and
+exported `formatTreeNodeLine` design. The current shared interface exports
+`LayoutNode<P>`, `TreeGutter`, `FlatLayoutNode<P>`, `flattenVisibleTree`, and
+`treePrefix` from the import-free `src/format/tree-layout.ts` module.
+
+`src/format/tree.ts` retains the pi-specific interface:
 
 ```ts
-import type { SessionTreeNode } from "@geraschenko/pi-coding-agent";
-import type { FilterMode } from "./filter.ts";
 import type { TreeFormatOptions, TreeInput } from "./types.ts";
 
 export const DEFAULT_TREE_FORMAT_OPTIONS: TreeFormatOptions;
-
-export interface TreeGutter {
-  readonly position: number;
-  readonly show: boolean;
-}
-
-export interface FlatTreeNode {
-  readonly node: SessionTreeNode;
-  readonly indent: number;
-  readonly showConnector: boolean;
-  readonly isLast: boolean;
-  readonly gutters: readonly TreeGutter[];
-  readonly isVirtualRootChild: boolean;
-  readonly isOnActivePath: boolean;
-  readonly isCurrentLeaf: boolean;
-}
 
 export function formatTreeInput(
   input: TreeInput,
   options?: Partial<TreeFormatOptions>,
 ): string;
-
-export function flattenTreeForFormat(
-  roots: readonly SessionTreeNode[],
-  currentLeafId: string | null,
-  filter: FilterMode,
-): readonly FlatTreeNode[];
-
-export function formatTreeNodeLine(
-  flatNode: FlatTreeNode,
-  options: TreeFormatOptions,
-): string;
 ```
 
-`formatTreeInput` passes `input.leafId` to `flattenTreeForFormat`, calls `formatTreeNodeLine` for each flat node, and appends `[cursor: <leafId>]`.
+`formatTreeInput` adapts pi session nodes to `LayoutNode<SessionTreeNode>`,
+calls `flattenVisibleTree`, renders each flat node with private pi-specific
+line rendering, and appends `[cursor: <leafId>]`.
 
-Any tree flattening, filtering, connector, or entry-summary logic adapted from pi must have explicit comments naming the source file:
+Any tree flattening, filtering, connector, or entry-summary logic adapted
+from pi must have explicit comments naming the source file:
 
 ```text
 pi repo-relative: packages/coding-agent/src/modes/interactive/components/tree-selector.ts
@@ -430,11 +413,15 @@ export function decodeEntriesInput(value: unknown): EntriesInput;
 
 export function decodeTreeInput(value: unknown): TreeInput;
 
-export function parseEntriesInput(input: string): EntriesInput | readonly SessionEntry[];
+export function parseEntriesInput(
+  input: string,
+): EntriesInput | readonly SessionEntry[];
 
 export function parseTreeInput(input: string): TreeInput;
 
-export function parseMessageRecords(input: string): readonly MessageStreamRecord[];
+export function parseMessageRecords(
+  input: string,
+): readonly MessageStreamRecord[];
 ```
 
 The `decode*` functions validate unknown input and return typed values. Invalid input throws `UsageError` with a useful message so the command exits non-zero without crashing. `parseEntriesInput` requires every JSONL record to decode as `SessionEntry`; `pictl_cursor` records are invalid for entry formatting.
@@ -480,7 +467,10 @@ export async function formatMessages(
   file?: string,
 ): Promise<void>;
 
-const formatMessagesCommand = commandNoTarget<FormatMessagesFlags, [string | undefined]>({
+const formatMessagesCommand = commandNoTarget<
+  FormatMessagesFlags,
+  [string | undefined]
+>({
   common: true,
   docs: { brief: "format pictl message JSONL" },
   parameters: {
@@ -509,7 +499,10 @@ export async function formatEntries(
   file?: string,
 ): Promise<void>;
 
-const formatEntriesCommand = commandNoTarget<FormatEntriesFlags, [string | undefined]>({
+const formatEntriesCommand = commandNoTarget<
+  FormatEntriesFlags,
+  [string | undefined]
+>({
   common: true,
   docs: { brief: "format pictl entries JSON or JSONL" },
   parameters: {
@@ -536,7 +529,10 @@ export async function formatTree(
   file?: string,
 ): Promise<void>;
 
-const formatTreeCommand = commandNoTarget<FormatTreeFlags, [string | undefined]>({
+const formatTreeCommand = commandNoTarget<
+  FormatTreeFlags,
+  [string | undefined]
+>({
   common: true,
   docs: { brief: "format pictl tree JSON" },
   parameters: {
@@ -626,6 +622,8 @@ Flag specs and inferred flag types are intentionally adjacent to their commands,
 - [x] Add regression coverage for omitted trailing cursors in entry-mode prompt streams.
 - [x] Run `npm run build` successfully.
 - [x] Run `npm run presubmit` successfully.
+- [x] Supersede the original tree type design with the generic interface in
+      `tree-layout-extraction.md`.
 
 ## Implementation-Time Decisions
 
