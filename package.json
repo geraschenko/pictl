@@ -1,6 +1,6 @@
 {
   "name": "@geraschenko/pictl",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Spawn, observe, control, and attach to a fleet of pi coding-agent instances",
   "license": "Apache-2.0",
   "author": "Anton Geraschenko <geraschenko@gmail.com>",
@@ -47,7 +47,7 @@
     "presubmit": "npm run check && npm run lint && treefmt --fail-on-change && npm test"
   },
   "dependencies": {
-    "@geraschenko/pi-coding-agent": "^0.80.6-fork.0",
+    "@geraschenko/pi-coding-agent": "^0.80.9-fork.0",
     "@stricli/auto-complete": "1.2.7",
     "@stricli/core": "1.2.7",
     "@xterm/addon-serialize": "^0.14.0",

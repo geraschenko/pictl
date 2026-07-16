@@ -44,10 +44,9 @@ cat <<MSG
 
 If the dry-run file list looks correct, publish with:
 
+  git tag "v${PKG_VERSION}" && git push --tags
   npm publish
 
-Then tag the release and verify it:
-
-  git tag "v${PKG_VERSION}" && git push --tags
+Then verify:
   npm view ${PKG_NAME} version
 MSG
