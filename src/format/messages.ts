@@ -118,8 +118,11 @@ function formatControl(record: MessageStreamRecord): string | undefined {
       return `[control: tree navigated ${oldLeafId} -> ${newLeafId}]`;
     }
     case "session_changed": {
-      const sessionId = optionalStringOrNumberField(event, "sessionId");
-      const sessionFile = optionalStringOrNumberField(event, "sessionFile");
+      // Records may come from parsed JSONL (`pictl format`), so read the
+      // state defensively despite the static type.
+      const state = event.type === "session_changed" ? event.state : undefined;
+      const sessionId = optionalStringOrNumberField(state, "sessionId");
+      const sessionFile = optionalStringOrNumberField(state, "sessionFile");
       return `[control: session changed${sessionId === undefined ? "" : ` to ${sessionId}`}${sessionFile === undefined ? "" : ` ${sessionFile}`}]`;
     }
     case "queue_update": {

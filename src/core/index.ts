@@ -15,12 +15,7 @@
  */
 
 // pi.sock client
-export {
-  PiSocketClient,
-  connectWithRetry,
-  getState,
-  type SocketEvent,
-} from "./pi-socket-client.ts";
+export { PiSocketClient, connectWithRetry } from "./pi-socket-client.ts";
 
 // tty.sock protocol
 export {
@@ -51,9 +46,21 @@ export {
   type SessionHistoryEntry,
 } from "./registry.ts";
 
-// until-conditions
+// until-conditions and the stream driver they run on
 export {
-  applyUntilCondition,
+  parseUntilCondition,
   UntilTimeoutError,
   type UntilCondition,
+} from "./until-engine.ts";
+export {
+  runStream,
+  type StreamClient,
+  type StreamHandler,
+  type StreamResult,
+} from "./stream-driver.ts";
+export {
+  isIdle,
+  untilMetAtSeed,
+  untilMetByEvent,
+  untilQuietMs,
 } from "./until.ts";

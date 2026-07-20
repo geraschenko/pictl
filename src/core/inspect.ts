@@ -20,7 +20,7 @@ import {
   listAgentIds,
   piSocketPath,
 } from "./registry.ts";
-import { connectWithRetry, getState } from "./pi-socket-client.ts";
+import { connectWithRetry } from "./pi-socket-client.ts";
 
 const PROBE_CONNECT_DEADLINE_MS = 2_000;
 
@@ -60,7 +60,9 @@ async function probeAgent(agentId: string): Promise<AgentProbe> {
       PROBE_CONNECT_DEADLINE_MS,
     );
     try {
-      const state = await getState(client);
+      // The subscribe seed is built by pi at send time, so it is as fresh as
+      // a get_state response for this connect-read-close probe.
+      const state = await client.subscribe(() => {});
       // Compacting is a more special kind of streaming, so it wins.
       const status = state.isCompacting
         ? "compacting"

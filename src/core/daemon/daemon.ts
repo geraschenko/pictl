@@ -20,6 +20,8 @@ import {
   hasTrustRequiringProjectResources,
   ProjectTrustStore,
   SettingsManager,
+  type RpcSessionState,
+  type RpcSocketBroadcastEvent,
 } from "@geraschenko/pi-coding-agent";
 import {
   commandNoTarget,
@@ -42,7 +44,7 @@ import {
   writeAgentRecord,
 } from "../registry.ts";
 import { auditEnabled } from "../audit.ts";
-import { connectWithRetry, type SocketEvent } from "../pi-socket-client.ts";
+import { connectWithRetry } from "../pi-socket-client.ts";
 import { PtyScreen } from "../pty-screen.ts";
 import { fileExists } from "../util.ts";
 import { startTtyService, type TtyService } from "./tty-service.ts";
@@ -104,23 +106,6 @@ function ptyEnv(
   // checks and telemetry).
   env.PI_SKIP_VERSION_CHECK = "1";
   return env;
-}
-
-/**
- * The one socket event whose payload the daemon reads structurally (to track
- * session rotation below). Every other event is forwarded opaquely as a bare
- * SocketEvent, so only this one earns a typed shape, narrowed via the guard.
- */
-interface SessionChangedEvent {
-  type: "session_changed";
-  sessionFile?: string;
-  sessionId: string;
-}
-
-function isSessionChangedEvent(
-  event: SocketEvent,
-): event is SocketEvent & SessionChangedEvent {
-  return event.type === "session_changed";
 }
 
 /** pi flags that decide trust without prompting (`--approve`/`--no-approve`). */
@@ -321,35 +306,39 @@ async function daemon(this: CommandContext, flags: DaemonFlags): Promise<void> {
   proc.on("SIGTERM", () => piScreen.kill("SIGTERM"));
   proc.on("SIGINT", () => piScreen.kill("SIGTERM"));
 
-  const handleEvent = (event: SocketEvent): void => {
-    if (!isSessionChangedEvent(event)) {
-      return;
-    }
+  const recordSession = (state: RpcSessionState): void => {
     // In-memory sessions (no file) are not recorded; they cannot be revived.
-    if (event.sessionFile === undefined) {
+    if (state.sessionFile === undefined) {
       return;
     }
     // The history is duplicate-free: re-announcing a known session moves it
     // to the end (most recent).
     const previousIndex = record.sessions.findIndex(
-      (s) => s.sessionId === event.sessionId,
+      (s) => s.sessionId === state.sessionId,
     );
     if (previousIndex !== -1) {
       record.sessions.splice(previousIndex, 1);
     }
     record.sessions.push({
-      sessionFile: event.sessionFile,
-      sessionId: event.sessionId,
+      sessionFile: state.sessionFile,
+      sessionId: state.sessionId,
     });
     queueRecordWrite();
   };
+  const handleEvent = (event: RpcSocketBroadcastEvent): void => {
+    if (event.type === "session_changed") {
+      recordSession(event.state);
+    }
+  };
 
   try {
-    await connectWithRetry(
+    const piClient = await connectWithRetry(
       piSocketPath(agentDir),
       RPC_CONNECT_DEADLINE_MS,
-      handleEvent,
     );
+    // The subscribe seed is the initial session announcement; later
+    // session_changed events arrive through handleEvent.
+    recordSession(await piClient.subscribe(handleEvent));
     signalReady(flags.readyFd, { ok: true });
   } catch (error) {
     failStartup(

@@ -11,7 +11,7 @@ import { spawnRoute } from "./spawn.ts";
 import { tailRoute } from "./tail.ts";
 import { UsageError } from "./util.ts";
 import { VERSION } from "./version.ts";
-import { UntilTimeoutError } from "./until.ts";
+import { UntilTimeoutError } from "./until-engine.ts";
 import { waitRoute } from "./wait.ts";
 
 const routes = {

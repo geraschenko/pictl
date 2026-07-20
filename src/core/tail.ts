@@ -1,19 +1,16 @@
 /*
  * `pictl tail --target <agent> [--type messages|entries|raw] [--since <entry-id>]
- * [-n <count>] [--follow|-f] [--until <cond>] [--json]` streams activity from
- * one agent and emits a final `pictl_cursor` record for bounded streams.
+ * [-n <count>] [--until <cond>] [--json]` streams activity from one agent:
+ * historical output first (per `-n`/`--since`), then it follows new events
+ * until `--until` is met (emitting a final `pictl_cursor` record) or, without
+ * `--until`, until pi closes the socket (exit 1).
  *
  * Output is human-readable by default; `--json` emits JSONL (for piping into
  * `pictl format`). Message mode is the default. It prints historical
- * message-shaped records, then optionally follows append-only message/control
- * events. Entry mode drains real session entries with `get_entries --since
- * <cursor>` on socket wakeups. Raw mode prints future socket records directly
- * (always as JSON); it has no historical backlog, so `-n` and `--since` do not
- * apply.
- *
- * `--follow`/`-f` is sugar for `--until killed` and conflicts with explicit
- * `--until`. Finite `--until` conditions stop the stream, drain trailing output
- * where applicable, and then write one final cursor.
+ * message-shaped records, then follows append-only message/control events.
+ * Entry mode drains real session entries with `get_entries --since <cursor>`
+ * per socket event. Raw mode prints future socket records directly (always as
+ * JSON); it has no historical backlog, so `-n` and `--since` do not apply.
  */
 
 import {
@@ -26,14 +23,16 @@ import {
 } from "./cli.ts";
 import { type CommandContext } from "./targets.ts";
 import {
-  normalizeFollowUntil,
   parseStreamOutputType,
-  parseStreamUntil,
   streamTail,
   STREAM_OUTPUT_TYPES,
-  STREAM_UNTIL_USAGE,
   type StreamOutputType,
 } from "./streaming.ts";
+import {
+  parseUntilCondition,
+  secondsToTimerMs,
+  UNTIL_USAGE,
+} from "./until-engine.ts";
 import { makeRecordWriter } from "../format/record-writer.ts";
 import { UsageError } from "./util.ts";
 
@@ -54,12 +53,7 @@ const tailFlags = {
   ),
   since: stringFlag("Start after entry id", "entry-id"),
   n: parsedFlag("Number of historical output units", parseLimit, "count"),
-  follow: booleanFlag("Follow new output"),
-  until: parsedFlag(
-    `Stream until ${STREAM_UNTIL_USAGE}`,
-    parseStreamUntil,
-    "cond",
-  ),
+  until: parsedFlag(`Stream until ${UNTIL_USAGE}`, parseUntilCondition, "cond"),
   timeout: parsedFlag(
     "Timeout in seconds",
     (input: string): number => {
@@ -89,15 +83,16 @@ export async function tail(
     writer: makeRecordWriter(this, outputType, flags.json),
     since: flags.since,
     limit: flags.n,
-    until: normalizeFollowUntil({ follow: flags.follow, until: flags.until }),
-    timeoutMs: flags.timeout === undefined ? undefined : flags.timeout * 1000,
+    until: flags.until,
+    timeoutMs:
+      flags.timeout === undefined ? undefined : secondsToTimerMs(flags.timeout),
   });
 }
 
 const tailCommand = commandOneTarget<TailFlags>({
   common: true,
   docs: { brief: "stream session activity" },
-  parameters: { flags: tailFlags, aliases: { f: "follow", n: "n" } },
+  parameters: { flags: tailFlags, aliases: { n: "n" } },
   func: tail,
 });
 

@@ -3,34 +3,58 @@
  *
  * The pi package's exported RpcClient spawns its own child process over stdio,
  * so it cannot attach to an existing socket; this client speaks the same
- * protocol over a net.Socket instead. Command/response/state types are
- * imported from the pi package; the socket-transport record types below are
- * not exported from its index, so they mirror
- * packages/coding-agent/src/modes/rpc/rpc-types.ts in the pi repo.
+ * protocol over a net.Socket instead. Command/response/state/event types are
+ * imported from the pi package; the hello record is not exported from its
+ * index, so validateHello mirrors packages/coding-agent/src/modes/rpc/
+ * rpc-types.ts in the pi repo.
+ *
+ * The client owns the session-state fold: it seeds from the first
+ * `session_changed` after hello (never delivered as an event) and folds every
+ * subsequent broadcast through `nextSessionState` at dispatch. Nothing is
+ * buffered — a long-lived non-subscriber costs O(1) memory, and events before
+ * subscribe are reflected in the state subscribe returns rather than replayed.
  */
 
 import { connect, type Socket } from "node:net";
-import type {
-  RpcCommand,
-  RpcResponse,
-  RpcSessionState,
+import {
+  nextSessionState,
+  type RpcCommand,
+  type RpcResponse,
+  type RpcSessionState,
+  type RpcSocketBroadcastEvent,
 } from "@geraschenko/pi-coding-agent";
 
-/** Any broadcast record that is not a response: agent events, session events, side-channel events. */
-export type SocketEvent = { type: string } & Record<string, unknown>;
+/** Any parsed JSONL record off the socket, before classification. Non-response
+ *  records are cast to pi's RpcSocketBroadcastEvent at dispatch — the one
+ *  transport-boundary cast; safe because that union is what pi sends and the
+ *  fold returns state unchanged for unknown event types. */
+type SocketRecord = { type: string } & Record<string, unknown>;
 
 interface PendingRequest {
   resolve: (response: RpcResponse) => void;
   reject: (error: Error) => void;
 }
 
+interface SeedWaiter {
+  resolve: (seed: RpcSessionState) => void;
+  reject: (error: Error) => void;
+}
+
 export class PiSocketClient {
   private readonly socket: Socket;
   private readonly pending = new Map<string, PendingRequest>();
-  private readonly eventListeners: Array<(event: SocketEvent) => void> = [];
   private readonly closedPromise: Promise<void>;
   private requestCounter = 0;
   private closed = false;
+
+  /** The folded session state, seeded by the first session_changed after
+   *  hello and advanced by every subsequent broadcast; undefined until the
+   *  seed arrives. */
+  private state: RpcSessionState | undefined;
+  private seedWaiter: SeedWaiter | undefined;
+  private subscriber:
+    | ((event: RpcSocketBroadcastEvent, state: RpcSessionState) => void)
+    | undefined;
 
   private constructor(socket: Socket) {
     this.socket = socket;
@@ -42,6 +66,8 @@ export class PiSocketClient {
           pending.reject(error);
         }
         this.pending.clear();
+        this.seedWaiter?.reject(error);
+        this.seedWaiter = undefined;
         resolve();
       });
     });
@@ -49,14 +75,10 @@ export class PiSocketClient {
 
   /**
    * Connect and consume the hello record; rejects if the path is not a pi RPC
-   * socket. An event listener passed here is registered before any record is
-   * dispatched — pi sends `session_changed` immediately after `hello`, often
-   * in the same chunk, so registering via onEvent() after connect would lose it.
+   * socket. The seeding session_changed pi sends right after hello arrives
+   * stream-ordered before all events, so the fold misses nothing.
    */
-  static async connect(
-    socketPath: string,
-    onEvent?: (event: SocketEvent) => void,
-  ): Promise<PiSocketClient> {
+  static async connect(socketPath: string): Promise<PiSocketClient> {
     const socket = await new Promise<Socket>((resolve, reject) => {
       const s = connect(socketPath);
       s.once("connect", () => {
@@ -67,9 +89,6 @@ export class PiSocketClient {
     });
 
     const client = new PiSocketClient(socket);
-    if (onEvent) {
-      client.eventListeners.push(onEvent);
-    }
     socket.on("error", () => socket.destroy());
 
     let helloSeen = false;
@@ -116,9 +135,9 @@ export class PiSocketClient {
   }
 
   private dispatchLine(line: string): void {
-    let record: SocketEvent;
+    let record: SocketRecord;
     try {
-      record = JSON.parse(line) as SocketEvent;
+      record = JSON.parse(line) as SocketRecord;
     } catch {
       return;
     }
@@ -132,9 +151,21 @@ export class PiSocketClient {
       }
       return;
     }
-    for (const listener of this.eventListeners) {
-      listener(record);
+    // The first session_changed after hello seeds the fold, not an event: pi
+    // sends it immediately after hello, stream-ordered before all subsequent
+    // events. Later session_changed records are ordinary events (the fold
+    // reseeds wholesale from their state).
+    if (this.state === undefined) {
+      if (record.type === "session_changed") {
+        this.state = (record as unknown as { state: RpcSessionState }).state;
+        this.seedWaiter?.resolve(this.state);
+        this.seedWaiter = undefined;
+      }
+      return;
     }
+    const event = record as unknown as RpcSocketBroadcastEvent;
+    this.state = nextSessionState(this.state, event);
+    this.subscriber?.(event, this.state);
   }
 
   async request(command: RpcCommand): Promise<RpcResponse> {
@@ -152,8 +183,30 @@ export class PiSocketClient {
     return response;
   }
 
-  onEvent(listener: (event: SocketEvent) => void): void {
-    this.eventListeners.push(listener);
+  /**
+   * Resolves with the current folded state and forwards subsequent events
+   * live, each paired with the state after folding it — the pair keeps an
+   * async consumer's view aligned with the event it is processing even when
+   * the client's live state has run ahead. Events before subscribe are not
+   * replayed; they are already reflected in the returned state. One
+   * subscriber per client; a second call throws.
+   */
+  subscribe(
+    onEvent: (event: RpcSocketBroadcastEvent, state: RpcSessionState) => void,
+  ): Promise<RpcSessionState> {
+    if (this.subscriber !== undefined) {
+      throw new Error("pi socket client already subscribed");
+    }
+    this.subscriber = onEvent;
+    if (this.state !== undefined) {
+      return Promise.resolve(this.state);
+    }
+    if (this.closed) {
+      return Promise.reject(new Error("pi socket closed"));
+    }
+    return new Promise((resolve, reject) => {
+      this.seedWaiter = { resolve, reject };
+    });
   }
 
   /** Resolves when pi closes the socket (i.e. pi has exited or shut the server down). */
@@ -200,13 +253,12 @@ function validateHello(line: string): Error | undefined {
 export async function connectWithRetry(
   socketPath: string,
   deadlineMs: number,
-  onEvent?: (event: SocketEvent) => void,
 ): Promise<PiSocketClient> {
   const deadline = Date.now() + deadlineMs;
   let delay = 50;
   while (true) {
     try {
-      return await PiSocketClient.connect(socketPath, onEvent);
+      return await PiSocketClient.connect(socketPath);
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
       const retryable = code === "ENOENT" || code === "ECONNREFUSED";
@@ -215,75 +267,6 @@ export async function connectWithRetry(
       }
       await new Promise((resolve) => setTimeout(resolve, delay));
       delay = Math.min(delay * 2, 500);
-    }
-  }
-}
-
-/**
- * Free function rather than a PiSocketClient method to keep the client purely
- * transport-level. Serves programmatic state checks (idle waits in
- * lifecycle.ts, status probes in inspect.ts); the CLI passthrough in
- * rpc-commands.ts builds its commands from its own spec table instead.
- */
-export async function getState(
-  client: PiSocketClient,
-): Promise<RpcSessionState> {
-  const response = await client.request({ type: "get_state" });
-  return (
-    response as Extract<RpcResponse, { command: "get_state"; success: true }>
-  ).data;
-}
-
-export class IdleTimeoutError extends Error {}
-
-/**
- * Wait until the agent is fully idle (not streaming AND pending queue empty).
- * State is re-checked only on agent_end (once per turn), not per event. The
- * waiter is registered before each get_state so an agent_end landing between
- * the two is not missed.
- */
-export async function waitIdle(
-  client: PiSocketClient,
-  timeoutMs: number | undefined,
-): Promise<void> {
-  const deadline = timeoutMs === undefined ? undefined : Date.now() + timeoutMs;
-  while (true) {
-    const nextAgentEnd = new Promise<"agent_end" | "closed">((resolve) => {
-      client.onEvent((event) => {
-        if (event.type === "agent_end") {
-          resolve("agent_end");
-        }
-      });
-      void client.waitClosed().then(() => resolve("closed"));
-    });
-
-    const state = await getState(client);
-    if (!state.isStreaming && state.pendingMessageCount === 0) {
-      return;
-    }
-
-    if (deadline === undefined) {
-      if ((await nextAgentEnd) === "closed") {
-        throw new Error("pi socket closed while waiting for idle");
-      }
-    } else {
-      const remaining = deadline - Date.now();
-      if (remaining <= 0) {
-        throw new IdleTimeoutError();
-      }
-      // Cleared after the race; see the timer comment in lifecycle.ts terminatePi.
-      let timeoutTimer: NodeJS.Timeout | undefined;
-      const timeout = new Promise<"timeout">((resolve) => {
-        timeoutTimer = setTimeout(() => resolve("timeout"), remaining);
-      });
-      const winner = await Promise.race([nextAgentEnd, timeout]);
-      clearTimeout(timeoutTimer);
-      if (winner === "timeout") {
-        throw new IdleTimeoutError();
-      }
-      if (winner === "closed") {
-        throw new Error("pi socket closed while waiting for idle");
-      }
     }
   }
 }

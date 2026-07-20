@@ -1,56 +1,46 @@
-import type { RpcCommand, RpcResponse } from "@geraschenko/pi-coding-agent";
 import type {
-  AgentMessage,
+  RpcCommand,
+  RpcResponse,
+  RpcSessionState,
+  RpcSocketBroadcastEvent,
+} from "@geraschenko/pi-coding-agent";
+import type {
   MessageStreamRecord,
   StreamCursorRecord,
 } from "./stream-types.ts";
 import { oneTarget, type CommandContext } from "./targets.ts";
 import { ensureAgentRunning } from "./lifecycle.ts";
 import { piSocketPath } from "./registry.ts";
-import {
-  connectWithRetry,
-  getState,
-  type PiSocketClient,
-  type SocketEvent,
-} from "./pi-socket-client.ts";
+import { connectWithRetry, type PiSocketClient } from "./pi-socket-client.ts";
 import { oneOf, UsageError } from "./util.ts";
-import {
-  applyUntilCondition,
-  parseUntilCondition,
-  UNTIL_USAGE,
-  type UntilCondition,
-} from "./until.ts";
+import type { UntilCondition } from "./until-engine.ts";
+import { untilMetAtSeed, untilMetByEvent, untilQuietMs } from "./until.ts";
+import { runStream, type StreamHandler } from "./stream-driver.ts";
 
 const SOCKET_CONNECT_DEADLINE_MS = 5_000;
-const STREAMING_NOISE_EVENTS = new Set([
-  "message_update",
-  "tool_execution_update",
-]);
+
+/** Per-delta events that can never produce a new session entry; the
+ *  incremental entries drain skips them (one drain per token would spam
+ *  RPCs). They still reach the until checkers and the quiet timer. */
+const ENTRY_DELTA_EVENTS = new Set(["message_update", "tool_execution_update"]);
 
 export const STREAM_OUTPUT_TYPES = ["messages", "entries", "raw"] as const;
 export type StreamOutputType = (typeof STREAM_OUTPUT_TYPES)[number];
-
-// "killed" is a streaming-only extension, not a pi.sock state predicate like
-// the UntilCondition cases: it means "follow until the socket closes" and
-// resolves by throwing (see waitForUntil), never by reaching a success state.
-// It lives here rather than in until.ts because only the streaming commands
-// (tail/prompt -f) follow indefinitely; `wait` consumes the bare UntilCondition
-// engine, where "until killed" would just block for pi's death and exit nonzero.
-export type StreamUntil = UntilCondition | { kind: "killed" };
 
 interface StreamOptions {
   outputType: StreamOutputType;
   writer: RecordWriter;
   since: string | undefined;
   limit: number | undefined;
-  until: StreamUntil | undefined;
+  /** undefined = follow until the socket closes. */
+  until: UntilCondition | undefined;
   timeoutMs: number | undefined;
 }
 
 export interface PromptStreamOptions {
   type: StreamOutputType;
   writer: RecordWriter;
-  until: StreamUntil;
+  until: UntilCondition;
   timeoutMs: number | undefined;
   message: string;
   images: Extract<RpcCommand, { type: "prompt" }>["images"] | undefined;
@@ -67,43 +57,13 @@ export interface RecordWriter {
   writeRecord(record: unknown): void;
 }
 
-interface StreamState {
-  sessionId: string | undefined;
-  resyncNeeded: boolean;
-  wakeArrived: boolean;
-  notifyWake: (() => void) | undefined;
-  stopRequested: boolean;
-  stopError: Error | undefined;
-}
-
 type GetEntriesData = Extract<
   RpcResponse,
   { command: "get_entries"; success: true }
 >["data"];
 
-type SessionEntry = GetEntriesData["entries"][number];
-
 export function parseStreamOutputType(input: string): StreamOutputType {
   return oneOf(input, STREAM_OUTPUT_TYPES, "--type");
-}
-
-export const STREAM_UNTIL_USAGE = `${UNTIL_USAGE}|killed`;
-
-export function parseStreamUntil(input: string): StreamUntil {
-  if (input === "killed") {
-    return { kind: "killed" };
-  }
-  return parseUntilCondition(input);
-}
-
-export function normalizeFollowUntil(input: {
-  follow: boolean;
-  until: StreamUntil | undefined;
-}): StreamUntil | undefined {
-  if (input.follow && input.until !== undefined) {
-    throw new UsageError("--follow/-f cannot be combined with --until");
-  }
-  return input.follow ? { kind: "killed" } : input.until;
 }
 
 async function getEntries(
@@ -122,127 +82,23 @@ async function getEntries(
 async function writeFinalCursor(
   client: PiSocketClient,
   writer: RecordWriter,
-): Promise<StreamCursorRecord> {
-  const state = await getState(client);
+  sessionId: string | undefined,
+): Promise<void> {
+  // TODO: it's strange that RpcSessionState doesn't have leafId. Consider changing that in our pi fork (and perhaps upstreaming).
   const entries = await getEntries(client, undefined);
   const record: StreamCursorRecord = {
     type: "pictl_cursor",
-    sessionId: state.sessionId ?? null,
+    sessionId: sessionId ?? null,
     entryId: entries.leafId,
   };
   writer.writeRecord(record);
-  return record;
-}
-
-function handleSessionEvent(state: StreamState, event: SocketEvent): void {
-  if (event.type === "session_changed") {
-    const announcedSessionId = (event as { sessionId?: string }).sessionId;
-    if (state.sessionId === undefined) {
-      state.sessionId = announcedSessionId;
-    } else if (announcedSessionId !== state.sessionId) {
-      state.sessionId = announcedSessionId;
-      state.resyncNeeded = true;
-    }
-  }
-  if (STREAMING_NOISE_EVENTS.has(event.type)) {
-    return;
-  }
-  state.wakeArrived = true;
-  state.notifyWake?.();
-}
-
-function nextWake(state: StreamState, client: PiSocketClient): Promise<void> {
-  if (state.wakeArrived || state.stopRequested) {
-    return Promise.resolve();
-  }
-  return new Promise((resolve) => {
-    state.notifyWake = resolve;
-    void client.waitClosed().then(resolve);
-  });
-}
-
-function newStreamState(): StreamState {
-  return {
-    sessionId: undefined,
-    resyncNeeded: false,
-    wakeArrived: false,
-    notifyWake: undefined,
-    stopRequested: false,
-    stopError: undefined,
-  };
-}
-
-function isFiniteUntil(until: StreamUntil | undefined): boolean {
-  return until !== undefined && until.kind !== "killed";
-}
-
-async function waitForUntil(
-  client: PiSocketClient,
-  until: StreamUntil,
-  timeoutMs: number | undefined,
-): Promise<void> {
-  if (until.kind === "killed") {
-    await client.waitClosed();
-    throw new Error("pi socket closed");
-  }
-  await applyUntilCondition(client, until, timeoutMs);
-}
-
-function startStopWatcher(
-  client: PiSocketClient,
-  state: StreamState,
-  until: StreamUntil | undefined,
-  timeoutMs: number | undefined,
-): void {
-  if (until === undefined || until.kind === "killed") {
-    return;
-  }
-  void waitForUntil(client, until, timeoutMs).then(
-    () => {
-      state.stopRequested = true;
-      state.notifyWake?.();
-    },
-    (error: unknown) => {
-      state.stopError =
-        error instanceof Error ? error : new Error(String(error));
-      state.stopRequested = true;
-      state.notifyWake?.();
-    },
-  );
-}
-
-/**
- * Prompt streaming deliberately splits listener startup from stop-condition
- * startup. Stream listeners must be installed before sending the prompt, or
- * fast message events can be missed. Stop-condition watchers must start after
- * prompt acceptance, because the default turn-end wait treats an already-idle
- * agent as complete.
- *
- * This gate lets stream pipelines start listening immediately while delaying
- * their stop-condition watcher until the prompt RPC has been accepted.
- */
-function createGate(): {
-  wait: Promise<void>;
-  open: () => void;
-  fail: (error: unknown) => void;
-} {
-  let open!: () => void;
-  let fail!: (error: unknown) => void;
-  const wait = new Promise<void>((resolve, reject) => {
-    open = resolve;
-    fail = reject;
-  });
-  return { wait, open, fail };
 }
 
 function messageRecordFromEvent(
-  event: SocketEvent,
+  event: RpcSocketBroadcastEvent,
 ): MessageStreamRecord | undefined {
   if (event.type === "message_end") {
-    return {
-      type: "message",
-      message: (event as unknown as { message: AgentMessage }).message,
-    };
+    return { type: "message", message: event.message };
   }
   if (event.type === "compaction_start" || event.type === "compaction_end") {
     return { type: "control", control: { kind: "compaction", event } };
@@ -259,56 +115,11 @@ function messageRecordFromEvent(
   return undefined;
 }
 
-async function streamMessages(
-  client: PiSocketClient,
-  writer: RecordWriter,
-  until: StreamUntil | undefined,
-  timeoutMs: number | undefined,
-  stopConditionGate: Promise<void> = Promise.resolve(),
-): Promise<void> {
-  const state = newStreamState();
-  client.onEvent((event) => {
-    const record = messageRecordFromEvent(event);
-    if (record !== undefined) {
-      writer.writeRecord(record);
-      state.wakeArrived = true;
-      state.notifyWake?.();
-    }
-  });
-  if (until === undefined) {
-    return;
-  }
-  await stopConditionGate;
-  startStopWatcher(client, state, until, timeoutMs);
-  if (until.kind === "killed") {
-    await waitForUntil(client, until, timeoutMs);
-    return;
-  }
-  while (!state.stopRequested) {
-    state.wakeArrived = false;
-    state.notifyWake = undefined;
-    await nextWake(state, client);
-    if (client.isClosed) {
-      throw new Error("pi socket closed");
-    }
-  }
-  if (state.stopError !== undefined) {
-    throw state.stopError;
-  }
-}
-
 function limitedTail<T>(
   items: readonly T[],
   limit: number | undefined,
 ): readonly T[] {
   return limit === undefined ? items : items.slice(-limit);
-}
-
-function messageFromEntry(entry: SessionEntry): AgentMessage | undefined {
-  if (entry.type === "message") {
-    return entry.message;
-  }
-  return undefined;
 }
 
 async function emitHistoricalMessages(
@@ -332,13 +143,16 @@ async function emitHistoricalMessages(
   }
   const { entries } = await getEntries(client, since);
   const messages = entries
-    .map((entry) => messageFromEntry(entry))
-    .filter((message) => message !== undefined);
+    .filter((entry) => entry.type === "message")
+    .map((entry) => entry.message);
   for (const message of limitedTail(messages, limit)) {
     writer.writeRecord({ type: "message", message });
   }
 }
 
+/** Emit every entry after `cursor` and return the new cursor. `get_entries
+ *  since` is incremental server-side, so each drain sends only new entries.
+ *  Serves tail's entries history and the per-event drains of both streams. */
 async function drainEntries(
   client: PiSocketClient,
   writer: RecordWriter,
@@ -354,71 +168,89 @@ async function drainEntries(
   return nextCursor;
 }
 
-async function streamEntries(
-  client: PiSocketClient,
-  writer: RecordWriter,
-  since: string | undefined,
-  limit: number | undefined,
-  until: StreamUntil | undefined,
-  timeoutMs: number | undefined,
-  stopConditionGate: Promise<void> = Promise.resolve(),
-): Promise<void> {
-  const state = newStreamState();
-  client.onEvent((event) => handleSessionEvent(state, event));
-  let cursor = await drainEntries(client, writer, since, limit);
-  if (until === undefined) {
-    return;
-  }
-  await stopConditionGate;
-  startStopWatcher(client, state, until, timeoutMs);
-  if (until.kind === "killed") {
-    while (true) {
-      state.wakeArrived = false;
-      state.notifyWake = undefined;
-      await nextWake(state, client);
-      if (client.isClosed) {
-        throw new Error("pi socket closed");
-      }
-      if (state.resyncNeeded) {
-        state.resyncNeeded = false;
-        cursor = undefined;
-      }
-      cursor = await drainEntries(client, writer, cursor, undefined);
-    }
-  }
-  while (!state.stopRequested) {
-    state.wakeArrived = false;
-    state.notifyWake = undefined;
-    await nextWake(state, client);
-    if (client.isClosed) {
-      throw new Error("pi socket closed");
-    }
-    if (state.resyncNeeded) {
-      state.resyncNeeded = false;
-      cursor = undefined;
-    }
-    cursor = await drainEntries(client, writer, cursor, undefined);
-  }
-  if (state.stopError !== undefined) {
-    throw state.stopError;
-  }
-  await drainEntries(client, writer, cursor, undefined);
-}
+/**
+ * Build the mode's StreamHandler and drive it over the subscribed event
+ * stream. The handler composes its output emission with the until checkers:
+ * without `until` both hooks return false (follow until close). Prompt
+ * streams pass checkSeed=false — the seed predates the prompt, so an idle
+ * pre-prompt seed must not satisfy `turn-end`/`idle`.
+ *
+ * Returns the settling state (the one delivered with the satisfying event).
+ * Throws "pi socket closed" when the socket closes before the condition is
+ * met — which for follow mode (no condition) is the normal exit path.
+ */
+async function runModeStream(options: {
+  client: PiSocketClient;
+  outputType: StreamOutputType;
+  writer: RecordWriter;
+  until: UntilCondition | undefined;
+  timeoutMs: number | undefined;
+  checkSeed: boolean;
+  /** Entries mode: continue the incremental drain after this cursor
+   *  (undefined = from the session start); unused for other modes. */
+  entriesSince?: string | undefined;
+}): Promise<RpcSessionState> {
+  const { client, writer, until } = options;
+  const metAtSeed = (seed: RpcSessionState): boolean =>
+    options.checkSeed && until !== undefined && untilMetAtSeed(until, seed);
+  const metByEvent = (
+    event: RpcSocketBroadcastEvent,
+    state: RpcSessionState,
+  ): boolean => until !== undefined && untilMetByEvent(until, event, state);
+  const quietMs = until === undefined ? undefined : untilQuietMs(until);
 
-async function streamRaw(
-  client: PiSocketClient,
-  writer: RecordWriter,
-  until: StreamUntil | undefined,
-  timeoutMs: number | undefined,
-  stopConditionGate: Promise<void> = Promise.resolve(),
-): Promise<void> {
-  client.onEvent((event) => writer.writeRecord(event));
-  await stopConditionGate;
-  if (until === undefined || until.kind === "killed") {
-    await waitForUntil(client, { kind: "killed" }, timeoutMs);
-    return;
+  let handler: StreamHandler<RpcSocketBroadcastEvent, RpcSessionState>;
+  if (options.outputType === "messages") {
+    handler = {
+      onSeed: metAtSeed,
+      onEvent: (event, state) => {
+        const record = messageRecordFromEvent(event);
+        if (record !== undefined) {
+          writer.writeRecord(record);
+        }
+        return metByEvent(event, state);
+      },
+      quietMs,
+    };
+  } else if (options.outputType === "entries") {
+    let cursor = options.entriesSince;
+    let lastSessionId: string | undefined;
+    handler = {
+      onSeed: (seed) => {
+        lastSessionId = seed.sessionId;
+        return metAtSeed(seed);
+      },
+      onEvent: async (event, state) => {
+        // Entry cursors are session-scoped: a session replacement
+        // invalidates ours, so restart the drain from the new session's
+        // beginning.
+        if (state.sessionId !== lastSessionId) {
+          lastSessionId = state.sessionId;
+          cursor = undefined;
+        }
+        if (!ENTRY_DELTA_EVENTS.has(event.type)) {
+          cursor = await drainEntries(client, writer, cursor, undefined);
+        }
+        return metByEvent(event, state);
+      },
+      quietMs,
+    };
+  } else {
+    handler = {
+      onSeed: metAtSeed,
+      onEvent: (event, state) => {
+        writer.writeRecord(event);
+        return metByEvent(event, state);
+      },
+      quietMs,
+    };
   }
-  await waitForUntil(client, until, timeoutMs);
+
+  const result = await runStream(client, handler, options.timeoutMs);
+  if (result.outcome === "closed") {
+    throw new Error("pi socket closed");
+  }
+  return result.state;
 }
 
 async function connectForContext(
@@ -466,6 +298,12 @@ export async function promptDetached(
   }
 }
 
+/**
+ * Stream a prompt until its condition is met. The stream starts before the
+ * prompt RPC is awaited — runModeStream subscribes synchronously inside the
+ * call — so a turn that finishes faster than the CLI could otherwise
+ * subscribe cannot slip its events past the stream: ordering, not buffering.
+ */
 export async function streamPrompt(
   context: CommandContext,
   options: PromptStreamOptions,
@@ -473,49 +311,39 @@ export async function streamPrompt(
   const writer = options.writer;
   const client = await connectForContext(context);
   try {
-    const command = buildPromptCommand(options);
-    const initialEntryCursor =
+    // Entries mode drains past the pre-prompt leaf, so the incremental
+    // drains emit exactly the entries the prompt produces.
+    // TODO: This behavior actually isn't quite right. What we'd like to do (for all `--type`s) is to _start_ streaming at the prompt message itself, whereever it gets inserted. In the case where the assistant is idle before the prompt, this gives the right behavior, but if the assistant is busy, then I'd like to figure out where the prompt gets inserted (based on --streaming-behavior and steering_mode/followup_mode, possibly requiring string-matching of content, particularly if the modes are all-at-once) and start the stream there. This will probably require a change to pi.
+    const entriesSince =
       options.type === "entries"
         ? (await getEntries(client, undefined)).entries.at(-1)?.id
         : undefined;
-    const stopConditionGate = createGate();
-    const streamPromise =
-      options.type === "messages"
-        ? streamMessages(
-            client,
-            writer,
-            options.until,
-            options.timeoutMs,
-            stopConditionGate.wait,
-          )
-        : options.type === "entries"
-          ? streamEntries(
-              client,
-              writer,
-              initialEntryCursor,
-              undefined,
-              options.until,
-              options.timeoutMs,
-              stopConditionGate.wait,
-            )
-          : streamRaw(
-              client,
-              writer,
-              options.until,
-              options.timeoutMs,
-              stopConditionGate.wait,
-            );
+    const streamPromise = runModeStream({
+      client,
+      outputType: options.type,
+      writer,
+      until: options.until,
+      timeoutMs: options.timeoutMs,
+      checkSeed: false,
+      entriesSince,
+    });
+    // Mark handled while the prompt RPC is in flight: the stream can reject
+    // first (e.g. `--timeout 0`), which must not raise an unhandled
+    // rejection before the await below attaches.
+    streamPromise.catch(() => undefined);
     try {
-      await client.request(command);
-      stopConditionGate.open();
+      await client.request(buildPromptCommand(options));
     } catch (error) {
-      stopConditionGate.fail(error);
+      // The stream only settles once the socket closes; close it so the
+      // prompt failure surfaces instead of hanging.
+      client.close();
+      await streamPromise.catch(() => undefined);
       throw error;
     }
-    await streamPromise;
+    const state = await streamPromise;
     // Entries already include entryId, so a cursor is redundant.
-    if (options.type !== "entries" && isFiniteUntil(options.until)) {
-      await writeFinalCursor(client, writer);
+    if (options.type !== "entries") {
+      await writeFinalCursor(client, writer, state.sessionId);
     }
   } finally {
     client.close();
@@ -535,10 +363,7 @@ export async function streamTail(
   const writer = options.writer;
   const client = await connectForContext(context);
   try {
-    const until =
-      options.outputType === "raw" && options.until === undefined
-        ? { kind: "killed" as const }
-        : options.until;
+    let entriesSince: string | undefined;
     if (options.outputType === "messages") {
       await emitHistoricalMessages(
         client,
@@ -546,25 +371,29 @@ export async function streamTail(
         options.since,
         options.limit,
       );
-      await streamMessages(client, writer, until, options.timeoutMs);
     } else if (options.outputType === "entries") {
-      await streamEntries(
+      // The follow drains continue from the cursor the history drain ends on.
+      entriesSince = await drainEntries(
         client,
         writer,
         options.since,
         options.limit,
-        until,
-        options.timeoutMs,
       );
-    } else {
-      await streamRaw(client, writer, until, options.timeoutMs);
     }
-    // Entries already include entryId, so a cursor is redundant.
-    if (
-      options.outputType !== "entries" &&
-      (until === undefined || isFiniteUntil(until))
-    ) {
-      await writeFinalCursor(client, writer);
+    const state = await runModeStream({
+      client,
+      outputType: options.outputType,
+      writer,
+      until: options.until,
+      timeoutMs: options.timeoutMs,
+      checkSeed: true,
+      entriesSince,
+    });
+    // Entries already include entryId, so a cursor is redundant; without
+    // --until the stream only ends by socket close (thrown above), so a
+    // cursor is written exactly when a condition settled the stream.
+    if (options.outputType !== "entries" && options.until !== undefined) {
+      await writeFinalCursor(client, writer, state.sessionId);
     }
   } finally {
     client.close();

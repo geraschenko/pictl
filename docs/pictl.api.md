@@ -4,9 +4,10 @@
 
 ```ts
 
-import type { RpcCommand } from '@geraschenko/pi-coding-agent';
-import type { RpcResponse } from '@geraschenko/pi-coding-agent';
-import type { RpcSessionState } from '@geraschenko/pi-coding-agent';
+import { RpcCommand } from '@geraschenko/pi-coding-agent';
+import { RpcResponse } from '@geraschenko/pi-coding-agent';
+import { RpcSessionState } from '@geraschenko/pi-coding-agent';
+import { RpcSocketBroadcastEvent } from '@geraschenko/pi-coding-agent';
 
 // @public (undocumented)
 export interface AgentRecord {
@@ -32,9 +33,6 @@ export interface AgentRecord {
 }
 
 // @public
-export function applyUntilCondition(client: PiSocketClient, condition: UntilCondition, timeoutMs: number | undefined): Promise<void>;
-
-// @public
 export interface AttachmentInfo {
     // (undocumented)
     client: string;
@@ -47,7 +45,7 @@ export interface AttachmentInfo {
 }
 
 // @public
-export function connectWithRetry(socketPath: string, deadlineMs: number, onEvent?: (event: SocketEvent) => void): Promise<PiSocketClient>;
+export function connectWithRetry(socketPath: string, deadlineMs: number): Promise<PiSocketClient>;
 
 // @public (undocumented)
 export function decodeExit(payload: Buffer): ExitPayload;
@@ -103,14 +101,14 @@ export const FrameType: {
 // @public (undocumented)
 export type FrameType = (typeof FrameType)[keyof typeof FrameType];
 
-// @public
-export function getState(client: PiSocketClient): Promise<RpcSessionState>;
-
 // @public (undocumented)
 export interface HelloPayload {
     client: string;
     pid: number;
 }
+
+// @public
+export function isIdle(state: RpcSessionState): boolean;
 
 // @public (undocumented)
 export function listAgentIds(prefix?: string): Promise<string[]>;
@@ -122,16 +120,18 @@ export function loadAgent(agentIdPrefix: string): Promise<AgentRecord>;
 export const MAX_PAYLOAD_BYTES: number;
 
 // @public (undocumented)
+export function parseUntilCondition(value: string): UntilCondition;
+
+// @public (undocumented)
 export class PiSocketClient {
     // (undocumented)
     close(): void;
-    static connect(socketPath: string, onEvent?: (event: SocketEvent) => void): Promise<PiSocketClient>;
+    static connect(socketPath: string): Promise<PiSocketClient>;
     // (undocumented)
     get isClosed(): boolean;
     // (undocumented)
-    onEvent(listener: (event: SocketEvent) => void): void;
-    // (undocumented)
     request(command: RpcCommand): Promise<RpcResponse>;
+    subscribe(onEvent: (event: RpcSocketBroadcastEvent, state: RpcSessionState) => void): Promise<RpcSessionState>;
     waitClosed(): Promise<void>;
 }
 
@@ -147,6 +147,9 @@ export interface ResizePayload {
 }
 
 // @public
+export function runStream<TEvent, TState>(client: StreamClient<TEvent, TState>, handler: StreamHandler<TEvent, TState>, timeoutMs: number | undefined): Promise<StreamResult<TState>>;
+
+// @public
 export interface SessionHistoryEntry {
     // (undocumented)
     sessionFile: string;
@@ -155,9 +158,25 @@ export interface SessionHistoryEntry {
 }
 
 // @public
-export type SocketEvent = {
-    type: string;
-} & Record<string, unknown>;
+export interface StreamClient<TEvent, TState> {
+    // (undocumented)
+    subscribe(onEvent: (event: TEvent, state: TState) => void): Promise<TState>;
+    // (undocumented)
+    waitClosed(): Promise<void>;
+}
+
+// @public
+export interface StreamHandler<TEvent, TState> {
+    onEvent(event: TEvent, state: TState): boolean | Promise<boolean>;
+    onSeed(seed: TState): boolean | Promise<boolean>;
+    quietMs?: number;
+}
+
+// @public (undocumented)
+export interface StreamResult<TState> {
+    outcome: "done" | "closed";
+    state: TState;
+}
 
 // @public (undocumented)
 export function ttySocketPath(agentDir: string): string;
@@ -171,6 +190,15 @@ export type UntilCondition = {
     kind: "no-activity";
     idleMs: number;
 };
+
+// @public (undocumented)
+export const untilMetAtSeed: (condition: UntilCondition, seed: RpcSessionState) => boolean;
+
+// @public (undocumented)
+export const untilMetByEvent: (condition: UntilCondition, event: RpcSocketBroadcastEvent, state: RpcSessionState) => boolean;
+
+// @public (undocumented)
+export const untilQuietMs: (condition: UntilCondition) => number | undefined;
 
 // @public
 export class UntilTimeoutError extends Error {

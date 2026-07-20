@@ -64,8 +64,10 @@ test("format messages renders control event details from real pi event fields", 
             kind: "session_changed",
             event: {
               type: "session_changed",
-              sessionId: "session-1",
-              sessionFile: "/tmp/session.jsonl",
+              state: {
+                sessionId: "session-1",
+                sessionFile: "/tmp/session.jsonl",
+              },
             },
           },
         },

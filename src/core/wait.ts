@@ -3,8 +3,8 @@
  * block until the agent reaches a condition. Exit codes: 0 condition met,
  * 1 runtime error, 2 usage error, 3 `--timeout` expired.
  *
- * The condition grammar and blocking logic live in until.ts (shared with
- * `tail --until` and streaming `prompt --until`).
+ * The condition grammar lives in until-engine.ts and the pi semantics in
+ * until.ts (shared with `tail --until` and streaming `prompt --until`).
  *
  * A dormant or archived agent is reported as having met any of these conditions
  * immediately — its process is doing nothing — and is never revived: revival
@@ -22,11 +22,13 @@ import { oneTarget, type CommandContext } from "./targets.ts";
 import { isPidAlive, piSocketPath } from "./registry.ts";
 import { connectWithRetry } from "./pi-socket-client.ts";
 import {
-  applyUntilCondition,
   parseUntilCondition,
+  secondsToTimerMs,
   UNTIL_COMPLETIONS,
   UNTIL_USAGE,
-} from "./until.ts";
+} from "./until-engine.ts";
+import { runStream } from "./stream-driver.ts";
+import { untilMetAtSeed, untilMetByEvent, untilQuietMs } from "./until.ts";
 
 const SOCKET_CONNECT_DEADLINE_MS = 5_000;
 
@@ -57,11 +59,18 @@ export async function wait(
     SOCKET_CONNECT_DEADLINE_MS,
   );
   try {
-    await applyUntilCondition(
+    const result = await runStream(
       client,
-      flags.until,
-      flags.timeout === undefined ? undefined : flags.timeout * 1000,
+      {
+        onSeed: (seed) => untilMetAtSeed(flags.until, seed),
+        onEvent: (event, state) => untilMetByEvent(flags.until, event, state),
+        quietMs: untilQuietMs(flags.until),
+      },
+      flags.timeout === undefined ? undefined : secondsToTimerMs(flags.timeout),
     );
+    if (result.outcome === "closed") {
+      throw new Error("pi socket closed before condition met");
+    }
   } finally {
     client.close();
   }

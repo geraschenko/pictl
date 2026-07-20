@@ -34,12 +34,15 @@ import { readStdin } from "./read-input.ts";
 import { oneOf, UsageError } from "./util.ts";
 import {
   parseStreamOutputType,
-  parseStreamUntil,
   promptDetached,
   streamPrompt,
   STREAM_OUTPUT_TYPES,
-  STREAM_UNTIL_USAGE,
 } from "./streaming.ts";
+import {
+  parseUntilCondition,
+  secondsToTimerMs,
+  UNTIL_USAGE,
+} from "./until-engine.ts";
 import { makeRecordWriter } from "../format/record-writer.ts";
 
 const SOCKET_CONNECT_DEADLINE_MS = 5_000;
@@ -187,11 +190,7 @@ const promptFlags = {
   ),
   detach: booleanFlag("Send the prompt and return immediately"),
   json: booleanFlag("Emit JSONL instead of formatted output"),
-  until: parsedFlag(
-    `Stream until ${STREAM_UNTIL_USAGE}`,
-    parseStreamUntil,
-    "cond",
-  ),
+  until: parsedFlag(`Stream until ${UNTIL_USAGE}`, parseUntilCondition, "cond"),
   timeout: parsedFlag(
     "Timeout in seconds",
     (input: string): number => {
@@ -242,7 +241,8 @@ export async function prompt(
     type,
     writer: makeRecordWriter(this, type, flags.json),
     until: flags.until ?? { kind: "turn-end" },
-    timeoutMs: flags.timeout === undefined ? undefined : flags.timeout * 1000,
+    timeoutMs:
+      flags.timeout === undefined ? undefined : secondsToTimerMs(flags.timeout),
     message: await messageFrom(this, message),
     images,
     streamingBehavior,

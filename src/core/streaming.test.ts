@@ -127,12 +127,24 @@ async function withFakePiSocket<T>(
     },
   ];
   let leafId = "user-entry";
-  let promptAccepted = false;
-  let agentEnded = false;
 
   const server: Server = createServer((socket) => {
     writeJson(socket, { type: "hello", protocol: "pi-rpc-socket", version: 1 });
-    writeJson(socket, { type: "session_changed", sessionId });
+    // The seeding session_changed pi sends right after hello.
+    writeJson(socket, {
+      type: "session_changed",
+      state: {
+        thinkingLevel: "off",
+        isStreaming: false,
+        isCompacting: false,
+        steeringMode: "all",
+        followUpMode: "all",
+        sessionId,
+        autoCompactionEnabled: false,
+        messageCount: 1,
+        pendingMessageCount: 0,
+      },
+    });
 
     let buffer = "";
     socket.on("data", (chunk) => {
@@ -145,7 +157,6 @@ async function withFakePiSocket<T>(
           const request = JSON.parse(line) as JsonRecord;
           const id = request.id as string | undefined;
           if (request.type === "prompt") {
-            promptAccepted = true;
             writeJson(socket, {
               id,
               type: "response",
@@ -162,7 +173,6 @@ async function withFakePiSocket<T>(
                 message: assistantMessage,
               });
               leafId = "assistant-entry";
-              agentEnded = true;
               writeJson(socket, {
                 type: "message_end",
                 message: assistantMessage,
@@ -173,24 +183,6 @@ async function withFakePiSocket<T>(
                 willRetry: false,
               });
             }, 10);
-          } else if (request.type === "get_state") {
-            writeJson(socket, {
-              id,
-              type: "response",
-              command: "get_state",
-              success: true,
-              data: {
-                thinkingLevel: "off",
-                isStreaming: promptAccepted && !agentEnded,
-                isCompacting: false,
-                steeringMode: "all",
-                followUpMode: "all",
-                sessionId,
-                autoCompactionEnabled: false,
-                messageCount: entries.length,
-                pendingMessageCount: 0,
-              },
-            });
           } else if (request.type === "get_messages") {
             writeJson(socket, {
               id,
@@ -302,16 +294,18 @@ test("prompt entries stream only includes entry records", async () => {
 
 test("streaming flag validation rejects ambiguous or unsupported combinations", async () => {
   await withFakeRegistry(async (agentId) => {
-    const followUntil = fakeProcess({ PICTL_TARGET: agentId });
-    await runCliApp(
-      app,
-      ["tail", "--follow", "--until", "idle"],
-      followUntil.proc,
-    );
-    assert.equal(followUntil.proc.exitCode, 2);
+    // Following is tail's default behavior; the old --follow/-f flag is gone.
+    const follow = fakeProcess({ PICTL_TARGET: agentId });
+    await runCliApp(app, ["tail", "--follow"], follow.proc);
+    assert.equal(follow.proc.exitCode, 2);
+    assert.match(follow.stderr, /--follow/);
+
+    const untilKilled = fakeProcess({ PICTL_TARGET: agentId });
+    await runCliApp(app, ["tail", "--until", "killed"], untilKilled.proc);
+    assert.equal(untilKilled.proc.exitCode, 2);
     assert.match(
-      followUntil.stderr,
-      /--follow\/-f cannot be combined with --until/,
+      untilKilled.stderr,
+      /--until must be turn-end\|idle\|no-activity:<secs> \(got 'killed'\)/,
     );
 
     const rawLimit = fakeProcess({ PICTL_TARGET: agentId });

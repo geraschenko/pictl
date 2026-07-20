@@ -1,5 +1,7 @@
-import type { RpcResponse } from "@geraschenko/pi-coding-agent";
-import type { SocketEvent } from "./pi-socket-client.ts";
+import type {
+  RpcResponse,
+  RpcSocketBroadcastEvent,
+} from "@geraschenko/pi-coding-agent";
 
 export type GetMessagesData = Extract<
   RpcResponse,
@@ -29,7 +31,7 @@ export interface StreamControlRecord {
   readonly type: "control";
   readonly control: {
     readonly kind: StreamControlKind;
-    readonly event: SocketEvent;
+    readonly event: RpcSocketBroadcastEvent;
   };
 }
 

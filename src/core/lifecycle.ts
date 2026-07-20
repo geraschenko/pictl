@@ -37,12 +37,10 @@ import {
   reviveLockPath,
   tombstonePath,
 } from "./registry.ts";
-import {
-  connectWithRetry,
-  IdleTimeoutError,
-  waitIdle,
-  type PiSocketClient,
-} from "./pi-socket-client.ts";
+import { connectWithRetry, type PiSocketClient } from "./pi-socket-client.ts";
+import { secondsToTimerMs, UntilTimeoutError } from "./until-engine.ts";
+import { runStream } from "./stream-driver.ts";
+import { isIdle } from "./until.ts";
 import { launchDaemon } from "./spawn.ts";
 
 const SOCKET_CONNECT_DEADLINE_MS = 5_000;
@@ -248,6 +246,25 @@ async function forEachAgent(
   }
 }
 
+/** Block until fully idle (the `idle` condition: not streaming, not
+ *  compacting, pending queue empty), driven by the subscribed event stream. */
+async function waitUntilIdle(
+  client: PiSocketClient,
+  timeoutMs: number | undefined,
+): Promise<void> {
+  const result = await runStream(
+    client,
+    {
+      onSeed: (seed) => isIdle(seed),
+      onEvent: (_event, state) => isIdle(state),
+    },
+    timeoutMs,
+  );
+  if (result.outcome === "closed") {
+    throw new Error("pi socket closed while waiting for idle");
+  }
+}
+
 /** The idle-wait → SIGTERM → escalate → daemon-gone sequence shared by purge and suspend. */
 async function stopRunningAgent(
   agent: AgentRecord,
@@ -262,7 +279,7 @@ async function stopRunningAgent(
     if (abortFirst) {
       await client.request({ type: "abort" });
     }
-    await waitIdle(client, timeoutMs);
+    await waitUntilIdle(client, timeoutMs);
     await terminatePi(client, agent.piPid);
   } finally {
     client.close();
@@ -293,7 +310,7 @@ async function purgeOne(
     try {
       await stopRunningAgent(agent, timeoutMs, now);
     } catch (error) {
-      if (error instanceof IdleTimeoutError) {
+      if (error instanceof UntilTimeoutError) {
         throw new Error(`still busy after ${timeoutMs! / 1000}s; not purged`);
       }
       throw error;
@@ -313,7 +330,7 @@ async function purge(this: CommandContext, flags: PurgeFlags): Promise<void> {
   await forEachAgent(multiTargets(this), (agent) =>
     purgeOne(
       agent,
-      flags.timeout === undefined ? undefined : flags.timeout * 1000,
+      flags.timeout === undefined ? undefined : secondsToTimerMs(flags.timeout),
       flags.now,
       flags.force,
       (message) => this.process.stdout.write(message),
@@ -335,7 +352,7 @@ async function suspend(
   flags: TimeoutFlags,
 ): Promise<void> {
   const timeoutMs =
-    flags.timeout === undefined ? undefined : flags.timeout * 1000;
+    flags.timeout === undefined ? undefined : secondsToTimerMs(flags.timeout);
   await forEachAgent(multiTargets(this), async (agent) => {
     if (!isPidAlive(agent.daemonPid)) {
       this.process.stdout.write(`${agent.id} is already dormant\n`);
@@ -344,7 +361,7 @@ async function suspend(
     try {
       await stopRunningAgent(agent, timeoutMs, false);
     } catch (error) {
-      if (error instanceof IdleTimeoutError) {
+      if (error instanceof UntilTimeoutError) {
         throw new Error(
           `still busy after ${timeoutMs! / 1000}s; not suspended`,
         );
@@ -372,13 +389,13 @@ async function archive(
   flags: TimeoutFlags,
 ): Promise<void> {
   const timeoutMs =
-    flags.timeout === undefined ? undefined : flags.timeout * 1000;
+    flags.timeout === undefined ? undefined : secondsToTimerMs(flags.timeout);
   await forEachAgent(multiTargets(this), async (agent) => {
     if (isPidAlive(agent.daemonPid)) {
       try {
         await stopRunningAgent(agent, timeoutMs, false);
       } catch (error) {
-        if (error instanceof IdleTimeoutError) {
+        if (error instanceof UntilTimeoutError) {
           throw new Error(
             `still busy after ${timeoutMs! / 1000}s; not archived`,
           );

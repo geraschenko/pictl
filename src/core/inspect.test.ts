@@ -79,7 +79,8 @@ function writeJson(socket: Socket, record: Record<string, unknown>): void {
   socket.write(`${JSON.stringify(record)}\n`);
 }
 
-/** A pi.sock stand-in that only answers get_state with the given flags. */
+/** A pi.sock stand-in that announces the given flags via the seeding
+ *  session_changed after hello (which the status probe reads). */
 async function withFakePiState<T>(
   agentDir: string,
   state: { isStreaming: boolean; isCompacting: boolean },
@@ -87,37 +88,19 @@ async function withFakePiState<T>(
 ): Promise<T> {
   const server: Server = createServer((socket) => {
     writeJson(socket, { type: "hello", protocol: "pi-rpc-socket", version: 1 });
-    let buffer = "";
-    socket.on("data", (chunk) => {
-      buffer += chunk.toString("utf8");
-      let newlineIndex = buffer.indexOf("\n");
-      while (newlineIndex !== -1) {
-        const line = buffer.slice(0, newlineIndex);
-        buffer = buffer.slice(newlineIndex + 1);
-        if (line.trim() !== "") {
-          const request = JSON.parse(line) as Record<string, unknown>;
-          if (request.type === "get_state") {
-            writeJson(socket, {
-              id: request.id,
-              type: "response",
-              command: "get_state",
-              success: true,
-              data: {
-                thinkingLevel: "off",
-                isStreaming: state.isStreaming,
-                isCompacting: state.isCompacting,
-                steeringMode: "all",
-                followUpMode: "all",
-                sessionId: "session-1",
-                autoCompactionEnabled: false,
-                messageCount: 0,
-                pendingMessageCount: 0,
-              },
-            });
-          }
-        }
-        newlineIndex = buffer.indexOf("\n");
-      }
+    writeJson(socket, {
+      type: "session_changed",
+      state: {
+        thinkingLevel: "off",
+        isStreaming: state.isStreaming,
+        isCompacting: state.isCompacting,
+        steeringMode: "all",
+        followUpMode: "all",
+        sessionId: "session-1",
+        autoCompactionEnabled: false,
+        messageCount: 0,
+        pendingMessageCount: 0,
+      },
     });
   });
   await new Promise<void>((resolve, reject) => {
