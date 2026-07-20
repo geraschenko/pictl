@@ -1,0 +1,1 @@
+When we send `pictl prompt --streaming-mode [follow-up|steer]`, it starts the stream immediately. However, what the user expects is that it should start streaming messages starting with when the current prompt is inserted.
