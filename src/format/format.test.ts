@@ -3,13 +3,9 @@ import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { parsePositiveInteger } from "./command.ts";
 import { formatEntriesInput } from "./entries.ts";
-import {
-  parseEntriesInput,
-  parseMessageRecords,
-  parseTreeInput,
-} from "./input.ts";
+import { parseEntriesInput, parseMessageRecords } from "./input.ts";
 import { formatMessageRecords } from "./messages.ts";
-import { formatTreeInput } from "./tree.ts";
+import { formatEntriesTree } from "./tree.ts";
 import type { EntriesInput } from "./types.ts";
 
 function isEntriesInput(
@@ -208,10 +204,33 @@ test("format entries rejects cursor JSONL records", () => {
   );
 });
 
+function userEntry(
+  id: string,
+  parentId: string | null,
+  text: string,
+): Record<string, unknown> {
+  return {
+    type: "message",
+    id,
+    parentId,
+    timestamp: "2026-01-01T00:00:00.000Z",
+    message: {
+      role: "user",
+      content: [{ type: "text", text }],
+      timestamp: 1,
+    },
+  };
+}
+
+async function treeFixture(): Promise<EntriesInput> {
+  const input = parseEntriesInput(await fixture("entries-tree.json"));
+  assert.ok(isEntriesInput(input));
+  return input;
+}
+
 test("format tree renders conversation branches with current leaf marker", async () => {
-  const output = formatTreeInput(parseTreeInput(await fixture("tree.json")));
   assert.equal(
-    output,
+    formatEntriesTree(await treeFixture()),
     "• 79d4e93e user: Start\n" +
       "├─ * ea28b2b5 assistant: Second branch\n" +
       "└─ ab4e0c01 assistant: First branch\n" +
@@ -219,43 +238,34 @@ test("format tree renders conversation branches with current leaf marker", async
   );
 });
 
+test("format tree resolves labels from label entries", async () => {
+  assert.equal(
+    formatEntriesTree(await treeFixture(), { filter: "pi-labeled-only" }),
+    "ab4e0c01 assistant: First branch\n[cursor: ea28b2b5]\n",
+  );
+});
+
 test("format tree conversation includes compaction token boundary", () => {
-  const input = parseTreeInput(
+  const input = parseEntriesInput(
     JSON.stringify({
-      tree: [
+      entries: [
+        userEntry("user0001", null, "Before compaction"),
         {
-          entry: {
-            type: "message",
-            id: "user0001",
-            parentId: null,
-            timestamp: "2026-01-01T00:00:00.000Z",
-            message: {
-              role: "user",
-              content: [{ type: "text", text: "Before compaction" }],
-              timestamp: 1,
-            },
-          },
-          children: [
-            {
-              entry: {
-                type: "compaction",
-                id: "compact1",
-                parentId: "user0001",
-                timestamp: "2026-01-01T00:00:01.000Z",
-                summary: "large history",
-                firstKeptEntryId: "user0001",
-                tokensBefore: 110123,
-              },
-              children: [],
-            },
-          ],
+          type: "compaction",
+          id: "compact1",
+          parentId: "user0001",
+          timestamp: "2026-01-01T00:00:01.000Z",
+          summary: "large history",
+          firstKeptEntryId: "user0001",
+          tokensBefore: 110123,
         },
       ],
       leafId: "compact1",
     }),
   );
+  assert.ok(isEntriesInput(input));
   assert.equal(
-    formatTreeInput(input),
+    formatEntriesTree(input),
     "• user0001 user: Before compaction\n" +
       "* compact1 [compaction: 110k tokens]\n" +
       "[cursor: compact1]\n",
@@ -263,80 +273,109 @@ test("format tree conversation includes compaction token boundary", () => {
 });
 
 test("format tree conversation hides tool-only assistant messages", () => {
-  const input = parseTreeInput(
+  const input = parseEntriesInput(
     JSON.stringify({
-      tree: [
+      entries: [
+        userEntry("user0001", null, "Run a tool"),
         {
-          entry: {
-            type: "message",
-            id: "user0001",
-            parentId: null,
-            timestamp: "2026-01-01T00:00:00.000Z",
-            message: {
-              role: "user",
-              content: [{ type: "text", text: "Run a tool" }],
-              timestamp: 1,
-            },
-          },
-          children: [
-            {
-              entry: {
-                type: "message",
-                id: "tool0001",
-                parentId: "user0001",
-                timestamp: "2026-01-01T00:00:01.000Z",
-                message: {
-                  role: "assistant",
-                  content: [
-                    {
-                      type: "toolCall",
-                      id: "call-1",
-                      name: "bash",
-                      arguments: { command: "true" },
-                    },
-                  ],
-                  api: "test",
-                  provider: "test",
-                  model: "test",
-                  usage: {
-                    input: 0,
-                    output: 0,
-                    cacheRead: 0,
-                    cacheWrite: 0,
-                    totalTokens: 0,
-                    cost: {
-                      input: 0,
-                      output: 0,
-                      cacheRead: 0,
-                      cacheWrite: 0,
-                      total: 0,
-                    },
-                  },
-                  stopReason: "toolUse",
-                  timestamp: 2,
-                },
+          type: "message",
+          id: "tool0001",
+          parentId: "user0001",
+          timestamp: "2026-01-01T00:00:01.000Z",
+          message: {
+            role: "assistant",
+            content: [
+              {
+                type: "toolCall",
+                id: "call-1",
+                name: "bash",
+                arguments: { command: "true" },
               },
-              children: [],
+            ],
+            api: "test",
+            provider: "test",
+            model: "test",
+            usage: {
+              input: 0,
+              output: 0,
+              cacheRead: 0,
+              cacheWrite: 0,
+              totalTokens: 0,
+              cost: {
+                input: 0,
+                output: 0,
+                cacheRead: 0,
+                cacheWrite: 0,
+                total: 0,
+              },
             },
-          ],
+            stopReason: "toolUse",
+            timestamp: 2,
+          },
         },
       ],
       leafId: "user0001",
     }),
   );
+  assert.ok(isEntriesInput(input));
   assert.equal(
-    formatTreeInput(input),
+    formatEntriesTree(input),
     "* user0001 user: Run a tool\n[cursor: user0001]\n",
   );
 });
 
 test("format tree width applies to full rendered line", async () => {
-  const output = formatTreeInput(parseTreeInput(await fixture("tree.json")), {
-    width: 28,
-  });
+  const output = formatEntriesTree(await treeFixture(), { width: 28 });
   const treeLines = output.trimEnd().split("\n");
   assert.equal(treeLines[1], "├─ * ea28b2b5 assistant: Se…");
   assert.ok(treeLines.every((line) => [...line].length <= 28));
+});
+
+test("format tree entry JSONL uses the last entry as cursor", () => {
+  const input = parseEntriesInput(
+    [
+      userEntry("user0001", null, "First"),
+      userEntry("user0002", "user0001", "Second"),
+    ]
+      .map((record) => JSON.stringify(record))
+      .join("\n"),
+  );
+  assert.ok(!isEntriesInput(input));
+  assert.equal(
+    formatEntriesTree({ entries: input }),
+    "• user0001 user: First\n* user0002 user: Second\n[cursor: user0002]\n",
+  );
+});
+
+test("format tree renders entries with missing parents as roots", () => {
+  const input = parseEntriesInput(
+    JSON.stringify(userEntry("orphan01", "gone0000", "Adrift")),
+  );
+  assert.ok(!isEntriesInput(input));
+  assert.equal(
+    formatEntriesTree({ entries: input }),
+    "* orphan01 user: Adrift\n[cursor: orphan01]\n",
+  );
+});
+
+test("format tree rejects duplicate entry ids", () => {
+  const input = parseEntriesInput(
+    [userEntry("user0001", null, "One"), userEntry("user0001", null, "Two")]
+      .map((record) => JSON.stringify(record))
+      .join("\n"),
+  );
+  assert.ok(!isEntriesInput(input));
+  assert.throws(
+    () => formatEntriesTree({ entries: input }),
+    new Error("duplicate session entry id: user0001"),
+  );
+});
+
+test("parseEntriesInput cross-points get-tree output at get-entries", async () => {
+  await assert.rejects(
+    async () => parseEntriesInput(await fixture("tree.json")),
+    /looks like get-tree output; feed it get-entries output instead/u,
+  );
 });
 
 test("parsePositiveInteger validates exact error message", () => {

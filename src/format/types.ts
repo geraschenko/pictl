@@ -1,7 +1,4 @@
-import type {
-  SessionEntry,
-  SessionTreeNode,
-} from "@geraschenko/pi-coding-agent";
+import type { SessionEntry } from "@geraschenko/pi-coding-agent";
 import type { FilterMode } from "./filter.ts";
 
 export type ToolResultDisplayMode = "summary" | "none" | "full";
@@ -27,9 +24,4 @@ export interface TreeFormatOptions {
 export interface EntriesInput {
   readonly entries: readonly SessionEntry[];
   readonly leafId?: string | null;
-}
-
-export interface TreeInput {
-  readonly tree: readonly SessionTreeNode[];
-  readonly leafId: string | null;
 }

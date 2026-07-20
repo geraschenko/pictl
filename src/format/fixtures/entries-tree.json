@@ -1,0 +1,82 @@
+{
+  "entries": [
+    {
+      "type": "message",
+      "id": "79d4e93e",
+      "parentId": null,
+      "timestamp": "2026-01-01T00:00:00.000Z",
+      "message": {
+        "role": "user",
+        "content": [{ "type": "text", "text": "Start" }],
+        "timestamp": 1
+      }
+    },
+    {
+      "type": "message",
+      "id": "ab4e0c01",
+      "parentId": "79d4e93e",
+      "timestamp": "2026-01-01T00:00:01.000Z",
+      "message": {
+        "role": "assistant",
+        "content": [{ "type": "text", "text": "First branch" }],
+        "api": "test",
+        "provider": "test",
+        "model": "test",
+        "usage": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "totalTokens": 0,
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "total": 0
+          }
+        },
+        "stopReason": "stop",
+        "timestamp": 2
+      }
+    },
+    {
+      "type": "message",
+      "id": "ea28b2b5",
+      "parentId": "79d4e93e",
+      "timestamp": "2026-01-01T00:00:02.000Z",
+      "message": {
+        "role": "assistant",
+        "content": [{ "type": "text", "text": "Second branch" }],
+        "api": "test",
+        "provider": "test",
+        "model": "test",
+        "usage": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "totalTokens": 0,
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "total": 0
+          }
+        },
+        "stopReason": "stop",
+        "timestamp": 3
+      }
+    },
+    {
+      "type": "label",
+      "id": "lab00001",
+      "parentId": "ea28b2b5",
+      "timestamp": "2026-01-01T00:00:03.000Z",
+      "targetId": "ab4e0c01",
+      "label": "keep"
+    }
+  ],
+  "leafId": "ea28b2b5"
+}

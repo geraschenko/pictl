@@ -12,13 +12,9 @@ import type { CommandContext } from "../core/targets.ts";
 import { UsageError } from "../core/util.ts";
 import { formatEntriesInput, formatEntryJsonl } from "./entries.ts";
 import { FILTER_MODES } from "./filter.ts";
-import {
-  parseEntriesInput,
-  parseMessageRecords,
-  parseTreeInput,
-} from "./input.ts";
+import { parseEntriesInput, parseMessageRecords } from "./input.ts";
 import { formatMessageRecords } from "./messages.ts";
-import { formatTreeInput } from "./tree.ts";
+import { formatEntriesTree } from "./tree.ts";
 import type { EntriesInput } from "./types.ts";
 
 function isEntriesInput(
@@ -129,9 +125,9 @@ export async function formatTree(
   flags: FormatTreeFlags,
   file?: string,
 ): Promise<void> {
-  const input = parseTreeInput(await readInputFile(this, file));
+  const input = parseEntriesInput(await readInputFile(this, file));
   this.process.stdout.write(
-    formatTreeInput(input, {
+    formatEntriesTree(isEntriesInput(input) ? input : { entries: input }, {
       filter: flags.filter,
       width: flags.width,
     }),
@@ -143,7 +139,7 @@ const formatTreeCommand = commandNoTarget<
   [string | undefined]
 >({
   common: true,
-  docs: { brief: "format pictl tree JSON" },
+  docs: { brief: "format pictl get-entries output or entry JSONL as a tree" },
   parameters: {
     flags: formatTreeFlags,
     positional: {

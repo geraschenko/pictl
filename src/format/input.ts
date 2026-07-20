@@ -1,11 +1,8 @@
-import type {
-  SessionEntry,
-  SessionTreeNode,
-} from "@geraschenko/pi-coding-agent";
-import { parseJsonInput, parseJsonlInput } from "../core/read-input.ts";
+import type { SessionEntry } from "@geraschenko/pi-coding-agent";
+import { parseJsonlInput } from "../core/read-input.ts";
 import type { MessageStreamRecord } from "../core/stream-types.ts";
 import { UsageError } from "../core/util.ts";
-import type { EntriesInput, TreeInput } from "./types.ts";
+import type { EntriesInput } from "./types.ts";
 
 const MESSAGE_ROLES = new Set([
   "user",
@@ -183,22 +180,6 @@ function validateSessionEntryRecord(record: Record<string, unknown>): void {
   }
 }
 
-function decodeTreeNode(value: unknown): SessionTreeNode {
-  if (!isRecord(value) || !Array.isArray(value.children)) {
-    throw new UsageError("invalid tree input");
-  }
-  const entry = decodeSessionEntry(value.entry);
-  const children = value.children.map(decodeTreeNode);
-  return {
-    entry,
-    children,
-    ...(typeof value.label === "string" && { label: value.label }),
-    ...(typeof value.labelTimestamp === "string" && {
-      labelTimestamp: value.labelTimestamp,
-    }),
-  };
-}
-
 export function decodeMessageStreamRecord(value: unknown): MessageStreamRecord {
   if (!isRecord(value) || typeof value.type !== "string") {
     throw new UsageError("invalid message stream record");
@@ -247,17 +228,6 @@ export function decodeEntriesInput(value: unknown): EntriesInput {
   throw new UsageError("invalid entries input");
 }
 
-export function decodeTreeInput(value: unknown): TreeInput {
-  if (
-    isRecord(value) &&
-    Array.isArray(value.tree) &&
-    isStringOrNull(value.leafId)
-  ) {
-    return { tree: value.tree.map(decodeTreeNode), leafId: value.leafId };
-  }
-  throw new UsageError("invalid tree input");
-}
-
 export function parseEntriesInput(
   input: string,
 ): EntriesInput | readonly SessionEntry[] {
@@ -266,20 +236,24 @@ export function parseEntriesInput(
   }
   const trimmed = input.trimStart();
   if (trimmed.startsWith("{")) {
+    let parsed: unknown;
     try {
-      const parsed = JSON.parse(input) as unknown;
-      if (isRecord(parsed) && "entries" in parsed) {
+      parsed = JSON.parse(input) as unknown;
+    } catch {
+      parsed = undefined; // Not a single JSON object; parse below as JSONL.
+    }
+    if (isRecord(parsed)) {
+      if ("entries" in parsed) {
         return decodeEntriesInput(parsed);
       }
-    } catch {
-      // Not a single JSON object; parse below as JSONL.
+      if (Array.isArray(parsed.tree)) {
+        throw new UsageError(
+          "input looks like get-tree output; feed it get-entries output instead",
+        );
+      }
     }
   }
   return parseJsonlInput(input).map(decodeSessionEntry);
-}
-
-export function parseTreeInput(input: string): TreeInput {
-  return decodeTreeInput(parseJsonInput(input));
 }
 
 function decodeMessagesInput(

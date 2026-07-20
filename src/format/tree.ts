@@ -1,13 +1,11 @@
-import type {
-  SessionEntry,
-  SessionTreeNode,
-} from "@geraschenko/pi-coding-agent";
+import type { SessionEntry } from "@geraschenko/pi-coding-agent";
 import { summarizeEntry } from "./entries.ts";
-import { passesFilter } from "./filter.ts";
+import { passesFilter, type FilterNode } from "./filter.ts";
+import { toLayoutTree, type ParentMap } from "./flat-tree.ts";
 import { extractTextContent, oneLine, truncateText } from "./text.ts";
-import type { FlatLayoutNode, LayoutNode } from "./tree-layout.ts";
+import type { FlatLayoutNode } from "./tree-layout.ts";
 import { flattenVisibleTree, treePrefix } from "./tree-layout.ts";
-import type { TreeFormatOptions, TreeInput } from "./types.ts";
+import type { EntriesInput, TreeFormatOptions } from "./types.ts";
 
 export const DEFAULT_TREE_FORMAT_OPTIONS: TreeFormatOptions = {
   filter: "conversation",
@@ -53,16 +51,38 @@ function entrySummary(entry: SessionEntry): string {
   }
 }
 
-function toLayoutNode(node: SessionTreeNode): LayoutNode<SessionTreeNode> {
-  return {
-    id: node.entry.id,
-    children: node.children.map(toLayoutNode),
-    payload: node,
-  };
+/** Throws (file corruption, not usage) on a duplicate entry id: a Map would
+ *  silently collapse the duplicate and hide it. The layout's duplicate-id
+ *  check remains as backstop. */
+function entryParentMap(entries: readonly SessionEntry[]): ParentMap {
+  const parentMap = new Map<string, string | null>();
+  for (const entry of entries) {
+    if (parentMap.has(entry.id)) {
+      throw new Error(`duplicate session entry id: ${entry.id}`);
+    }
+    parentMap.set(entry.id, entry.parentId);
+  }
+  return parentMap;
+}
+
+/** targetId → label; latest label entry wins, empty/absent label clears
+ *  (mirrors pi SessionManager._buildIndex). */
+function resolveLabels(entries: readonly SessionEntry[]): Map<string, string> {
+  const labels = new Map<string, string>();
+  for (const entry of entries) {
+    if (entry.type === "label") {
+      if (entry.label !== undefined && entry.label !== "") {
+        labels.set(entry.targetId, entry.label);
+      } else {
+        labels.delete(entry.targetId);
+      }
+    }
+  }
+  return labels;
 }
 
 function formatTreeNodeLine(
-  flatNode: FlatLayoutNode<SessionTreeNode>,
+  flatNode: FlatLayoutNode<FilterNode>,
   options: TreeFormatOptions,
 ): string {
   const marker = flatNode.isCurrentLeaf
@@ -76,22 +96,35 @@ function formatTreeNodeLine(
   return `${prefix}${truncateText(entrySummary(entry), availableSummary)}`.trimEnd();
 }
 
-export function formatTreeInput(
-  input: TreeInput,
+/** Cursor: input.leafId if present (null renders as [cursor: null]); when
+ *  absent (raw JSONL input), the last entry's id — pi's own on-load leaf
+ *  rule (SessionManager._buildIndex). */
+export function formatEntriesTree(
+  input: EntriesInput,
   options?: Partial<TreeFormatOptions>,
 ): string {
   const fullOptions: TreeFormatOptions = {
     filter: options?.filter ?? DEFAULT_TREE_FORMAT_OPTIONS.filter,
     width: options?.width ?? DEFAULT_TREE_FORMAT_OPTIONS.width,
   };
-  const roots = input.tree.map(toLayoutNode);
-  const lines = flattenVisibleTree(roots, input.leafId, (node) =>
-    passesFilter(
-      { entry: node.payload.entry, label: node.payload.label },
-      input.leafId,
-      fullOptions.filter,
-    ),
+  const parentMap = entryParentMap(input.entries);
+  const entryById = new Map(input.entries.map((entry) => [entry.id, entry]));
+  const labels = resolveLabels(input.entries);
+  const leafId =
+    input.leafId !== undefined
+      ? input.leafId
+      : (input.entries.at(-1)?.id ?? null);
+  const roots = toLayoutTree<FilterNode>(parentMap, (id) => {
+    const entry = entryById.get(id);
+    if (entry === undefined) {
+      throw new Error(`missing entry for id: ${id}`);
+    }
+    const label = labels.get(id);
+    return { entry, ...(label !== undefined && { label }) };
+  });
+  const lines = flattenVisibleTree(roots, leafId, (node) =>
+    passesFilter(node.payload, leafId, fullOptions.filter),
   ).map((node) => formatTreeNodeLine(node, fullOptions));
-  lines.push(`[cursor: ${input.leafId ?? "null"}]`);
-  return lines.length === 0 ? "" : `${lines.join("\n")}\n`;
+  lines.push(`[cursor: ${leafId ?? "null"}]`);
+  return `${lines.join("\n")}\n`;
 }
