@@ -1,6 +1,6 @@
 /*
  * pictl's instantiation of the until-engine over pi's RPC socket protocol,
- * consumed through runStream (stream-driver.ts) by `wait`, `tail --until`,
+ * consumed through runStream (streaming/driver.ts) by `wait`, `tail --until`,
  * streaming `prompt --until`, and lifecycle's polite stop. The grammar and
  * generic checkers live in until-engine.ts.
  *

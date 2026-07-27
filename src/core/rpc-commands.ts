@@ -37,7 +37,7 @@ import {
   promptDetached,
   streamPrompt,
   STREAM_OUTPUT_TYPES,
-} from "./streaming.ts";
+} from "./streaming/stream.ts";
 import {
   parseUntilCondition,
   secondsToTimerMs,

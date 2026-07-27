@@ -43,6 +43,79 @@ test("format messages supports get-messages JSON", async () => {
   );
 });
 
+test("format messages supports append-ordered get-entries JSON", async () => {
+  const output = formatMessageRecords(
+    parseMessageRecords(await fixture("entries.json")),
+  );
+  assert.equal(
+    output,
+    "== user ==\nHelp me write a script\n\n" +
+      "== assistant ==\n[thinking]\n[tool:read path: README.md]\n",
+  );
+});
+
+test("format messages ignores leafId and retains inactive-branch entries", () => {
+  const input = JSON.stringify({
+    entries: [
+      userEntry("A", null, "root"),
+      userEntry("B", "A", "active leaf"),
+      userEntry("C", "A", "inactive branch"),
+    ],
+    leafId: "B",
+  });
+  assert.equal(
+    formatMessageRecords(parseMessageRecords(input)),
+    "== user ==\nroot\n\n" +
+      "== user ==\nactive leaf\n\n" +
+      "[control: tree navigated B -> A]\n\n" +
+      "== user ==\ninactive branch\n",
+  );
+});
+
+test("format messages delegates legacy null content normalization to Pi", () => {
+  const input = JSON.stringify({
+    entries: [
+      {
+        type: "message",
+        id: "legacy",
+        parentId: null,
+        timestamp: "2026-01-01T00:00:00.000Z",
+        message: { role: "user", content: null, timestamp: 1 },
+      },
+      {
+        type: "custom_message",
+        id: "custom",
+        parentId: "legacy",
+        timestamp: "2026-01-01T00:00:01.000Z",
+        customType: "notice",
+        content: null,
+        display: true,
+      },
+    ],
+    leafId: "custom",
+  });
+  const records = parseMessageRecords(input);
+  assert.deepEqual(records[0], {
+    type: "message",
+    message: { role: "user", content: [], timestamp: 1 },
+  });
+  assert.deepEqual(records[1], {
+    type: "message",
+    message: {
+      role: "custom",
+      customType: "notice",
+      content: [],
+      display: true,
+      details: undefined,
+      timestamp: Date.parse("2026-01-01T00:00:01.000Z"),
+    },
+  });
+  assert.equal(
+    formatMessageRecords(records),
+    "== user ==\n\n\n== custom:notice ==\n\n",
+  );
+});
+
 test("format messages renders control event details from real pi event fields", () => {
   const output = formatMessageRecords(
     parseMessageRecords(
@@ -55,6 +128,30 @@ test("format messages renders control event details from real pi event fields", 
               type: "tree_navigated",
               oldLeafId: "old12345",
               newLeafId: "new12345",
+            },
+          },
+        },
+        {
+          type: "control",
+          control: {
+            kind: "tree_navigated",
+            event: {
+              type: "tree_navigated",
+              oldLeafId: null,
+              newLeafId: "only-new-leaf",
+            },
+          },
+        },
+        {
+          type: "control",
+          control: {
+            kind: "model_changed",
+            event: {
+              type: "model_changed",
+              model: {
+                provider: "anthropic",
+                id: "claude-sonnet",
+              },
             },
           },
         },
@@ -90,8 +187,17 @@ test("format messages renders control event details from real pi event fields", 
   assert.equal(
     output,
     "[control: tree navigated old12345 -> new12345]\n\n" +
+      "[control: tree navigated to only-new-leaf]\n\n" +
+      "[model: anthropic/claude-sonnet]\n\n" +
       "[control: session changed to session-1 /tmp/session.jsonl]\n\n" +
       "[control: queue update steering=1 follow-up=2]\n",
+  );
+});
+
+test("format messages rejects invalid get-entries metadata", () => {
+  assert.throws(
+    () => parseMessageRecords('{"entries":[],"leafId":42}'),
+    /invalid entries input: invalid leafId/u,
   );
 });
 

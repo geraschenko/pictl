@@ -1,5 +1,5 @@
 import type { SessionEntry } from "@geraschenko/pi-coding-agent";
-import type { AgentMessage } from "../core/stream-types.ts";
+import type { AgentMessage } from "../core/streaming/types.ts";
 import { passesFilter } from "./filter.ts";
 import type { EntriesInput, EntryFormatOptions } from "./types.ts";
 import {

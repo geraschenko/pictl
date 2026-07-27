@@ -10,9 +10,9 @@
  *
  * The client owns the session-state fold: it seeds from the first
  * `session_changed` after hello (never delivered as an event) and folds every
- * subsequent broadcast through `nextSessionState` at dispatch. Nothing is
- * buffered — a long-lived non-subscriber costs O(1) memory, and events before
- * subscribe are reflected in the state subscribe returns rather than replayed.
+ * subsequent broadcast through `nextSessionState` at dispatch. Once subscribed,
+ * it queues each event with its post-fold state for one async consumer. Events
+ * before subscribe are reflected in the seed rather than replayed.
  */
 
 import { connect, type Socket } from "node:net";
@@ -23,6 +23,8 @@ import {
   type RpcSessionState,
   type RpcSocketBroadcastEvent,
 } from "@geraschenko/pi-coding-agent";
+import { AsyncQueue } from "./streaming/async-queue.ts";
+import type { StreamEvent, StreamSubscription } from "./streaming/driver.ts";
 
 /** Any parsed JSONL record off the socket, before classification. Non-response
  *  records are cast to pi's RpcSocketBroadcastEvent at dispatch — the one
@@ -40,6 +42,11 @@ interface SeedWaiter {
   reject: (error: Error) => void;
 }
 
+export type RpcEventSubscription = StreamSubscription<
+  RpcSocketBroadcastEvent,
+  RpcSessionState
+>;
+
 export class PiSocketClient {
   private readonly socket: Socket;
   private readonly pending = new Map<string, PendingRequest>();
@@ -52,8 +59,11 @@ export class PiSocketClient {
    *  seed arrives. */
   private state: RpcSessionState | undefined;
   private seedWaiter: SeedWaiter | undefined;
-  private subscriber:
-    | ((event: RpcSocketBroadcastEvent, state: RpcSessionState) => void)
+  private subscribed = false;
+
+  /** Installed by subscribe(); until then broadcasts only advance the fold. */
+  private events:
+    | AsyncQueue<StreamEvent<RpcSocketBroadcastEvent, RpcSessionState>>
     | undefined;
 
   private constructor(socket: Socket) {
@@ -66,8 +76,11 @@ export class PiSocketClient {
           pending.reject(error);
         }
         this.pending.clear();
-        this.seedWaiter?.reject(error);
+        this.seedWaiter?.reject(
+          new Error("pi socket closed before the subscribe seed"),
+        );
         this.seedWaiter = undefined;
+        this.events?.close();
         resolve();
       });
     });
@@ -165,7 +178,7 @@ export class PiSocketClient {
     }
     const event = record as unknown as RpcSocketBroadcastEvent;
     this.state = nextSessionState(this.state, event);
-    this.subscriber?.(event, this.state);
+    this.events?.push({ event, state: this.state });
   }
 
   async request(command: RpcCommand): Promise<RpcResponse> {
@@ -184,29 +197,29 @@ export class PiSocketClient {
   }
 
   /**
-   * Resolves with the current folded state and forwards subsequent events
-   * live, each paired with the state after folding it — the pair keeps an
-   * async consumer's view aligned with the event it is processing even when
-   * the client's live state has run ahead. Events before subscribe are not
-   * replayed; they are already reflected in the returned state. One
-   * subscriber per client; a second call throws.
+   * Atomically installs the event queue and returns the current folded seed
+   * plus subsequent events paired with their post-fold state. Events observed
+   * before subscription are represented by the seed rather than replayed.
    */
-  subscribe(
-    onEvent: (event: RpcSocketBroadcastEvent, state: RpcSessionState) => void,
-  ): Promise<RpcSessionState> {
-    if (this.subscriber !== undefined) {
+  async subscribe(): Promise<RpcEventSubscription> {
+    if (this.subscribed) {
       throw new Error("pi socket client already subscribed");
     }
-    this.subscriber = onEvent;
+    this.subscribed = true;
+    this.events = new AsyncQueue();
     if (this.state !== undefined) {
-      return Promise.resolve(this.state);
+      if (this.closed) {
+        this.events.close();
+      }
+      return { seed: this.state, events: this.events };
     }
     if (this.closed) {
-      return Promise.reject(new Error("pi socket closed"));
+      throw new Error("pi socket closed before the subscribe seed");
     }
-    return new Promise((resolve, reject) => {
+    const seed = await new Promise<RpcSessionState>((resolve, reject) => {
       this.seedWaiter = { resolve, reject };
     });
+    return { seed, events: this.events };
   }
 
   /** Resolves when pi closes the socket (i.e. pi has exited or shut the server down). */

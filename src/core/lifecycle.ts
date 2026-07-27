@@ -39,7 +39,7 @@ import {
 } from "./registry.ts";
 import { connectWithRetry, type PiSocketClient } from "./pi-socket-client.ts";
 import { secondsToTimerMs, UntilTimeoutError } from "./until-engine.ts";
-import { runStream } from "./stream-driver.ts";
+import { runStream } from "./streaming/driver.ts";
 import { isIdle } from "./until.ts";
 import { launchDaemon } from "./spawn.ts";
 
@@ -262,6 +262,11 @@ async function waitUntilIdle(
   );
   if (result.outcome === "closed") {
     throw new Error("pi socket closed while waiting for idle");
+  }
+  if (result.outcome === "timeout") {
+    throw new UntilTimeoutError(
+      `condition not met within ${timeoutMs! / 1000}s`,
+    );
   }
 }
 

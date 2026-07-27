@@ -1,7 +1,7 @@
 import type {
   AgentMessage,
   MessageStreamRecord,
-} from "../core/stream-types.ts";
+} from "../core/streaming/types.ts";
 import type { MessageFormatOptions } from "./types.ts";
 import {
   countLines,
@@ -111,11 +111,12 @@ function formatControl(record: MessageStreamRecord): string | undefined {
         ? "[control: compaction started]"
         : "[control: compaction finished]";
     case "tree_navigated": {
-      const oldLeafId =
-        optionalStringOrNumberField(event, "oldLeafId") ?? "null";
+      const oldLeafId = optionalStringOrNumberField(event, "oldLeafId");
       const newLeafId =
         optionalStringOrNumberField(event, "newLeafId") ?? "null";
-      return `[control: tree navigated ${oldLeafId} -> ${newLeafId}]`;
+      return oldLeafId === undefined
+        ? `[control: tree navigated to ${newLeafId}]`
+        : `[control: tree navigated ${oldLeafId} -> ${newLeafId}]`;
     }
     case "session_changed": {
       // Records may come from parsed JSONL (`pictl format`), so read the
@@ -129,6 +130,13 @@ function formatControl(record: MessageStreamRecord): string | undefined {
       const steeringCount = stringListField(event, "steering").length;
       const followUpCount = stringListField(event, "followUp").length;
       return `[control: queue update steering=${steeringCount} follow-up=${followUpCount}]`;
+    }
+    case "model_changed": {
+      const model = "model" in event ? event.model : undefined;
+      const provider =
+        optionalStringOrNumberField(model, "provider") ?? "unknown";
+      const modelId = optionalStringOrNumberField(model, "id") ?? "unknown";
+      return `[model: ${provider}/${modelId}]`;
     }
   }
 }

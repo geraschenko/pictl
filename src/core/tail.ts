@@ -27,7 +27,7 @@ import {
   streamTail,
   STREAM_OUTPUT_TYPES,
   type StreamOutputType,
-} from "./streaming.ts";
+} from "./streaming/stream.ts";
 import {
   parseUntilCondition,
   secondsToTimerMs,

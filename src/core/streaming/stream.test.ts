@@ -4,10 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer, type Server, type Socket } from "node:net";
 import { test } from "node:test";
-import { app } from "./app.ts";
-import { runCliApp } from "./cli.ts";
-import type { MessageStreamRecord } from "./stream-types.ts";
-import { formatMessageRecords } from "../format/messages.ts";
+import { app } from "../app.ts";
+import { runCliApp } from "../cli.ts";
+import type { MessageStreamRecord } from "./types.ts";
+import { formatMessageRecords } from "../../format/messages.ts";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -96,6 +96,7 @@ function writeJson(socket: Socket, record: JsonRecord): void {
 async function withFakePiSocket<T>(
   agentDir: string,
   fn: () => Promise<T>,
+  closeAfterAgentEnd = false,
 ): Promise<T> {
   const socketPath = join(agentDir, "pi.sock");
   const sessionId = "session-1";
@@ -182,6 +183,9 @@ async function withFakePiSocket<T>(
                 messages: [userMessage, assistantMessage],
                 willRetry: false,
               });
+              if (closeAfterAgentEnd) {
+                socket.destroy();
+              }
             }, 10);
           } else if (request.type === "get_messages") {
             writeJson(socket, {
@@ -272,6 +276,43 @@ test("prompt streams assistant response and final cursor after prompt completion
   });
 });
 
+test("prompt fails if transport closure prevents the final cursor request", async () => {
+  await withFakeRegistry(async (agentId, agentDir) => {
+    const process = fakeProcess({ PICTL_TARGET: agentId });
+    await withFakePiSocket(
+      agentDir,
+      async () => {
+        await runCliApp(app, ["prompt", "hello"], process.proc);
+      },
+      true,
+    );
+    assert.equal(process.proc.exitCode, 1);
+    assert.match(process.stderr, /pi socket closed/u);
+    assert.doesNotMatch(process.stdout, /\[cursor:/u);
+  });
+});
+
+test("prompt timeout is successful and emits a final cursor", async () => {
+  await withFakeRegistry(async (agentId, agentDir) => {
+    await withFakePiSocket(agentDir, async () => {
+      const process = fakeProcess({ PICTL_TARGET: agentId });
+      await runCliApp(
+        app,
+        ["prompt", "--json", "--timeout", "0", "hello"],
+        process.proc,
+      );
+
+      assert.equal(process.proc.exitCode, 0);
+      assert.equal(process.stderr, "");
+      assert.deepEqual(jsonlLines(process.stdout).at(-1), {
+        type: "pictl_cursor",
+        sessionId: "session-1",
+        entryId: "user-entry",
+      });
+    });
+  });
+});
+
 test("prompt entries stream only includes entry records", async () => {
   await withFakeRegistry(async (agentId, agentDir) => {
     await withFakePiSocket(agentDir, async () => {
@@ -288,6 +329,22 @@ test("prompt entries stream only includes entry records", async () => {
         jsonlLines(process.stdout).map((record) => record.type),
         ["message"],
       );
+    });
+  });
+});
+
+test("wait still reports timeout as exit code 3", async () => {
+  await withFakeRegistry(async (agentId, agentDir) => {
+    await withFakePiSocket(agentDir, async () => {
+      const process = fakeProcess({ PICTL_TARGET: agentId });
+      await runCliApp(
+        app,
+        ["wait", "--until", "no-activity:1", "--timeout", "0"],
+        process.proc,
+      );
+
+      assert.equal(process.proc.exitCode, 3);
+      assert.match(process.stderr, /condition not met within 0s/u);
     });
   });
 });
@@ -410,6 +467,79 @@ test("prompt --detach sends the prompt and returns without streaming", async () 
       assert.equal(process.proc.exitCode, 0);
       assert.equal(process.stderr, "");
       assert.equal(process.stdout, "");
+    });
+  });
+});
+
+test("tail --timeout 0 emits history and a cursor without live events", async () => {
+  await withFakeRegistry(async (agentId, agentDir) => {
+    await withFakePiSocket(agentDir, async () => {
+      const process = fakeProcess({ PICTL_TARGET: agentId });
+      await runCliApp(app, ["tail", "--json", "--timeout", "0"], process.proc);
+
+      assert.equal(process.proc.exitCode, 0);
+      assert.equal(process.stderr, "");
+      assert.deepEqual(
+        jsonlLines(process.stdout).map((record) => record.type),
+        ["message", "pictl_cursor"],
+      );
+    });
+  });
+});
+
+test("positive tail timeout is successful and emits a cursor", async () => {
+  await withFakeRegistry(async (agentId, agentDir) => {
+    await withFakePiSocket(agentDir, async () => {
+      const process = fakeProcess({ PICTL_TARGET: agentId });
+      await runCliApp(
+        app,
+        ["tail", "--json", "--timeout", "0.01"],
+        process.proc,
+      );
+
+      assert.equal(process.proc.exitCode, 0);
+      assert.equal(process.stderr, "");
+      assert.equal(jsonlLines(process.stdout).at(-1)?.type, "pictl_cursor");
+    });
+  });
+});
+
+test("entries timeout remains entry-only", async () => {
+  await withFakeRegistry(async (agentId, agentDir) => {
+    await withFakePiSocket(agentDir, async () => {
+      const process = fakeProcess({ PICTL_TARGET: agentId });
+      await runCliApp(
+        app,
+        ["tail", "--type", "entries", "--json", "--timeout", "0"],
+        process.proc,
+      );
+
+      assert.equal(process.proc.exitCode, 0);
+      assert.equal(process.stderr, "");
+      assert.deepEqual(
+        jsonlLines(process.stdout).map((record) => record.type),
+        ["message"],
+      );
+    });
+  });
+});
+
+test("raw timeout emits a cursor without fabricating history", async () => {
+  await withFakeRegistry(async (agentId, agentDir) => {
+    await withFakePiSocket(agentDir, async () => {
+      const process = fakeProcess({ PICTL_TARGET: agentId });
+      await runCliApp(
+        app,
+        ["tail", "--type", "raw", "--json", "--timeout", "0"],
+        process.proc,
+      );
+
+      assert.equal(process.proc.exitCode, 0);
+      assert.equal(process.stderr, "");
+      assert.deepEqual(
+        jsonlLines(process.stdout).map((record) => record.type),
+        ["pictl_cursor"],
+      );
     });
   });
 });

@@ -4,18 +4,16 @@ import type {
   RpcSessionState,
   RpcSocketBroadcastEvent,
 } from "@geraschenko/pi-coding-agent";
-import type {
-  MessageStreamRecord,
-  StreamCursorRecord,
-} from "./stream-types.ts";
-import { oneTarget, type CommandContext } from "./targets.ts";
-import { ensureAgentRunning } from "./lifecycle.ts";
-import { piSocketPath } from "./registry.ts";
-import { connectWithRetry, type PiSocketClient } from "./pi-socket-client.ts";
-import { oneOf, UsageError } from "./util.ts";
-import type { UntilCondition } from "./until-engine.ts";
-import { untilMetAtSeed, untilMetByEvent, untilQuietMs } from "./until.ts";
-import { runStream, type StreamHandler } from "./stream-driver.ts";
+import { EventMessageRecordProjector } from "./message-records.ts";
+import type { StreamCursorRecord } from "./types.ts";
+import { oneTarget, type CommandContext } from "../targets.ts";
+import { ensureAgentRunning } from "../lifecycle.ts";
+import { piSocketPath } from "../registry.ts";
+import { connectWithRetry, type PiSocketClient } from "../pi-socket-client.ts";
+import { oneOf, UsageError } from "../util.ts";
+import type { UntilCondition } from "../until-engine.ts";
+import { untilMetAtSeed, untilMetByEvent, untilQuietMs } from "../until.ts";
+import { runStream, type StreamHandler, type StreamResult } from "./driver.ts";
 
 const SOCKET_CONNECT_DEADLINE_MS = 5_000;
 
@@ -79,40 +77,20 @@ async function getEntries(
   ).data;
 }
 
-async function writeFinalCursor(
-  client: PiSocketClient,
+function writeFinalCursor(
   writer: RecordWriter,
   sessionId: string | undefined,
-): Promise<void> {
-  // TODO: it's strange that RpcSessionState doesn't have leafId. Consider changing that in our pi fork (and perhaps upstreaming).
-  const entries = await getEntries(client, undefined);
+  entries: GetEntriesData | undefined,
+): void {
+  if (entries === undefined) {
+    throw new Error("stream stopped without a final cursor snapshot");
+  }
   const record: StreamCursorRecord = {
     type: "pictl_cursor",
     sessionId: sessionId ?? null,
     entryId: entries.leafId,
   };
   writer.writeRecord(record);
-}
-
-function messageRecordFromEvent(
-  event: RpcSocketBroadcastEvent,
-): MessageStreamRecord | undefined {
-  if (event.type === "message_end") {
-    return { type: "message", message: event.message };
-  }
-  if (event.type === "compaction_start" || event.type === "compaction_end") {
-    return { type: "control", control: { kind: "compaction", event } };
-  }
-  if (event.type === "tree_navigated") {
-    return { type: "control", control: { kind: "tree_navigated", event } };
-  }
-  if (event.type === "session_changed") {
-    return { type: "control", control: { kind: "session_changed", event } };
-  }
-  if (event.type === "queue_update") {
-    return { type: "control", control: { kind: "queue_update", event } };
-  }
-  return undefined;
 }
 
 function limitedTail<T>(
@@ -175,10 +153,15 @@ async function drainEntries(
  * streams pass checkSeed=false — the seed predates the prompt, so an idle
  * pre-prompt seed must not satisfy `turn-end`/`idle`.
  *
- * Returns the settling state (the one delivered with the satisfying event).
- * Throws "pi socket closed" when the socket closes before the condition is
- * met — which for follow mode (no condition) is the normal exit path.
+ * Returns the successful `done` or `timeout` result. Throws "pi socket
+ * closed" when transport close wins before the condition — which for follow
+ * mode (no condition or timeout) is the normal exit path.
  */
+interface ModeStreamResult {
+  readonly stream: StreamResult<RpcSessionState>;
+  readonly cutoffEntries: GetEntriesData | undefined;
+}
+
 async function runModeStream(options: {
   client: PiSocketClient;
   outputType: StreamOutputType;
@@ -189,8 +172,15 @@ async function runModeStream(options: {
   /** Entries mode: continue the incremental drain after this cursor
    *  (undefined = from the session start); unused for other modes. */
   entriesSince?: string | undefined;
-}): Promise<RpcSessionState> {
+}): Promise<ModeStreamResult> {
   const { client, writer, until } = options;
+  let cutoffEntries: GetEntriesData | undefined;
+  const captureCutoffEntries =
+    options.outputType === "entries"
+      ? undefined
+      : async (): Promise<void> => {
+          cutoffEntries = await getEntries(client, undefined);
+        };
   const metAtSeed = (seed: RpcSessionState): boolean =>
     options.checkSeed && until !== undefined && untilMetAtSeed(until, seed);
   const metByEvent = (
@@ -201,14 +191,20 @@ async function runModeStream(options: {
 
   let handler: StreamHandler<RpcSocketBroadcastEvent, RpcSessionState>;
   if (options.outputType === "messages") {
+    const projector = new EventMessageRecordProjector();
     handler = {
       onSeed: metAtSeed,
       onEvent: (event, state) => {
-        const record = messageRecordFromEvent(event);
-        if (record !== undefined) {
+        for (const record of projector.project(event)) {
           writer.writeRecord(record);
         }
         return metByEvent(event, state);
+      },
+      onStop: captureCutoffEntries,
+      onEnd: () => {
+        for (const record of projector.finish()) {
+          writer.writeRecord(record);
+        }
       },
       quietMs,
     };
@@ -242,6 +238,7 @@ async function runModeStream(options: {
         writer.writeRecord(event);
         return metByEvent(event, state);
       },
+      onStop: captureCutoffEntries,
       quietMs,
     };
   }
@@ -250,7 +247,7 @@ async function runModeStream(options: {
   if (result.outcome === "closed") {
     throw new Error("pi socket closed");
   }
-  return result.state;
+  return { stream: result, cutoffEntries };
 }
 
 async function connectForContext(
@@ -327,9 +324,9 @@ export async function streamPrompt(
       checkSeed: false,
       entriesSince,
     });
-    // Mark handled while the prompt RPC is in flight: the stream can reject
-    // first (e.g. `--timeout 0`), which must not raise an unhandled
-    // rejection before the await below attaches.
+    // Mark handled while the prompt RPC is in flight: a handler can reject
+    // first, which must not raise an unhandled rejection before the await
+    // below attaches.
     streamPromise.catch(() => undefined);
     try {
       await client.request(buildPromptCommand(options));
@@ -340,10 +337,14 @@ export async function streamPrompt(
       await streamPromise.catch(() => undefined);
       throw error;
     }
-    const state = await streamPromise;
+    const result = await streamPromise;
     // Entries already include entryId, so a cursor is redundant.
     if (options.type !== "entries") {
-      await writeFinalCursor(client, writer, state.sessionId);
+      writeFinalCursor(
+        writer,
+        result.stream.state.sessionId,
+        result.cutoffEntries,
+      );
     }
   } finally {
     client.close();
@@ -380,7 +381,19 @@ export async function streamTail(
         options.limit,
       );
     }
-    const state = await runModeStream({
+    if (options.timeoutMs === 0) {
+      if (options.outputType !== "entries") {
+        const subscription = await client.subscribe();
+        subscription.events.cancel();
+        writeFinalCursor(
+          writer,
+          subscription.seed.sessionId,
+          await getEntries(client, undefined),
+        );
+      }
+      return;
+    }
+    const result = await runModeStream({
       client,
       outputType: options.outputType,
       writer,
@@ -389,11 +402,17 @@ export async function streamTail(
       checkSeed: true,
       entriesSince,
     });
-    // Entries already include entryId, so a cursor is redundant; without
-    // --until the stream only ends by socket close (thrown above), so a
-    // cursor is written exactly when a condition settled the stream.
-    if (options.outputType !== "entries" && options.until !== undefined) {
-      await writeFinalCursor(client, writer, state.sessionId);
+    // Entries already include entryId, so a cursor is redundant. A timed
+    // finite observation always emits a resumable cursor for message/raw.
+    if (
+      options.outputType !== "entries" &&
+      (options.until !== undefined || result.stream.outcome === "timeout")
+    ) {
+      writeFinalCursor(
+        writer,
+        result.stream.state.sessionId,
+        result.cutoffEntries,
+      );
     }
   } finally {
     client.close();

@@ -24,10 +24,11 @@ import { connectWithRetry } from "./pi-socket-client.ts";
 import {
   parseUntilCondition,
   secondsToTimerMs,
+  UntilTimeoutError,
   UNTIL_COMPLETIONS,
   UNTIL_USAGE,
 } from "./until-engine.ts";
-import { runStream } from "./stream-driver.ts";
+import { runStream } from "./streaming/driver.ts";
 import { untilMetAtSeed, untilMetByEvent, untilQuietMs } from "./until.ts";
 
 const SOCKET_CONNECT_DEADLINE_MS = 5_000;
@@ -70,6 +71,9 @@ export async function wait(
     );
     if (result.outcome === "closed") {
       throw new Error("pi socket closed before condition met");
+    }
+    if (result.outcome === "timeout") {
+      throw new UntilTimeoutError(`condition not met within ${flags.timeout}s`);
     }
   } finally {
     client.close();

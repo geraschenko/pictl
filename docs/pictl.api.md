@@ -33,6 +33,17 @@ export interface AgentRecord {
 }
 
 // @public
+export class AsyncQueue<T> implements AsyncIterable<T> {
+    // (undocumented)
+    [Symbol.asyncIterator](): AsyncIterator<T>;
+    // (undocumented)
+    cancel(): void;
+    close(): boolean;
+    onPush(handler: () => void): () => void;
+    push(value: T): void;
+}
+
+// @public
 export interface AttachmentInfo {
     // (undocumented)
     client: string;
@@ -131,7 +142,7 @@ export class PiSocketClient {
     get isClosed(): boolean;
     // (undocumented)
     request(command: RpcCommand): Promise<RpcResponse>;
-    subscribe(onEvent: (event: RpcSocketBroadcastEvent, state: RpcSessionState) => void): Promise<RpcSessionState>;
+    subscribe(): Promise<RpcEventSubscription>;
     waitClosed(): Promise<void>;
 }
 
@@ -146,7 +157,10 @@ export interface ResizePayload {
     rows: number;
 }
 
-// @public
+// @public (undocumented)
+export type RpcEventSubscription = StreamSubscription<RpcSocketBroadcastEvent, RpcSessionState>;
+
+// @public (undocumented)
 export function runStream<TEvent, TState>(client: StreamClient<TEvent, TState>, handler: StreamHandler<TEvent, TState>, timeoutMs: number | undefined): Promise<StreamResult<TState>>;
 
 // @public
@@ -157,25 +171,48 @@ export interface SessionHistoryEntry {
     sessionId: string;
 }
 
-// @public
+// @public (undocumented)
 export interface StreamClient<TEvent, TState> {
     // (undocumented)
-    subscribe(onEvent: (event: TEvent, state: TState) => void): Promise<TState>;
-    // (undocumented)
-    waitClosed(): Promise<void>;
+    subscribe(): Promise<StreamSubscription<TEvent, TState>>;
 }
 
-// @public
+// @public (undocumented)
+export interface StreamEvent<TEvent, TState> {
+    // (undocumented)
+    readonly event: TEvent;
+    // (undocumented)
+    readonly state: TState;
+}
+
+// @public (undocumented)
 export interface StreamHandler<TEvent, TState> {
-    onEvent(event: TEvent, state: TState): boolean | Promise<boolean>;
-    onSeed(seed: TState): boolean | Promise<boolean>;
-    quietMs?: number;
+    // (undocumented)
+    readonly onEnd?: () => void | Promise<void>;
+    // (undocumented)
+    readonly onEvent: (event: TEvent, state: TState) => boolean | Promise<boolean>;
+    // (undocumented)
+    readonly onSeed: (seed: TState) => boolean | Promise<boolean>;
+    // (undocumented)
+    readonly onStop?: () => void | Promise<void>;
+    // (undocumented)
+    readonly quietMs?: number;
 }
 
 // @public (undocumented)
 export interface StreamResult<TState> {
-    outcome: "done" | "closed";
-    state: TState;
+    // (undocumented)
+    readonly outcome: "done" | "closed" | "timeout";
+    // (undocumented)
+    readonly state: TState;
+}
+
+// @public (undocumented)
+export interface StreamSubscription<TEvent, TState> {
+    // (undocumented)
+    readonly events: AsyncQueue<StreamEvent<TEvent, TState>>;
+    // (undocumented)
+    readonly seed: TState;
 }
 
 // @public (undocumented)

@@ -7,8 +7,11 @@
 
 import type { SessionEntry } from "@geraschenko/pi-coding-agent";
 import type { CommandContext } from "../core/targets.ts";
-import type { MessageStreamRecord } from "../core/stream-types.ts";
-import type { RecordWriter, StreamOutputType } from "../core/streaming.ts";
+import type { MessageStreamRecord } from "../core/streaming/types.ts";
+import type {
+  RecordWriter,
+  StreamOutputType,
+} from "../core/streaming/stream.ts";
 import {
   DEFAULT_MESSAGE_FORMAT_OPTIONS,
   formatMessageRecord,

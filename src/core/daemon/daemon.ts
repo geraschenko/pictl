@@ -337,8 +337,14 @@ async function daemon(this: CommandContext, flags: DaemonFlags): Promise<void> {
       RPC_CONNECT_DEADLINE_MS,
     );
     // The subscribe seed is the initial session announcement; later
-    // session_changed events arrive through handleEvent.
-    recordSession(await piClient.subscribe(handleEvent));
+    // session_changed events arrive through the subscription iterable.
+    const subscription = await piClient.subscribe();
+    recordSession(subscription.seed);
+    void (async (): Promise<void> => {
+      for await (const { event } of subscription.events) {
+        handleEvent(event);
+      }
+    })();
     signalReady(flags.readyFd, { ok: true });
   } catch (error) {
     failStartup(

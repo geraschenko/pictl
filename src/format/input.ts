@@ -1,6 +1,7 @@
 import type { SessionEntry } from "@geraschenko/pi-coding-agent";
 import { parseJsonlInput } from "../core/read-input.ts";
-import type { MessageStreamRecord } from "../core/stream-types.ts";
+import { messageRecordsFromEntries } from "../core/streaming/message-records.ts";
+import type { MessageStreamRecord } from "../core/streaming/types.ts";
 import { UsageError } from "../core/util.ts";
 import type { EntriesInput } from "./types.ts";
 
@@ -29,6 +30,7 @@ const CONTROL_KINDS = new Set([
   "tree_navigated",
   "session_changed",
   "queue_update",
+  "model_changed",
 ]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -68,7 +70,12 @@ function requireBoolean(record: Record<string, unknown>, key: string): void {
   }
 }
 
-function validateMessage(value: unknown): void {
+// Persisted session files are parsed without validation, so old versions,
+// forks, or hand-edited files may contain null/missing content. Pi normalizes
+// these entries in packages/coding-agent/src/core/session-manager.ts's
+// sessionEntryToContextMessages; get-entries formatting must reach that
+// canonical conversion rather than rejecting the entry first.
+function validateMessage(value: unknown, allowLegacyNullContent = false): void {
   if (!isRecord(value) || typeof value.role !== "string") {
     throw new UsageError("invalid session entry: invalid message");
   }
@@ -79,6 +86,9 @@ function validateMessage(value: unknown): void {
   }
   switch (value.role) {
     case "user":
+      if (allowLegacyNullContent && value.content == null) {
+        break;
+      }
       if (
         !(typeof value.content === "string" || Array.isArray(value.content))
       ) {
@@ -86,6 +96,9 @@ function validateMessage(value: unknown): void {
       }
       break;
     case "assistant":
+      if (allowLegacyNullContent && value.content == null) {
+        break;
+      }
       if (!Array.isArray(value.content)) {
         throw new UsageError(
           "invalid session entry: invalid assistant content",
@@ -95,6 +108,9 @@ function validateMessage(value: unknown): void {
     case "toolResult":
       requireString(value, "toolName");
       requireBoolean(value, "isError");
+      if (allowLegacyNullContent && value.content == null) {
+        break;
+      }
       if (!Array.isArray(value.content)) {
         throw new UsageError(
           "invalid session entry: invalid tool result content",
@@ -134,7 +150,7 @@ function validateSessionEntryRecord(record: Record<string, unknown>): void {
 
   switch (record.type) {
     case "message":
-      validateMessage(record.message);
+      validateMessage(record.message, true);
       break;
     case "thinking_level_change":
       requireString(record, "thinkingLevel");
@@ -158,7 +174,11 @@ function validateSessionEntryRecord(record: Record<string, unknown>): void {
     case "custom_message":
       requireString(record, "customType");
       if (
-        !(typeof record.content === "string" || Array.isArray(record.content))
+        !(
+          record.content == null ||
+          typeof record.content === "string" ||
+          Array.isArray(record.content)
+        )
       ) {
         throw new UsageError(
           "invalid session entry: invalid custom message content",
@@ -275,13 +295,20 @@ export function parseMessageRecords(
     return [];
   }
   if (input.trimStart().startsWith("{")) {
+    let parsed: unknown;
     try {
-      const parsed = JSON.parse(input) as unknown;
-      if (isRecord(parsed) && "messages" in parsed) {
+      parsed = JSON.parse(input) as unknown;
+    } catch {
+      parsed = undefined;
+    }
+    if (isRecord(parsed)) {
+      if ("messages" in parsed) {
         return decodeMessagesInput(parsed);
       }
-    } catch {
-      // Not a single JSON object; parse below as JSONL.
+      if ("entries" in parsed) {
+        const { entries } = decodeEntriesInput(parsed);
+        return Array.from(messageRecordsFromEntries(entries));
+      }
     }
   }
   return parseJsonlInput(input).map(decodeMessageStreamRecord);

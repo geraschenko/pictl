@@ -15,7 +15,11 @@
  */
 
 // pi.sock client
-export { PiSocketClient, connectWithRetry } from "./pi-socket-client.ts";
+export {
+  PiSocketClient,
+  connectWithRetry,
+  type RpcEventSubscription,
+} from "./pi-socket-client.ts";
 
 // tty.sock protocol
 export {
@@ -52,12 +56,15 @@ export {
   UntilTimeoutError,
   type UntilCondition,
 } from "./until-engine.ts";
+export { AsyncQueue } from "./streaming/async-queue.ts";
 export {
   runStream,
   type StreamClient,
+  type StreamEvent,
+  type StreamSubscription,
   type StreamHandler,
   type StreamResult,
-} from "./stream-driver.ts";
+} from "./streaming/driver.ts";
 export {
   isIdle,
   untilMetAtSeed,

@@ -62,7 +62,9 @@ async function probeAgent(agentId: string): Promise<AgentProbe> {
     try {
       // The subscribe seed is built by pi at send time, so it is as fresh as
       // a get_state response for this connect-read-close probe.
-      const state = await client.subscribe(() => {});
+      const subscription = await client.subscribe();
+      subscription.events.cancel();
+      const state = subscription.seed;
       // Compacting is a more special kind of streaming, so it wins.
       const status = state.isCompacting
         ? "compacting"
