@@ -4,33 +4,22 @@ import type {
 } from "../core/streaming/types.ts";
 import type { MessageFormatOptions } from "./types.ts";
 import {
+  contentBlocks,
   countLines,
   extractTextContent,
+  hasContentBlock,
   oneLine,
   summarizeContentBlock,
   summarizeUnknown,
   truncateText,
 } from "./text.ts";
+import { isRecord } from "../core/util.ts";
 
 export const DEFAULT_MESSAGE_FORMAT_OPTIONS: MessageFormatOptions = {
   maxToolArgChars: 120,
   toolResults: "summary",
   maxErrorLines: 10,
 };
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
-function contentBlocks(content: unknown): readonly unknown[] {
-  return Array.isArray(content) ? content : [];
-}
-
-function hasContentBlock(content: unknown, type: string): boolean {
-  return contentBlocks(content).some(
-    (block) => isRecord(block) && block.type === type,
-  );
-}
 
 function formatToolArguments(args: unknown, maxChars: number): string {
   if (!isRecord(args)) {

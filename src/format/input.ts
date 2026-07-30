@@ -2,7 +2,7 @@ import type { SessionEntry } from "@geraschenko/pi-coding-agent";
 import { parseJsonlInput } from "../core/read-input.ts";
 import { messageRecordsFromEntries } from "../core/streaming/message-records.ts";
 import type { MessageStreamRecord } from "../core/streaming/types.ts";
-import { UsageError } from "../core/util.ts";
+import { isRecord, UsageError } from "../core/util.ts";
 import type { EntriesInput } from "./types.ts";
 
 const MESSAGE_ROLES = new Set([
@@ -32,10 +32,6 @@ const CONTROL_KINDS = new Set([
   "queue_update",
   "model_changed",
 ]);
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
 
 function isStringOrNull(value: unknown): value is string | null {
   return typeof value === "string" || value === null;

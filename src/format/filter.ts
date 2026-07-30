@@ -1,5 +1,5 @@
 import type { SessionEntry } from "@geraschenko/pi-coding-agent";
-import { extractTextContent } from "./text.ts";
+import { extractTextContent, hasContentBlock } from "./text.ts";
 
 export const FILTER_MODES = [
   "conversation",
@@ -28,16 +28,6 @@ export interface FilterNode {
   readonly label?: string;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
-function hasBlock(content: unknown, type: string): boolean {
-  return Array.isArray(content)
-    ? content.some((block) => isRecord(block) && block.type === type)
-    : false;
-}
-
 function assistantHasText(entry: SessionEntry): boolean {
   return (
     entry.type === "message" &&
@@ -58,7 +48,7 @@ function assistantToolOnlySuppressed(
     return false;
   }
   const hasText = assistantHasText(entry);
-  const hasToolCall = hasBlock(entry.message.content, "toolCall");
+  const hasToolCall = hasContentBlock(entry.message.content, "toolCall");
   const isErrorOrAborted =
     entry.message.stopReason !== "stop" &&
     entry.message.stopReason !== "toolUse";

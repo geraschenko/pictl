@@ -3,12 +3,15 @@ import type { AgentMessage } from "../core/streaming/types.ts";
 import { passesFilter } from "./filter.ts";
 import type { EntriesInput, EntryFormatOptions } from "./types.ts";
 import {
+  contentBlocks,
   countLines,
   extractTextContent,
+  hasContentBlock,
   oneLine,
   summarizeUnknown,
   truncateText,
 } from "./text.ts";
+import { isRecord } from "../core/util.ts";
 
 const DEFAULT_ENTRY_WIDTH = 120;
 
@@ -18,20 +21,6 @@ export const DEFAULT_ENTRY_FORMAT_OPTIONS: EntryFormatOptions = {
   filter: undefined,
   width: DEFAULT_ENTRY_WIDTH,
 };
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
-function contentBlocks(content: unknown): readonly unknown[] {
-  return Array.isArray(content) ? content : [];
-}
-
-function hasContentBlock(content: unknown, type: string): boolean {
-  return contentBlocks(content).some(
-    (block) => isRecord(block) && block.type === type,
-  );
-}
 
 function roleLabel(entry: SessionEntry): string {
   if (entry.type === "message") {

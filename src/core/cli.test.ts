@@ -10,34 +10,7 @@ import { commandOneTarget, recordCommandAudit, runCliApp } from "./cli.ts";
 import { auditLogPath } from "./registry.ts";
 import type { CommandContext } from "./targets.ts";
 import { VERSION } from "./version.ts";
-
-function fakeProcess(env: NodeJS.ProcessEnv = {}) {
-  let stdout = "";
-  let stderr = "";
-  const proc = {
-    env,
-    stdout: {
-      write: (chunk: string) => {
-        stdout += chunk;
-      },
-    },
-    stderr: {
-      write: (chunk: string) => {
-        stderr += chunk;
-      },
-    },
-    exitCode: undefined as number | undefined,
-  };
-  return {
-    proc: proc as unknown as NodeJS.Process,
-    get stdout() {
-      return stdout;
-    },
-    get stderr() {
-      return stderr;
-    },
-  };
-}
+import { fakeProcess } from "./test-util.ts";
 
 async function withRegistry<T>(fn: (dir: string) => Promise<T>): Promise<T> {
   const old = process.env.PICTL_DIR;

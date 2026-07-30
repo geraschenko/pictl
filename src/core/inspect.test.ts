@@ -6,40 +6,7 @@ import { createServer, type Server, type Socket } from "node:net";
 import { test } from "node:test";
 import { app } from "./app.ts";
 import { runCliApp } from "./cli.ts";
-
-interface CapturedProcess {
-  proc: NodeJS.Process;
-  stdout: string;
-  stderr: string;
-}
-
-function fakeProcess(env: NodeJS.ProcessEnv = {}): CapturedProcess {
-  let stdout = "";
-  let stderr = "";
-  const proc = {
-    env,
-    stdout: {
-      write: (chunk: string) => {
-        stdout += chunk;
-      },
-    },
-    stderr: {
-      write: (chunk: string) => {
-        stderr += chunk;
-      },
-    },
-    exitCode: undefined as number | undefined,
-  };
-  return {
-    proc: proc as unknown as NodeJS.Process,
-    get stdout() {
-      return stdout;
-    },
-    get stderr() {
-      return stderr;
-    },
-  };
-}
+import { fakeProcess } from "./test-util.ts";
 
 async function withFakeRegistry<T>(
   fn: (agentId: string, agentDir: string) => Promise<T>,

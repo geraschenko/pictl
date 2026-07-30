@@ -44,8 +44,7 @@ import {
   UNTIL_USAGE,
 } from "./until-engine.ts";
 import { makeRecordWriter } from "../format/record-writer.ts";
-
-const SOCKET_CONNECT_DEADLINE_MS = 5_000;
+import { SOCKET_CONNECT_DEADLINE_MS } from "./constants.ts";
 
 function parseOnOff(value: string, what: string): boolean {
   return oneOf(value, ["on", "off"], what) === "on";

@@ -14,8 +14,7 @@ import { oneOf, UsageError } from "../util.ts";
 import type { UntilCondition } from "../until-engine.ts";
 import { untilMetAtSeed, untilMetByEvent, untilQuietMs } from "../until.ts";
 import { runStream, type StreamHandler, type StreamResult } from "./driver.ts";
-
-const SOCKET_CONNECT_DEADLINE_MS = 5_000;
+import { SOCKET_CONNECT_DEADLINE_MS } from "../constants.ts";
 
 /** Per-delta events that can never produce a new session entry; the
  *  incremental entries drain skips them (one drain per token would spam

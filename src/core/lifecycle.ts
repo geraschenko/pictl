@@ -42,8 +42,8 @@ import { secondsToTimerMs, UntilTimeoutError } from "./until-engine.ts";
 import { runStream } from "./streaming/driver.ts";
 import { isIdle } from "./until.ts";
 import { launchDaemon } from "./spawn.ts";
+import { SOCKET_CONNECT_DEADLINE_MS } from "./constants.ts";
 
-const SOCKET_CONNECT_DEADLINE_MS = 5_000;
 const SIGKILL_ESCALATION_MS = 5_000;
 const PROCESS_EXIT_DEADLINE_MS = 10_000;
 

@@ -30,8 +30,7 @@ import {
 } from "./until-engine.ts";
 import { runStream } from "./streaming/driver.ts";
 import { untilMetAtSeed, untilMetByEvent, untilQuietMs } from "./until.ts";
-
-const SOCKET_CONNECT_DEADLINE_MS = 5_000;
+import { SOCKET_CONNECT_DEADLINE_MS } from "./constants.ts";
 
 const waitFlags = {
   until: requiredParsedFlag(

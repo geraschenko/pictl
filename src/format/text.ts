@@ -1,7 +1,15 @@
+import { isRecord } from "../core/util.ts";
+
 const DEFAULT_SUMMARY_CHARS = 80;
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
+export function contentBlocks(content: unknown): readonly unknown[] {
+  return Array.isArray(content) ? content : [];
+}
+
+export function hasContentBlock(content: unknown, type: string): boolean {
+  return contentBlocks(content).some(
+    (block) => isRecord(block) && block.type === type,
+  );
 }
 
 export function oneLine(text: string): string {
