@@ -94,7 +94,7 @@ pictl purge -t <PREFIX_OF_PICTL_TARGET>
 
 ## Getting fancy with `pictl [prompt|tail|format]`
 
-`pictl prompt` and `pictl tail` both show a live agent's activity. `prompt` sends a message and streams until the end of the assistant turn. `tail` doesn't send anything and prints the agent's current context, returning immediately even if the agent is still streaming. Use `tail --follow` to keep streaming indefinitely, or `tail --until turn-end` to wait for the current turn (if any) to finish before returning.
+`pictl prompt` and `pictl tail` both show a live agent's activity. `prompt` sends a message and streams until the end of the assistant turn. `tail` doesn't send anything; it prints the agent's current context and then keeps streaming new activity indefinitely. Use `tail --until turn-end` to return once the current turn (if any) finishes, or `tail --timeout 0` to print the current context and return immediately.
 
 ### Machine-readable output
 
@@ -102,10 +102,10 @@ Both `prompt` and `tail` print human-readable, formatted output by default, but 
 
 ### Async prompting
 
-Send a prompt without waiting for the reply with `pictl prompt --detach`. Then check back with `tail`. The output of `prompt`/`tail` end with a "cursor" that identifies the entry id of last message returned, and `pictl tail --since <entry-id>` will return all the messages after that. For example:
+Send a prompt without waiting for the reply with `pictl prompt --detach`. Then check back with `tail --until turn-end`, which returns once the current turn (if any) finishes. The output of `prompt`/`tail --until` ends with a "cursor" that identifies the entry id of the last message returned, and `pictl tail --since <entry-id>` will return all the messages after that. For example:
 
 ```sh
-$ pictl tail -t c8b
+$ pictl tail -t c8b --until turn-end
 ...
 == assistant ==
 You are so smart.
@@ -122,7 +122,7 @@ $ pictl prompt -t c8b -d "Stop being such a boot-licker and write a compiler. No
 The `-d` causes the prompt command to return immediately with no output, but then when you're ready to check back in on this agent, you can see what's happened since last you checked with
 
 ```sh
-$ pictl tail -t c8b --since 6be9380a
+$ pictl tail -t c8b --since 6be9380a --until turn-end
 == user ==
 Stop being such a boot-licker and write a compiler. No mistakes.
 
@@ -147,7 +147,7 @@ You can control what you get from `prompt`/`tail` with `--type`:
 
 - `--type messages` (default): one block per message (and per control event like compaction), the same rendering as `pictl format messages`. `--json` for no formatting.
 - `--type entries`: one line per session entry (`<id> <role> <summary>`), the same rendering as `pictl format entries`. `--json` for no formatting.
-- `--type events`: pi socket events, one line per event, the same rendering as `pictl format events`. `--json` for no formatting. Since events aren't persisted, you can only get events that appear _after_ you run the command. For `tail`, `--type events` implies `--follow`.
+- `--type events`: pi socket events, one line per event, the same rendering as `pictl format events`. `--json` for no formatting. Since events aren't persisted, you can only get events that appear _after_ you run the command; there is no historical output, so `-n` and `--since` don't apply.
 
 If the reason you're after entries is to recover the tree structure from the `parentId` field, you may want to get the tree structure directly with `get-tree`. The output of `get-tree` is json (like pretty much all subcommands other than `prompt` and `tail`), but you can pretty print it like this:
 

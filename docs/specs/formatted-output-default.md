@@ -1,5 +1,13 @@
 # Formatted output by default for `prompt` and `tail`
 
+> **Historical record — the surface has since moved on (noted 2026-07-30).**
+> Later specs changed what this one describes: `--follow` and `--until
+> killed` were removed — following is now `tail`'s only mode, stopped by
+> `--until`/`--timeout` ([fold-streaming.md](fold-streaming.md)); `--type
+> raw` was renamed `--type events` and events gained a formatted rendering,
+> so "raw is inherently JSON / `--json` is a no-op" no longer holds
+> ([format-streaming.md](format-streaming.md)).
+
 # SPEC
 
 ## Problem

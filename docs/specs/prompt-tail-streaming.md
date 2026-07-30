@@ -1,5 +1,16 @@
 # Prompt and tail streaming
 
+> **Historical record — the surface has since moved on (noted 2026-07-30).**
+> This spec describes the streaming CLI as first implemented. Later specs
+> changed it: output is formatted by default with `--json` for JSONL, and
+> `--type detach` became `-d`/`--detach`
+> ([formatted-output-default.md](formatted-output-default.md));
+> `--follow`/`-f` and `--until killed` were removed — following is now
+> `tail`'s only mode, stopped by `--until`/`--timeout`
+> ([fold-streaming.md](fold-streaming.md)); `--type raw` was renamed
+> `--type events` and events gained a formatted rendering
+> ([format-streaming.md](format-streaming.md)).
+
 # SPEC
 
 ## Problem statement

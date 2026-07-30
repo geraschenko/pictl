@@ -33,6 +33,11 @@ import type { StreamEvent, StreamSubscription } from "./streaming/driver.ts";
  *  fold returns state unchanged for unknown event types. */
 type SocketRecord = { type: string } & Record<string, unknown>;
 
+/** The pi RPC socket protocol version this client speaks; bump alongside
+ *  protocol-affecting changes to the pi fork. A mismatched hello only warns —
+ *  the protocol is additive so far. */
+const PI_SOCKET_PROTOCOL_VERSION = 1;
+
 interface PendingRequest {
   resolve: (response: RpcResponse) => void;
   reject: (error: Error) => void;
@@ -242,9 +247,9 @@ function validateHello(line: string): Error | undefined {
     if (hello.type !== "hello" || hello.protocol !== "pi-rpc-socket") {
       return new Error(`not a pi RPC socket (got ${line.slice(0, 100)})`);
     }
-    if (hello.version !== 1) {
+    if (hello.version !== PI_SOCKET_PROTOCOL_VERSION) {
       process.stderr.write(
-        `pictl: warning: pi socket protocol version ${hello.version}, expected 1\n`,
+        `pictl: warning: pi socket protocol version ${hello.version}, expected ${PI_SOCKET_PROTOCOL_VERSION}\n`,
       );
     }
     return undefined;

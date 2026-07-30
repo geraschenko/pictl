@@ -76,9 +76,6 @@ export async function tail(
   flags: TailFlags,
 ): Promise<void> {
   const outputType: StreamOutputType = flags.type ?? "messages";
-  if (outputType === "events" && flags.n !== undefined) {
-    throw new UsageError("-n is not supported with --type events");
-  }
   await streamTail(this, {
     outputType,
     writer: makeRecordWriter(this, outputType, flags.json),
