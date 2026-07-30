@@ -19,7 +19,11 @@ import { SOCKET_CONNECT_DEADLINE_MS } from "../constants.ts";
 /** Per-delta events that can never produce a new session entry; the
  *  incremental entries drain skips them (one drain per token would spam
  *  RPCs). They still reach the until checkers and the quiet timer. */
-const ENTRY_DELTA_EVENTS = new Set(["message_update", "tool_execution_update"]);
+const ENTRY_DELTA_EVENTS = new Set([
+  "message_update",
+  "tool_execution_update",
+  "bash_execution_update",
+]);
 
 export const STREAM_OUTPUT_TYPES = ["messages", "entries", "events"] as const;
 export type StreamOutputType = (typeof STREAM_OUTPUT_TYPES)[number];

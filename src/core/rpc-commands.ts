@@ -438,6 +438,14 @@ const cycleThinkingLevelCommand = commandOneTarget<RawFlag>({
   },
 });
 
+const getAvailableThinkingLevelsCommand = commandOneTarget<RawFlag>({
+  docs: { brief: "list thinking levels" },
+  parameters: { flags: rawFlag },
+  func(flags) {
+    return sendSimple(this, flags, { type: "get_available_thinking_levels" });
+  },
+});
+
 const setSteeringModeCommand = commandOneTarget<
   RawFlag,
   ["all" | "one-at-a-time"]
@@ -761,6 +769,14 @@ const getCommandsCommand = commandOneTarget<RawFlag>({
   },
 });
 
+type SnakeToKebab<S extends string> = S extends `${infer Head}_${infer Tail}`
+  ? `${Head}-${SnakeToKebab<Tail>}`
+  : S;
+
+/** The `satisfies` clause makes tsc enforce the full-mirror contract:
+ *  exactly one subcommand per `RpcCommand` member, named by kebab-casing the
+ *  command type. A pi bump that adds or renames a command fails
+ *  `npm run check` here until this table catches up. */
 export const rpcRoutes = {
   prompt: promptCommand,
   steer: steerCommand,
@@ -773,6 +789,7 @@ export const rpcRoutes = {
   "get-available-models": getAvailableModelsCommand,
   "set-thinking-level": setThinkingLevelCommand,
   "cycle-thinking-level": cycleThinkingLevelCommand,
+  "get-available-thinking-levels": getAvailableThinkingLevelsCommand,
   "set-steering-mode": setSteeringModeCommand,
   "set-follow-up-mode": setFollowUpModeCommand,
   compact: compactCommand,
@@ -794,4 +811,4 @@ export const rpcRoutes = {
   "set-session-name": setSessionNameCommand,
   "get-messages": getMessagesCommand,
   "get-commands": getCommandsCommand,
-} as const;
+} as const satisfies Record<SnakeToKebab<RpcCommand["type"]>, unknown>;
