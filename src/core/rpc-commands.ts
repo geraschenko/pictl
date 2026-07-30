@@ -182,7 +182,7 @@ async function sendRpc(
 const promptFlags = {
   ...imageFlag,
   type: parsedFlag(
-    "Output type (messages|entries|raw)",
+    "Output type (messages|entries|events)",
     parseStreamOutputType,
     "type",
     completeChoices(STREAM_OUTPUT_TYPES),

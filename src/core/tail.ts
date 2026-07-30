@@ -1,16 +1,17 @@
 /*
- * `pictl tail --target <agent> [--type messages|entries|raw] [--since <entry-id>]
- * [-n <count>] [--until <cond>] [--json]` streams activity from one agent:
- * historical output first (per `-n`/`--since`), then it follows new events
- * until `--until` is met (emitting a final `pictl_cursor` record) or, without
- * `--until`, until pi closes the socket (exit 1).
+ * `pictl tail --target <agent> [--type messages|entries|events]
+ * [--since <entry-id>] [-n <count>] [--until <cond>] [--json]` streams
+ * activity from one agent: historical output first (per `-n`/`--since`), then
+ * it follows new events until `--until` is met (emitting a final
+ * `pictl_cursor` record) or, without `--until`, until pi closes the socket
+ * (exit 1).
  *
  * Output is human-readable by default; `--json` emits JSONL (for piping into
  * `pictl format`). Message mode is the default. It prints historical
  * message-shaped records, then follows append-only message/control events.
  * Entry mode drains real session entries with `get_entries --since <cursor>`
- * per socket event. Raw mode prints future socket records directly (always as
- * JSON); it has no historical backlog, so `-n` and `--since` do not apply.
+ * per socket event. Events mode prints future socket events directly; it has
+ * no historical backlog, so `-n` and `--since` do not apply.
  */
 
 import {
@@ -46,7 +47,7 @@ function parseLimit(input: string): number {
 
 const tailFlags = {
   type: parsedFlag(
-    "Output type (messages|entries|raw)",
+    "Output type (messages|entries|events)",
     parseStreamOutputType,
     "type",
     completeChoices(STREAM_OUTPUT_TYPES),
@@ -75,8 +76,8 @@ export async function tail(
   flags: TailFlags,
 ): Promise<void> {
   const outputType: StreamOutputType = flags.type ?? "messages";
-  if (outputType === "raw" && flags.n !== undefined) {
-    throw new UsageError("-n is not supported with --type raw");
+  if (outputType === "events" && flags.n !== undefined) {
+    throw new UsageError("-n is not supported with --type events");
   }
   await streamTail(this, {
     outputType,

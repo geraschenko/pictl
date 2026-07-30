@@ -21,7 +21,7 @@ import { SOCKET_CONNECT_DEADLINE_MS } from "../constants.ts";
  *  RPCs). They still reach the until checkers and the quiet timer. */
 const ENTRY_DELTA_EVENTS = new Set(["message_update", "tool_execution_update"]);
 
-export const STREAM_OUTPUT_TYPES = ["messages", "entries", "raw"] as const;
+export const STREAM_OUTPUT_TYPES = ["messages", "entries", "events"] as const;
 export type StreamOutputType = (typeof STREAM_OUTPUT_TYPES)[number];
 
 interface StreamOptions {
@@ -52,6 +52,9 @@ export interface PromptStreamOptions {
  */
 export interface RecordWriter {
   writeRecord(record: unknown): void;
+  /** Called once when the stream finishes (normally or not) so stateful
+   *  writers can flush; stateless writers no-op. */
+  end(): void;
 }
 
 type GetEntriesData = Extract<
@@ -346,6 +349,7 @@ export async function streamPrompt(
       );
     }
   } finally {
+    writer.end();
     client.close();
   }
 }
@@ -354,11 +358,11 @@ export async function streamTail(
   context: CommandContext,
   options: StreamOptions,
 ): Promise<void> {
-  if (options.outputType === "raw" && options.limit !== undefined) {
-    throw new UsageError("-n is not supported with --type raw");
+  if (options.outputType === "events" && options.limit !== undefined) {
+    throw new UsageError("-n is not supported with --type events");
   }
-  if (options.outputType === "raw" && options.since !== undefined) {
-    throw new UsageError("--since is not supported with --type raw");
+  if (options.outputType === "events" && options.since !== undefined) {
+    throw new UsageError("--since is not supported with --type events");
   }
   const writer = options.writer;
   const client = await connectForContext(context);
@@ -402,7 +406,7 @@ export async function streamTail(
       entriesSince,
     });
     // Entries already include entryId, so a cursor is redundant. A timed
-    // finite observation always emits a resumable cursor for message/raw.
+    // finite observation always emits a resumable cursor for message/events.
     if (
       options.outputType !== "entries" &&
       (options.until !== undefined || result.stream.outcome === "timeout")
@@ -414,6 +418,7 @@ export async function streamTail(
       );
     }
   } finally {
+    writer.end();
     client.close();
   }
 }

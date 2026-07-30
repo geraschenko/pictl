@@ -332,19 +332,26 @@ test("streaming flag validation rejects ambiguous or unsupported combinations", 
       /--until must be turn-end\|idle\|no-activity:<secs> \(got 'killed'\)/,
     );
 
-    const rawLimit = fakeProcess({ PICTL_TARGET: agentId });
-    await runCliApp(app, ["tail", "--type", "raw", "-n", "1"], rawLimit.proc);
-    assert.equal(rawLimit.proc.exitCode, 2);
-    assert.match(rawLimit.stderr, /-n is not supported with --type raw/);
-
-    const rawSince = fakeProcess({ PICTL_TARGET: agentId });
+    const eventsLimit = fakeProcess({ PICTL_TARGET: agentId });
     await runCliApp(
       app,
-      ["tail", "--type", "raw", "--since", "abc"],
-      rawSince.proc,
+      ["tail", "--type", "events", "-n", "1"],
+      eventsLimit.proc,
     );
-    assert.equal(rawSince.proc.exitCode, 2);
-    assert.match(rawSince.stderr, /--since is not supported with --type raw/);
+    assert.equal(eventsLimit.proc.exitCode, 2);
+    assert.match(eventsLimit.stderr, /-n is not supported with --type events/);
+
+    const eventsSince = fakeProcess({ PICTL_TARGET: agentId });
+    await runCliApp(
+      app,
+      ["tail", "--type", "events", "--since", "abc"],
+      eventsSince.proc,
+    );
+    assert.equal(eventsSince.proc.exitCode, 2);
+    assert.match(
+      eventsSince.stderr,
+      /--since is not supported with --type events/,
+    );
 
     const detachTimeout = fakeProcess({ PICTL_TARGET: agentId });
     await runCliApp(
@@ -491,13 +498,13 @@ test("entries timeout remains entry-only", async () => {
   });
 });
 
-test("raw timeout emits a cursor without fabricating history", async () => {
+test("events timeout emits a cursor without fabricating history", async () => {
   await withFakeRegistry(async (agentId, agentDir) => {
     await withFakePiSocket(agentDir, async () => {
       const process = fakeProcess({ PICTL_TARGET: agentId });
       await runCliApp(
         app,
-        ["tail", "--type", "raw", "--json", "--timeout", "0"],
+        ["tail", "--type", "events", "--json", "--timeout", "0"],
         process.proc,
       );
 
@@ -507,6 +514,23 @@ test("raw timeout emits a cursor without fabricating history", async () => {
         jsonlLines(process.stdout).map((record) => record.type),
         ["pictl_cursor"],
       );
+    });
+  });
+});
+
+test("events timeout renders a formatted cursor by default", async () => {
+  await withFakeRegistry(async (agentId, agentDir) => {
+    await withFakePiSocket(agentDir, async () => {
+      const process = fakeProcess({ PICTL_TARGET: agentId });
+      await runCliApp(
+        app,
+        ["tail", "--type", "events", "--timeout", "0"],
+        process.proc,
+      );
+
+      assert.equal(process.proc.exitCode, 0);
+      assert.equal(process.stderr, "");
+      assert.equal(process.stdout, "[cursor: user-entry]\n");
     });
   });
 });

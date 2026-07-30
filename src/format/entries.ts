@@ -11,15 +11,14 @@ import {
   summarizeUnknown,
   truncateText,
 } from "./text.ts";
+import { DEFAULT_FORMAT_WIDTH } from "../core/constants.ts";
 import { isRecord } from "../core/util.ts";
-
-const DEFAULT_ENTRY_WIDTH = 120;
 
 export const DEFAULT_ENTRY_FORMAT_OPTIONS: EntryFormatOptions = {
   timestamps: false,
   full: false,
   filter: undefined,
-  width: DEFAULT_ENTRY_WIDTH,
+  width: DEFAULT_FORMAT_WIDTH,
 };
 
 function roleLabel(entry: SessionEntry): string {
@@ -34,7 +33,7 @@ function formatToolCall(block: Record<string, unknown>): string {
   return `[tool: ${name}]`;
 }
 
-function entryFormatOptions(
+export function entryFormatOptions(
   options: Partial<EntryFormatOptions> | undefined,
 ): EntryFormatOptions {
   return {
@@ -45,7 +44,7 @@ function entryFormatOptions(
   };
 }
 
-function rawMessageSummary(message: AgentMessage): string {
+export function rawMessageSummary(message: AgentMessage): string {
   switch (message.role) {
     case "user":
       return oneLine(extractTextContent(message.content));
@@ -110,9 +109,25 @@ function rawEntrySummary(entry: SessionEntry, maxChars: number): string {
 
 export function summarizeEntry(
   entry: SessionEntry,
-  maxChars = DEFAULT_ENTRY_WIDTH,
+  maxChars = DEFAULT_FORMAT_WIDTH,
 ): string {
   return truncateText(rawEntrySummary(entry, maxChars), maxChars);
+}
+
+/** The entry's rendered line, or undefined when the filter drops it. Serves
+ *  both the buffered document path and the streaming per-record path. */
+export function formatFilteredEntry(
+  entry: SessionEntry,
+  leafId: string | null,
+  options: EntryFormatOptions,
+): string | undefined {
+  if (
+    options.filter !== undefined &&
+    !passesFilter({ entry }, leafId, options.filter)
+  ) {
+    return undefined;
+  }
+  return formatEntry(entry, options);
 }
 
 export function formatEntriesInput(
@@ -120,32 +135,11 @@ export function formatEntriesInput(
   options?: Partial<EntryFormatOptions>,
 ): string {
   const fullOptions = entryFormatOptions(options);
-  if (fullOptions.filter === undefined) {
-    return formatEntryJsonl(input.entries, fullOptions);
-  }
-  const filter = fullOptions.filter;
-  return formatEntryJsonl(
-    input.entries.filter((entry) =>
-      passesFilter({ entry }, input.leafId ?? null, filter),
-    ),
-    fullOptions,
-  );
-}
-
-export function formatEntryJsonl(
-  entriesInput: Iterable<SessionEntry>,
-  options?: Partial<EntryFormatOptions>,
-): string {
-  const fullOptions = entryFormatOptions(options);
-  const inputEntries = Array.from(entriesInput);
-  if (fullOptions.filter !== undefined) {
-    const filter = fullOptions.filter;
-    const lines = inputEntries
-      .filter((entry) => passesFilter({ entry }, null, filter))
-      .map((entry) => formatEntry(entry, fullOptions));
-    return lines.length === 0 ? "" : `${lines.join("\n")}\n`;
-  }
-  const lines = inputEntries.map((entry) => formatEntry(entry, fullOptions));
+  const lines = input.entries
+    .map((entry) =>
+      formatFilteredEntry(entry, input.leafId ?? null, fullOptions),
+    )
+    .filter((line): line is string => line !== undefined);
   return lines.length === 0 ? "" : `${lines.join("\n")}\n`;
 }
 

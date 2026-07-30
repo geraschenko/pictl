@@ -8,7 +8,7 @@ Like pi, `pictl` is meant to be minimal and composable. Its main components and 
 
 - **Lifecycle management** (`spawn`/`archive`/`list`/`status`/…). Each agent runs as a background process, automatically resumed when needed. There is no central orchestrator; each agent's daemon manages its own entry in an [on-disk registry](docs/architecture.md#pictl_dir-as-the-registry).
 - **CLI wrappers for all RPC commands** (`prompt`/`set-model`/`abort`/`compact`/…). `prompt` streams the response; everything else returns the RPC response as JSON.
-- **Monitoring** with `tail` and `wait`. `prompt` and `tail` can emit formatted messages (default), session entries, or the raw RPC stream — human-readable by default, `--json` for machines. See [Getting fancy](#getting-fancy-with-pictl-prompttailformat).
+- **Monitoring** with `tail` and `wait`. `prompt` and `tail` can emit formatted messages (default), session entries, or the RPC event stream — human-readable by default, `--json` for machines. See [Getting fancy](#getting-fancy-with-pictl-prompttailformat).
 - **TUI access** with `attach`. You get pi's stock interface, including any custom UI extensions.
 
 ## Installation
@@ -139,16 +139,15 @@ Yes sir. I'll get right on it.
 > - If `--since` is provided, you get all messages from all activity since that entry, which can cross **compaction boundaries** and **tree navitation**. If you used `/tree` to navigate back and forth between branches of the conversation, sending messages here and there, what you'll get is the messages in the order they were inserted into the session file (i.e. chronological order).
 > - If the underlying session _file_ has changed (e.g. you typed `/new` or `/fork` into the interactive TUI, or used the `switch-session` command), then you'll only get the new activity on the current session _file_, and you'll get an error if the current file doesn't contain the given entry id. You can use `pictl status` to see what session files have been associated with a given agent.
 
-### Messages vs Entries (vs raw RPC messages)
+### Messages vs Entries (vs RPC events)
 
-pi distinguishes between _messages_ (the agent/LLM-facing conversation units) and _entries_ (durable, branchable session history). Messages are derived from entries. If you need the greater fidelity of entries, you can get it. You can even stream the raw RPC messages if you really need to, but watch out because that includes a bunch of stuff that doesn't get written to the session file, like incremental message updates.
+pi distinguishes between _messages_ (the agent/LLM-facing conversation units) and _entries_ (durable, branchable session history). Messages are derived from entries. If you need the greater fidelity of entries, you can get it. You can even stream the RPC socket events if you really need to, but watch out because that includes a bunch of stuff that doesn't get written to the session file, like incremental message updates.
 
 You can control what you get from `prompt`/`tail` with `--type`:
 
 - `--type messages` (default): one block per message (and per control event like compaction), the same rendering as `pictl format messages`. `--json` for no formatting.
 - `--type entries`: one line per session entry (`<id> <role> <summary>`), the same rendering as `pictl format entries`. `--json` for no formatting.
-- `--type raw`: raw pi socket events, one JSON object per line. `raw` is
-  inherently JSON, so `--json` is a no-op for it. Since raw RPC messages aren't persisted, you can only get raw messages that appear _after_ you run the command. For `tail`, `--type raw` implies `--follow`.
+- `--type events`: pi socket events, one line per event, the same rendering as `pictl format events`. `--json` for no formatting. Since events aren't persisted, you can only get events that appear _after_ you run the command. For `tail`, `--type events` implies `--follow`.
 
 If the reason you're after entries is to recover the tree structure from the `parentId` field, you may want to get the tree structure directly with `get-tree`. The output of `get-tree` is json (like pretty much all subcommands other than `prompt` and `tail`), but you can pretty print it like this:
 

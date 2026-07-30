@@ -1,10 +1,18 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
+import { app } from "../core/app.ts";
+import { runCliApp } from "../core/cli.ts";
+import type { MessageStreamRecord } from "../core/streaming/types.ts";
+import { fakeProcess } from "../core/test-util.ts";
 import { parsePositiveInteger } from "./command.ts";
 import { formatEntriesInput } from "./entries.ts";
-import { parseEntriesInput, parseMessageRecords } from "./input.ts";
-import { formatMessageRecords } from "./messages.ts";
+import {
+  decodeFormatInput,
+  messageRecordsOf,
+  parseEntriesInput,
+} from "./input.ts";
+import { formatMessageRecords, MessageFormatter } from "./messages.ts";
 import { formatEntriesTree } from "./tree.ts";
 import type { EntriesInput } from "./types.ts";
 
@@ -18,43 +26,225 @@ async function fixture(path: string): Promise<string> {
   return await readFile(new URL(`./fixtures/${path}`, import.meta.url), "utf8");
 }
 
-test("format messages renders text, compact tool calls, summaries, and cursor", async () => {
+/** Collects the streaming message-record view of a whole input string. */
+async function parseMessageRecords(
+  input: string,
+): Promise<readonly MessageStreamRecord[]> {
+  const records: MessageStreamRecord[] = [];
+  for await (const record of messageRecordsOf(
+    await decodeFormatInput([input]),
+  )) {
+    records.push(record);
+  }
+  return records;
+}
+
+test("format messages coalesces the read run and renders text and cursor", async () => {
   const output = formatMessageRecords(
-    parseMessageRecords(await fixture("messages.jsonl")),
+    await parseMessageRecords(await fixture("messages.jsonl")),
   );
   assert.equal(
     output,
     "== user ==\nHello\n\n" +
-      "== assistant ==\n[thinking]\n[tool:read path: README.md]\n\n" +
-      "[read:ok 1 lines, 12 bytes]\n\n" +
+      "[thought for 1ms; read README.md]\n\n" +
       "[cursor: 0eb932a9]\n",
   );
 });
 
-test("format messages supports get-messages JSON", async () => {
+test("format messages --tool-results full renders every record", async () => {
   const output = formatMessageRecords(
-    parseMessageRecords(await fixture("messages.json")),
+    await parseMessageRecords(await fixture("messages.jsonl")),
+    { toolResults: "full" },
   );
   assert.equal(
     output,
     "== user ==\nHello\n\n" +
       "== assistant ==\n[thinking]\n[tool:read path: README.md]\n\n" +
-      "[read:ok 1 lines, 12 bytes]\n",
+      "[read:ok 1 lines, 12 bytes]\nlarge output\n\n" +
+      "[cursor: 0eb932a9]\n",
+  );
+});
+
+function messageJsonl(records: readonly unknown[]): string {
+  return records.map((record) => `${JSON.stringify(record)}\n`).join("");
+}
+
+function userMessageRecord(text: string, timestamp?: number): unknown {
+  return {
+    type: "message",
+    message: {
+      role: "user",
+      content: [{ type: "text", text }],
+      ...(timestamp !== undefined && { timestamp }),
+    },
+  };
+}
+
+function assistantRecord(content: unknown[], timestamp?: number): unknown {
+  return {
+    type: "message",
+    message: {
+      role: "assistant",
+      content,
+      stopReason: "toolUse",
+      ...(timestamp !== undefined && { timestamp }),
+    },
+  };
+}
+
+function toolResultRecord(
+  toolCallId: string,
+  toolName: string,
+  text: string,
+  timestamp?: number,
+  isError = false,
+): unknown {
+  return {
+    type: "message",
+    message: {
+      role: "toolResult",
+      toolCallId,
+      toolName,
+      content: [{ type: "text", text }],
+      isError,
+      ...(timestamp !== undefined && { timestamp }),
+    },
+  };
+}
+
+test("coalescing groups tools by first appearance and sums thinking time", async () => {
+  const input = messageJsonl([
+    userMessageRecord("go", 1000),
+    assistantRecord(
+      [
+        { type: "thinking", thinking: "..." },
+        {
+          type: "toolCall",
+          id: "call-1",
+          name: "read",
+          arguments: { path: "a.ts" },
+        },
+      ],
+      3000,
+    ),
+    toolResultRecord("call-1", "read", "ok", 3500),
+    assistantRecord(
+      [
+        { type: "thinking", thinking: "..." },
+        {
+          type: "toolCall",
+          id: "call-2",
+          name: "grep",
+          arguments: { pattern: "TODO" },
+        },
+        {
+          type: "toolCall",
+          id: "call-3",
+          name: "read",
+          arguments: { path: "b.ts" },
+        },
+      ],
+      5800,
+    ),
+    toolResultRecord("call-2", "grep", "ok", 5900),
+    toolResultRecord("call-3", "read", "ok", 6000),
+    userMessageRecord("done", 7000),
+  ]);
+  assert.equal(
+    formatMessageRecords(await parseMessageRecords(input)),
+    "== user ==\ngo\n\n" +
+      "[thought for 4.3s; read a.ts, b.ts; grep TODO]\n\n" +
+      "== user ==\ndone\n",
+  );
+});
+
+test("coalescing renders bare thought when no duration is computable", async () => {
+  const input = messageJsonl([
+    assistantRecord([{ type: "thinking", thinking: "..." }]),
+  ]);
+  assert.equal(
+    formatMessageRecords(await parseMessageRecords(input)),
+    "[thought]\n",
+  );
+});
+
+test("a failed tool result breaks the run and renders normally", async () => {
+  const input = messageJsonl([
+    assistantRecord([
+      {
+        type: "toolCall",
+        id: "call-1",
+        name: "read",
+        arguments: { path: "a.ts" },
+      },
+    ]),
+    toolResultRecord("call-1", "read", "boom", undefined, true),
+  ]);
+  assert.equal(
+    formatMessageRecords(await parseMessageRecords(input)),
+    "[read a.ts]\n\n[read:error 1 lines, 4 bytes]\nboom\n",
+  );
+});
+
+test("non-read-only calls do not coalesce", async () => {
+  const input = messageJsonl([
+    assistantRecord([
+      {
+        type: "toolCall",
+        id: "call-1",
+        name: "bash",
+        arguments: { command: "true" },
+      },
+    ]),
+  ]);
+  assert.equal(
+    formatMessageRecords(await parseMessageRecords(input)),
+    "== assistant ==\n[tool:bash command: true]\n",
+  );
+});
+
+test("MessageFormatter holds a run back and flushes it with the breaker's block", async () => {
+  const records = await parseMessageRecords(await fixture("messages.jsonl"));
+  const formatter = new MessageFormatter();
+  const chunks = records.map((record) => formatter.push(record));
+  const endChunk = formatter.end();
+  assert.deepEqual(chunks, [
+    "== user ==\nHello",
+    "",
+    "",
+    "\n\n[thought for 1ms; read README.md]\n\n[cursor: 0eb932a9]",
+  ]);
+  assert.equal(endChunk, "\n");
+  assert.equal(chunks.join("") + endChunk, formatMessageRecords(records));
+});
+
+test("MessageFormatter renders nothing for an empty stream", () => {
+  const formatter = new MessageFormatter();
+  assert.equal(formatter.end(), "");
+});
+
+test("format messages supports get-messages JSON", async () => {
+  const output = formatMessageRecords(
+    await parseMessageRecords(await fixture("messages.json")),
+  );
+  assert.equal(
+    output,
+    "== user ==\nHello\n\n[thought for 1ms; read README.md]\n",
   );
 });
 
 test("format messages supports append-ordered get-entries JSON", async () => {
   const output = formatMessageRecords(
-    parseMessageRecords(await fixture("entries.json")),
+    await parseMessageRecords(await fixture("entries.json")),
   );
   assert.equal(
     output,
     "== user ==\nHelp me write a script\n\n" +
-      "== assistant ==\n[thinking]\n[tool:read path: README.md]\n",
+      "[thought for 1ms; read README.md]\n",
   );
 });
 
-test("format messages ignores leafId and retains inactive-branch entries", () => {
+test("format messages ignores leafId and retains inactive-branch entries", async () => {
   const input = JSON.stringify({
     entries: [
       userEntry("A", null, "root"),
@@ -64,7 +254,7 @@ test("format messages ignores leafId and retains inactive-branch entries", () =>
     leafId: "B",
   });
   assert.equal(
-    formatMessageRecords(parseMessageRecords(input)),
+    formatMessageRecords(await parseMessageRecords(input)),
     "== user ==\nroot\n\n" +
       "== user ==\nactive leaf\n\n" +
       "[control: tree navigated B -> A]\n\n" +
@@ -72,7 +262,7 @@ test("format messages ignores leafId and retains inactive-branch entries", () =>
   );
 });
 
-test("format messages delegates legacy null content normalization to Pi", () => {
+test("format messages delegates legacy null content normalization to Pi", async () => {
   const input = JSON.stringify({
     entries: [
       {
@@ -94,7 +284,7 @@ test("format messages delegates legacy null content normalization to Pi", () => 
     ],
     leafId: "custom",
   });
-  const records = parseMessageRecords(input);
+  const records = await parseMessageRecords(input);
   assert.deepEqual(records[0], {
     type: "message",
     message: { role: "user", content: [], timestamp: 1 },
@@ -116,9 +306,9 @@ test("format messages delegates legacy null content normalization to Pi", () => 
   );
 });
 
-test("format messages renders control event details from real pi event fields", () => {
+test("format messages renders control event details from real pi event fields", async () => {
   const output = formatMessageRecords(
-    parseMessageRecords(
+    await parseMessageRecords(
       [
         {
           type: "control",
@@ -180,8 +370,8 @@ test("format messages renders control event details from real pi event fields", 
           },
         },
       ]
-        .map((record) => JSON.stringify(record))
-        .join("\n"),
+        .map((record) => `${JSON.stringify(record)}\n`)
+        .join(""),
     ),
   );
   assert.equal(
@@ -194,21 +384,205 @@ test("format messages renders control event details from real pi event fields", 
   );
 });
 
-test("format messages rejects invalid get-entries metadata", () => {
-  assert.throws(
-    () => parseMessageRecords('{"entries":[],"leafId":42}'),
+test("format messages rejects invalid get-entries metadata", async () => {
+  await assert.rejects(
+    async () => await parseMessageRecords('{"entries":[],"leafId":42}'),
     /invalid entries input: invalid leafId/u,
   );
 });
 
-test("format messages includes failed result snippets in summary mode", () => {
+test("format messages includes failed result snippets in summary mode", async () => {
   const output = formatMessageRecords(
-    parseMessageRecords(
+    await parseMessageRecords(
       '{"type":"message","message":{"role":"toolResult","toolCallId":"c","toolName":"bash","content":[{"type":"text","text":"one\\ntwo\\nthree"}],"isError":true,"timestamp":1}}\n',
     ),
     { maxErrorLines: 2 },
   );
   assert.equal(output, "[bash:error 3 lines, 13 bytes]\none\ntwo\n");
+});
+
+test("format messages accepts raw entry JSONL like the entries document", async () => {
+  const document = await fixture("entries.json");
+  // Trailing newline matters: the streaming decoder drops a torn final line.
+  const entryJsonl = (JSON.parse(document) as { entries: unknown[] }).entries
+    .map((entry) => `${JSON.stringify(entry)}\n`)
+    .join("");
+  assert.equal(
+    formatMessageRecords(await parseMessageRecords(entryJsonl)),
+    formatMessageRecords(await parseMessageRecords(document)),
+  );
+});
+
+test("streaming decode cross-points a mid-stream shape change by record number", async () => {
+  const messageLine =
+    '{"type":"message","message":{"role":"user","content":[{"type":"text","text":"hi"}],"timestamp":1}}';
+  const entryLine = JSON.stringify(userEntry("A", null, "hello"));
+  await assert.rejects(
+    async () => await parseMessageRecords(`${messageLine}\n${entryLine}\n`),
+    /record 2 looks like session-entry output; use `pictl format entries`/u,
+  );
+});
+
+test("streaming validation errors carry the record number, counting blank lines", async () => {
+  const messageLine =
+    '{"type":"message","message":{"role":"user","content":[{"type":"text","text":"hi"}],"timestamp":1}}';
+  const badLine = '{"type":"message","message":{"role":"nope"}}';
+  await assert.rejects(
+    async () => await parseMessageRecords(`${messageLine}\n\n${badLine}\n`),
+    /record 3: invalid session entry: invalid message role nope/u,
+  );
+});
+
+test("format messages writes each record's block as it arrives", async () => {
+  const lines = (await fixture("messages.jsonl"))
+    .split("\n")
+    .filter((line) => line !== "")
+    .map((line) => `${line}\n`);
+  const proc = fakeProcess({}, lines);
+  await runCliApp(app, ["format", "messages"], proc.proc);
+  assert.equal(proc.proc.exitCode, 0);
+  assert.equal(proc.stderr, "");
+  assert.deepEqual(proc.stdoutChunks, [
+    "== user ==\nHello",
+    "\n\n[thought for 1ms; read README.md]\n\n[cursor: 0eb932a9]",
+    "\n",
+  ]);
+});
+
+test("format messages renders nothing for blank input", async () => {
+  const proc = fakeProcess({}, ["\n  \n"]);
+  await runCliApp(app, ["format", "messages"], proc.proc);
+  assert.equal(proc.proc.exitCode, 0);
+  assert.equal(proc.stdout, "");
+});
+
+test("format messages projects event input through the daemon's conversion", async () => {
+  const proc = fakeProcess({}, [
+    '{"type":"agent_start"}\n',
+    '{"type":"message_end","message":{"role":"user","content":[{"type":"text","text":"hi"}],"timestamp":1}}\n',
+    '{"type":"pictl_cursor","sessionId":"s","entryId":"e"}\n',
+  ]);
+  await runCliApp(app, ["format", "messages"], proc.proc);
+  assert.equal(proc.proc.exitCode, 0);
+  assert.equal(proc.stderr, "");
+  assert.equal(proc.stdout, "== user ==\nhi\n\n[cursor: e]\n");
+});
+
+test("format entries cross-points socket-event input at format events", async () => {
+  const proc = fakeProcess({}, ['{"type":"agent_start"}\n']);
+  await runCliApp(app, ["format", "entries"], proc.proc);
+  assert.equal(proc.proc.exitCode, 2);
+  assert.match(
+    proc.stderr,
+    /input looks like socket events; use `pictl format events`/u,
+  );
+});
+
+test("format entries cross-points message input at format messages", async () => {
+  const proc = fakeProcess({}, [
+    '{"type":"pictl_cursor","sessionId":"s","entryId":"e"}\n',
+  ]);
+  await runCliApp(app, ["format", "entries"], proc.proc);
+  assert.equal(proc.proc.exitCode, 2);
+  assert.match(
+    proc.stderr,
+    /input looks like message output; use `pictl format messages`/u,
+  );
+});
+
+test("format events renders control-kind fields, message summaries, cursors, and bare types", async () => {
+  const events = [
+    { type: "agent_start" },
+    { type: "tree_navigated", oldLeafId: "old12345", newLeafId: "new12345" },
+    { type: "tree_navigated", oldLeafId: null, newLeafId: "new12345" },
+    { type: "queue_update", steering: ["a"], followUp: [] },
+    {
+      type: "model_changed",
+      model: { provider: "anthropic", id: "claude-sonnet" },
+    },
+    {
+      type: "session_changed",
+      state: { sessionId: "session-1", sessionFile: "/tmp/s.jsonl" },
+    },
+    {
+      type: "message_end",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "Sure — looking now" }],
+        stopReason: "stop",
+      },
+    },
+    { type: "totally_new_event", payload: { anything: true } },
+    { type: "pictl_cursor", sessionId: "s", entryId: "leaf1234" },
+  ];
+  const proc = fakeProcess(
+    {},
+    events.map((event) => `${JSON.stringify(event)}\n`),
+  );
+  await runCliApp(app, ["format", "events"], proc.proc);
+  assert.equal(proc.proc.exitCode, 0);
+  assert.equal(proc.stderr, "");
+  assert.equal(
+    proc.stdout,
+    "[agent_start]\n" +
+      "[tree_navigated: old12345 -> new12345]\n" +
+      "[tree_navigated: to new12345]\n" +
+      "[queue_update: steering=1 follow-up=0]\n" +
+      "[model_changed: anthropic/claude-sonnet]\n" +
+      "[session_changed: session-1 /tmp/s.jsonl]\n" +
+      "[message_end] assistant: Sure — looking now\n" +
+      "[totally_new_event]\n" +
+      "[cursor: leaf1234]\n",
+  );
+});
+
+test("format events accepts a cursor-only stream but cross-points real messages", async () => {
+  const cursorLine = '{"type":"pictl_cursor","sessionId":"s","entryId":"e"}\n';
+  const cursorOnly = fakeProcess({}, [cursorLine]);
+  await runCliApp(app, ["format", "events"], cursorOnly.proc);
+  assert.equal(cursorOnly.proc.exitCode, 0);
+  assert.equal(cursorOnly.stdout, "[cursor: e]\n");
+
+  const withMessage = fakeProcess({}, [
+    cursorLine,
+    '{"type":"message","message":{"role":"user","content":[{"type":"text","text":"hi"}],"timestamp":1}}\n',
+  ]);
+  await runCliApp(app, ["format", "events"], withMessage.proc);
+  assert.equal(withMessage.proc.exitCode, 2);
+  assert.match(
+    withMessage.stderr,
+    /input looks like message output; use `pictl format messages`/u,
+  );
+});
+
+test("format events cross-points entry input at format entries", async () => {
+  const proc = fakeProcess({}, [
+    `${JSON.stringify(userEntry("A", null, "hi"))}\n`,
+  ]);
+  await runCliApp(app, ["format", "events"], proc.proc);
+  assert.equal(proc.proc.exitCode, 2);
+  assert.match(
+    proc.stderr,
+    /input looks like session-entry output; use `pictl format entries`/u,
+  );
+});
+
+test("format entries streams entry JSONL and accepts the document form", async () => {
+  const jsonlProc = fakeProcess({}, [
+    `${JSON.stringify(userEntry("user0001", null, "First"))}\n`,
+  ]);
+  await runCliApp(app, ["format", "entries"], jsonlProc.proc);
+  assert.equal(jsonlProc.proc.exitCode, 0);
+  assert.equal(jsonlProc.stdout, "user0001 user       First\n");
+
+  const documentProc = fakeProcess({}, [await fixture("entries.json")]);
+  await runCliApp(app, ["format", "entries"], documentProc.proc);
+  assert.equal(documentProc.proc.exitCode, 0);
+  assert.equal(
+    documentProc.stdout,
+    "79d4e93e user       Help me write a script\n" +
+      "ab4e0c01 assistant  [thinking] [tool: read]\n",
+  );
 });
 
 test("format entries supports get-entries JSON", async () => {

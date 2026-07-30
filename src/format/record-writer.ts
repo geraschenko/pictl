@@ -12,11 +12,10 @@ import type {
   RecordWriter,
   StreamOutputType,
 } from "../core/streaming/stream.ts";
-import {
-  DEFAULT_MESSAGE_FORMAT_OPTIONS,
-  formatMessageRecord,
-} from "./messages.ts";
+import { MessageFormatter } from "./messages.ts";
 import { DEFAULT_ENTRY_FORMAT_OPTIONS, formatEntry } from "./entries.ts";
+import { formatEvent } from "./events.ts";
+import type { EventStreamRecord } from "./input.ts";
 
 export class StdoutJsonlWriter implements RecordWriter {
   private readonly context: CommandContext;
@@ -28,32 +27,35 @@ export class StdoutJsonlWriter implements RecordWriter {
   writeRecord(record: unknown): void {
     this.context.process.stdout.write(`${JSON.stringify(record)}\n`);
   }
+
+  end(): void {}
 }
 
 /**
- * Renders message records the same way `pictl format messages` does. The
- * separators (`"\n\n"` after message/control, `"\n"` after a `pictl_cursor`)
- * make a finite stream byte-identical to `formatMessageRecords`, which always
- * ends in exactly one cursor.
+ * Renders message records the same way `pictl format messages` does: both
+ * paths flow through one `MessageFormatter`, so byte-equality between them is
+ * structural.
  */
 export class FormattedMessageWriter implements RecordWriter {
   private readonly context: CommandContext;
+  private readonly formatter = new MessageFormatter();
 
   constructor(context: CommandContext) {
     this.context = context;
   }
 
   writeRecord(record: unknown): void {
-    const messageRecord = record as MessageStreamRecord;
-    const chunk = formatMessageRecord(
-      messageRecord,
-      DEFAULT_MESSAGE_FORMAT_OPTIONS,
-    );
-    if (chunk === undefined || chunk === "") {
-      return;
+    this.write(this.formatter.push(record as MessageStreamRecord));
+  }
+
+  end(): void {
+    this.write(this.formatter.end());
+  }
+
+  private write(chunk: string): void {
+    if (chunk !== "") {
+      this.context.process.stdout.write(chunk);
     }
-    const separator = messageRecord.type === "pictl_cursor" ? "\n" : "\n\n";
-    this.context.process.stdout.write(`${chunk}${separator}`);
   }
 }
 
@@ -71,23 +73,42 @@ export class FormattedEntryWriter implements RecordWriter {
     );
     this.context.process.stdout.write(`${line}\n`);
   }
+
+  end(): void {}
 }
 
-/**
- * Selects the writer for a stream. `--json` (and raw, which is inherently JSON)
- * force JSONL; the json/raw check must come first so `(messages, json)` routes
- * to JSONL rather than the formatted writer.
- */
+export class FormattedEventWriter implements RecordWriter {
+  private readonly context: CommandContext;
+
+  constructor(context: CommandContext) {
+    this.context = context;
+  }
+
+  writeRecord(record: unknown): void {
+    this.context.process.stdout.write(
+      `${formatEvent(record as EventStreamRecord)}\n`,
+    );
+  }
+
+  end(): void {}
+}
+
+/** Selects the writer for a stream: `--json` forces JSONL, each type
+ *  otherwise gets its formatted writer. */
 export function makeRecordWriter(
   context: CommandContext,
   type: StreamOutputType,
   json: boolean,
 ): RecordWriter {
-  if (type === "raw" || json) {
+  if (json) {
     return new StdoutJsonlWriter(context);
   }
-  if (type === "messages") {
-    return new FormattedMessageWriter(context);
+  switch (type) {
+    case "messages":
+      return new FormattedMessageWriter(context);
+    case "entries":
+      return new FormattedEntryWriter(context);
+    case "events":
+      return new FormattedEventWriter(context);
   }
-  return new FormattedEntryWriter(context);
 }

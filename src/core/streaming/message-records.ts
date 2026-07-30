@@ -35,14 +35,15 @@ export class EventMessageRecordProjector {
   }
 }
 
-export function* messageRecordsFromEntries(
-  entries: Iterable<SessionEntry>,
-): IterableIterator<MessageStreamRecord> {
-  let previousEntryId: string | undefined;
-  for (const entry of entries) {
+export class EntryMessageRecordProjector {
+  private previousEntryId: string | undefined;
+
+  project(entry: SessionEntry): readonly MessageStreamRecord[] {
+    const records: MessageStreamRecord[] = [];
+    const previousEntryId = this.previousEntryId;
     const isFirstEntry = previousEntryId === undefined;
     if (previousEntryId !== undefined && entry.parentId !== previousEntryId) {
-      yield {
+      records.push({
         type: "control",
         control: {
           kind: "tree_navigated",
@@ -52,12 +53,12 @@ export function* messageRecordsFromEntries(
             newLeafId: entry.parentId,
           },
         },
-      };
+      });
     }
 
     if (entry.type === "model_change") {
       if (!isFirstEntry) {
-        yield {
+        records.push({
           type: "control",
           control: {
             kind: "model_changed",
@@ -66,13 +67,23 @@ export function* messageRecordsFromEntries(
               model: { provider: entry.provider, id: entry.modelId },
             },
           },
-        };
+        });
       }
     } else {
       for (const message of sessionEntryToContextMessages(entry)) {
-        yield { type: "message", message };
+        records.push({ type: "message", message });
       }
     }
-    previousEntryId = entry.id;
+    this.previousEntryId = entry.id;
+    return records;
+  }
+}
+
+export function* messageRecordsFromEntries(
+  entries: Iterable<SessionEntry>,
+): IterableIterator<MessageStreamRecord> {
+  const projector = new EntryMessageRecordProjector();
+  for (const entry of entries) {
+    yield* projector.project(entry);
   }
 }

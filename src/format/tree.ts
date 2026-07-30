@@ -1,4 +1,5 @@
 import type { SessionEntry } from "@geraschenko/pi-coding-agent";
+import { DEFAULT_FORMAT_WIDTH } from "../core/constants.ts";
 import { summarizeEntry } from "./entries.ts";
 import { passesFilter, type FilterNode } from "./filter.ts";
 import { toLayoutTree, type ParentMap } from "./flat-tree.ts";
@@ -9,7 +10,7 @@ import type { EntriesInput, TreeFormatOptions } from "./types.ts";
 
 export const DEFAULT_TREE_FORMAT_OPTIONS: TreeFormatOptions = {
   filter: "conversation",
-  width: 120,
+  width: DEFAULT_FORMAT_WIDTH,
 };
 
 function entrySummary(entry: SessionEntry): string {
