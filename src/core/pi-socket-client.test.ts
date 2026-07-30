@@ -25,6 +25,8 @@ interface FakePiServer {
   socketPath: string;
   /** Send a broadcast record on the (single) accepted connection. */
   send(record: Record<string, unknown>): void;
+  /** Write raw bytes, for tests that control chunk boundaries. */
+  sendRaw(bytes: Buffer): void;
   closeConnection(): void;
   close(): Promise<void>;
 }
@@ -81,6 +83,7 @@ async function startFakePiServer(
   return {
     socketPath,
     send: writeJson,
+    sendRaw: (bytes) => connection!.write(bytes),
     closeConnection: () => connection!.destroy(),
     close: async () => {
       await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -144,6 +147,42 @@ test("each event is delivered paired with its post-fold state", async () => {
         { type: "compaction_start", isStreaming: true, isCompacting: true },
         { type: "agent_settled", isStreaming: false, isCompacting: true },
       ]);
+    } finally {
+      client.close();
+    }
+  } finally {
+    await server.close();
+  }
+});
+
+test("a UTF-8 code point split across socket chunks survives intact", async () => {
+  const server = await startFakePiServer();
+  try {
+    const client = await PiSocketClient.connect(server.socketPath);
+    try {
+      const subscription = await client.subscribe();
+      const iterator = subscription.events[Symbol.asyncIterator]();
+      const note = "liftoff \u{1f680}";
+      const torn = Buffer.from(
+        `${JSON.stringify({ type: "agent_settled", note })}\n`,
+      );
+      // Split inside the rocket's 4-byte encoding. The first write carries a
+      // complete record ahead of the torn prefix; receiving that record
+      // proves the prefix arrived in an earlier chunk than its continuation,
+      // so the tear cannot be papered over by kernel coalescing.
+      const splitAt = torn.indexOf(Buffer.from("\u{1f680}")) + 2;
+      server.sendRaw(
+        Buffer.concat([
+          Buffer.from('{"type":"agent_start"}\n'),
+          torn.subarray(0, splitAt),
+        ]),
+      );
+      assert.equal((await iterator.next()).value!.event.type, "agent_start");
+      server.sendRaw(torn.subarray(splitAt));
+      await flush(client);
+      const next = await iterator.next();
+      assert.equal(next.done, false);
+      assert.equal((next.value!.event as { note?: string }).note, note);
     } finally {
       client.close();
     }

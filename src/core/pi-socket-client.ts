@@ -23,6 +23,7 @@ import {
   type RpcSessionState,
   type RpcSocketBroadcastEvent,
 } from "@geraschenko/pi-coding-agent";
+import { LineReader } from "./line-reader.ts";
 import { AsyncQueue } from "./streaming/async-queue.ts";
 import type { StreamEvent, StreamSubscription } from "./streaming/driver.ts";
 
@@ -112,28 +113,23 @@ export class PiSocketClient {
       rejectHello = reject;
     });
 
-    let buffer = "";
+    // Byte-level splitting: a UTF-8 code point torn across TCP chunks must
+    // not be decoded until its continuation bytes arrive.
+    const lineReader = new LineReader();
     socket.on("data", (chunk) => {
-      buffer += chunk.toString("utf8");
-      let newlineIndex = buffer.indexOf("\n");
-      while (newlineIndex !== -1) {
-        const line = buffer.slice(0, newlineIndex);
-        buffer = buffer.slice(newlineIndex + 1);
-        if (line.trim() !== "") {
-          if (!helloSeen) {
-            helloSeen = true;
-            const error = validateHello(line);
-            if (error) {
-              socket.destroy();
-              rejectHello(error);
-            } else {
-              resolveHello();
-            }
+      for (const { text } of lineReader.push(chunk)) {
+        if (!helloSeen) {
+          helloSeen = true;
+          const error = validateHello(text);
+          if (error) {
+            socket.destroy();
+            rejectHello(error);
           } else {
-            client.dispatchLine(line);
+            resolveHello();
           }
+        } else {
+          client.dispatchLine(text);
         }
-        newlineIndex = buffer.indexOf("\n");
       }
     });
 
