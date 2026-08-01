@@ -140,15 +140,25 @@ function formatControl(record: MessageStreamRecord): string | undefined {
   }
 }
 
+/** A speaker header plus body; role-neutral records (control, cursor) carry
+ *  no header and never affect header suppression. */
+interface RenderedBlock {
+  readonly header: string | undefined;
+  readonly body: string;
+}
+
 function formatMessage(
   message: AgentMessage,
   options: MessageFormatOptions,
-): string {
+): RenderedBlock | undefined {
   switch (message.role) {
     case "user":
-      return `== user ==\n${extractTextContent(message.content)}`;
+      return {
+        header: "== user ==",
+        body: extractTextContent(message.content),
+      };
     case "assistant": {
-      const lines = ["== assistant =="];
+      const lines: string[] = [];
       if (hasContentBlock(message.content, "thinking")) {
         lines.push("[thinking]");
       }
@@ -169,52 +179,86 @@ function formatMessage(
       if (message.errorMessage !== undefined) {
         lines.push(`[error: ${message.errorMessage}]`);
       }
-      return lines.join("\n");
+      return { header: "== assistant ==", body: lines.join("\n") };
     }
     case "toolResult": {
-      const text = extractTextContent(message.content);
-      return (
-        formatToolResultText(
-          message.toolName,
-          message.isError,
-          text,
-          options,
-        ) ?? ""
+      const body = formatToolResultText(
+        message.toolName,
+        message.isError,
+        extractTextContent(message.content),
+        options,
       );
+      // Tool results are user-role in the protocol but assistant-side
+      // activity conceptually: they render headerless under an assistant
+      // block, and reassert the assistant header after a user message.
+      return body === undefined
+        ? undefined
+        : { header: "== assistant ==", body };
     }
     case "bashExecution":
-      return `== bash ==\n${message.command}\n[exit: ${message.exitCode ?? "unknown"}]${
-        message.output === "" ? "" : `\n${message.output}`
-      }`;
+      return {
+        header: "== bash ==",
+        body: `${message.command}\n[exit: ${message.exitCode ?? "unknown"}]${
+          message.output === "" ? "" : `\n${message.output}`
+        }`,
+      };
     case "custom":
-      return `== custom:${message.customType} ==\n${extractTextContent(message.content)}`;
+      return {
+        header: `== custom:${message.customType} ==`,
+        body: extractTextContent(message.content),
+      };
     case "branchSummary":
-      return `== branchSummary:${message.fromId} ==\n${message.summary}`;
+      return {
+        header: `== branchSummary:${message.fromId} ==`,
+        body: message.summary,
+      };
     case "compactionSummary":
-      return `== compactionSummary ==\n${message.summary}`;
+      return { header: "== compactionSummary ==", body: message.summary };
   }
 }
 
-/** A run of coalesced thinking/read-only activity, held back until a breaker
- *  or `end()` closes it (an open run is deliberately silent — any visible
- *  activity is itself a breaker). */
-interface CoalescedRun {
+/** Consecutive read-only calls between bash calls, merged into per-tool
+ *  clauses. */
+interface CoalescedToolClauses {
+  readonly kind: "tools";
   /** Tool name → rendered args in call order; insertion order is first
    *  appearance. */
   readonly toolArgs: Map<string, string[]>;
-  /** Call ids whose successful results are absorbed silently (their
-   *  summaries are the noise being removed). */
-  readonly callIds: Set<string>;
+}
+
+/** One bash call rendered on its own line (commands may contain the `;`/`,`
+ *  clause separators, so they never merge into a clause list). */
+interface CoalescedBashLine {
+  readonly kind: "bash";
+  readonly command: string;
+  /** `"3L, 45B"` once the call's successful result is absorbed; undefined
+ *  until then, or when `toolResults: "none"` asked to hide results. */
+  resultSummary: string | undefined;
+}
+
+/** A run of coalesced thinking/read-only/bash activity, held back until a
+ *  breaker or `end()` closes it (an open run is deliberately silent — any
+ *  visible activity is itself a breaker). */
+interface CoalescedRun {
+  /** Read-only clause segments and bash lines in call order; a bash call
+   *  closes the open clause segment so rendering preserves operation order. */
+  readonly items: (CoalescedToolClauses | CoalescedBashLine)[];
+  /** Read-only call ids whose successful results are absorbed silently
+   *  (their summaries are the noise being removed). */
+  readonly readCallIds: Set<string>;
+  /** Bash call id → rendered line awaiting its result summary. */
+  readonly bashLines: Map<string, CoalescedBashLine>;
   hadThinking: boolean;
   thoughtMs: number;
   thoughtComputable: boolean;
 }
 
 /** Adapted from clauctl's TUI fold (clauctl repo-relative:
- *  src/tui/transcript.ts `isFoldable`): thinking and read-only tool calls
- *  only, nothing visible — no non-blank text, no abort, no error, no other
- *  block types. A message contributing neither thinking nor a call renders
- *  normally instead of opening an empty run. */
+ *  src/tui/transcript.ts `isFoldable`): thinking, read-only tool calls, and —
+ *  unlike clauctl's fold — bash, whose commands stay visible in the run
+ *  rendering; nothing else visible — no non-blank text, no abort, no error,
+ *  no other block types. A message contributing neither thinking nor a call
+ *  renders normally instead of opening an empty run. */
 function isCoalescableAssistant(
   message: Extract<AgentMessage, { role: "assistant" }>,
 ): boolean {
@@ -233,7 +277,10 @@ function isCoalescableAssistant(
         return false;
       }
     } else if (block.type === "toolCall") {
-      if (typeof block.name !== "string" || !READ_ONLY_TOOLS.has(block.name)) {
+      if (
+        typeof block.name !== "string" ||
+        (!READ_ONLY_TOOLS.has(block.name) && block.name !== "bash")
+      ) {
         return false;
       }
       contributes = true;
@@ -264,15 +311,31 @@ function coalescedCallArg(
   return formatToolArguments(args, options.maxToolArgChars);
 }
 
+function toolClauses(segment: CoalescedToolClauses): string[] {
+  return [...segment.toolArgs].map(([name, args]) => {
+    const shown = args.filter((arg) => arg !== "");
+    return shown.length === 0 ? name : `${name} ${shown.join(", ")}`;
+  });
+}
+
+/** Width driving right-edge alignment: command plus summary code points (the
+ *  `[bash `, ` → `, `]` parts are constant per line). */
+function bashLineWidth(line: CoalescedBashLine): number {
+  return [...line.command].length + [...(line.resultSummary ?? "")].length;
+}
+
 /** `[thought for 4.3s; read a, b; grep TODO]` — one summed thought clause
  *  first (durations that would round to 0.0s render in milliseconds; bare
  *  `thought` when no duration was computable), then one clause per tool name
- *  in first-appearance order. */
-function renderRunLine(run: CoalescedRun): string {
-  const clauses: string[] = [];
+ *  in first-appearance order — followed by one `[bash cmd → 3L, 45B]` line
+ *  per bash call, padded so result summaries share a right edge within the
+ *  run. Later read-only segments render as further clause lines, preserving
+ *  operation order around bash calls. */
+function renderRunLines(run: CoalescedRun): string {
+  const leadingClauses: string[] = [];
   if (run.hadThinking) {
     const seconds = (run.thoughtMs / 1000).toFixed(1);
-    clauses.push(
+    leadingClauses.push(
       !run.thoughtComputable
         ? "thought"
         : seconds === "0.0"
@@ -280,11 +343,35 @@ function renderRunLine(run: CoalescedRun): string {
           : `thought for ${seconds}s`,
     );
   }
-  for (const [name, args] of run.toolArgs) {
-    const shown = args.filter((arg) => arg !== "");
-    clauses.push(shown.length === 0 ? name : `${name} ${shown.join(", ")}`);
+  const items = [...run.items];
+  if (items[0]?.kind === "tools") {
+    leadingClauses.push(...toolClauses(items[0]));
+    items.shift();
   }
-  return `[${clauses.join("; ")}]`;
+  const lines: string[] = [];
+  if (leadingClauses.length > 0) {
+    lines.push(`[${leadingClauses.join("; ")}]`);
+  }
+  const rightEdge = Math.max(
+    ...run.items
+      .filter(
+        (item): item is CoalescedBashLine =>
+          item.kind === "bash" && item.resultSummary !== undefined,
+      )
+      .map(bashLineWidth),
+    0,
+  );
+  for (const item of items) {
+    if (item.kind === "tools") {
+      lines.push(`[${toolClauses(item).join("; ")}]`);
+    } else if (item.resultSummary === undefined) {
+      lines.push(`[bash ${item.command}]`);
+    } else {
+      const padding = " ".repeat(rightEdge - bashLineWidth(item));
+      lines.push(`[bash ${item.command}${padding} → ${item.resultSummary}]`);
+    }
+  }
+  return lines.join("\n");
 }
 
 /**
@@ -295,15 +382,26 @@ function renderRunLine(run: CoalescedRun): string {
  * (`format messages`, `tail`, `prompt`) flows through this class, making
  * byte-equality between them structural.
  *
- * Runs of thinking and read-only tool calls coalesce into one line unless
- * `toolResults` is "full" (full detail was asked for). `push()` returns ""
- * for records joining the run; the breaker's `push()` — or `end()` at EOF —
- * emits the completed line first, then the breaker's own block.
+ * Runs of thinking, read-only tool calls, and bash calls coalesce into one
+ * compact block unless `toolResults` is "full" (full detail was asked for).
+ * `push()` returns "" for records joining the run; the breaker's `push()` —
+ * or `end()` at EOF — emits the completed block first, then the breaker's
+ * own block.
+ *
+ * Speaker headers (`== user ==`, `== assistant ==`, …) are emitted only when
+ * the speaker changes; tool results and coalesced runs count as assistant
+ * output. A block containing raw (unbracketed) text forces the next headered
+ * block to re-emit its header so the raw text's end stays unambiguous.
  */
 export class MessageFormatter {
   private readonly options: MessageFormatOptions;
   private emittedAny = false;
   private run: CoalescedRun | undefined;
+  /** Header of the last speaker-attributed block; a matching next block
+   *  omits its header unless raw text forced re-emission. */
+  private lastHeader: string | undefined;
+  /** Set when a block rendered raw (unbracketed) text; see class docs. */
+  private forceNextHeader = false;
   /** The last message timestamp seen; a thinking message's duration is its
    *  timestamp minus this (clauctl's session-file delta rule). */
   private previousTimestamp: number | undefined;
@@ -327,10 +425,10 @@ export class MessageFormatter {
       return "";
     }
     let output = this.flushRun();
-    const chunk = formatMessageRecord(record, this.options);
+    const rendered = formatMessageRecord(record, this.options);
     this.trackTimestamp(record);
-    if (chunk !== undefined && chunk !== "") {
-      output += this.block(chunk);
+    if (rendered !== undefined) {
+      output += this.block(rendered.header, rendered.body);
     }
     return output;
   }
@@ -342,7 +440,21 @@ export class MessageFormatter {
     return `${flushed}${this.emittedAny ? "\n" : ""}`;
   }
 
-  private block(chunk: string): string {
+  private block(header: string | undefined, body: string): string {
+    const emitHeader =
+      header !== undefined &&
+      (this.forceNextHeader || header !== this.lastHeader);
+    if (header !== undefined) {
+      this.lastHeader = header;
+      this.forceNextHeader = false;
+    }
+    if (hasRawTextLine(body)) {
+      this.forceNextHeader = true;
+    }
+    const chunk = emitHeader ? `${header}\n${body}` : body;
+    if (chunk === "") {
+      return "";
+    }
     const separator = this.emittedAny ? "\n\n" : "";
     this.emittedAny = true;
     return `${separator}${chunk}`;
@@ -352,9 +464,9 @@ export class MessageFormatter {
     if (this.run === undefined) {
       return "";
     }
-    const line = renderRunLine(this.run);
+    const lines = renderRunLines(this.run);
     this.run = undefined;
-    return this.block(line);
+    return this.block("== assistant ==", lines);
   }
 
   private absorbIntoRun(record: MessageStreamRecord): boolean {
@@ -363,9 +475,10 @@ export class MessageFormatter {
     }
     const message = record.message;
     if (message.role === "assistant" && isCoalescableAssistant(message)) {
-      const run = (this.run ??= {
-        toolArgs: new Map(),
-        callIds: new Set(),
+      const run: CoalescedRun = (this.run ??= {
+        items: [],
+        readCallIds: new Set(),
+        bashLines: new Map(),
         hadThinking: false,
         thoughtMs: 0,
         thoughtComputable: false,
@@ -387,11 +500,32 @@ export class MessageFormatter {
           block.type === "toolCall" &&
           typeof block.name === "string"
         ) {
-          const args = run.toolArgs.get(block.name) ?? [];
-          args.push(coalescedCallArg(block, this.options));
-          run.toolArgs.set(block.name, args);
-          if (typeof block.id === "string") {
-            run.callIds.add(block.id);
+          const arg = coalescedCallArg(block, this.options);
+          if (block.name === "bash") {
+            const line: CoalescedBashLine = {
+              kind: "bash",
+              command: arg,
+              resultSummary: undefined,
+            };
+            run.items.push(line);
+            if (typeof block.id === "string") {
+              run.bashLines.set(block.id, line);
+            }
+          } else {
+            const last = run.items.at(-1);
+            const segment: CoalescedToolClauses =
+              last?.kind === "tools"
+                ? last
+                : { kind: "tools", toolArgs: new Map() };
+            if (segment !== last) {
+              run.items.push(segment);
+            }
+            const args = segment.toolArgs.get(block.name) ?? [];
+            args.push(arg);
+            segment.toolArgs.set(block.name, args);
+            if (typeof block.id === "string") {
+              run.readCallIds.add(block.id);
+            }
           }
         }
       }
@@ -401,11 +535,21 @@ export class MessageFormatter {
     if (
       message.role === "toolResult" &&
       !message.isError &&
-      this.run !== undefined &&
-      this.run.callIds.has(message.toolCallId)
+      this.run !== undefined
     ) {
-      this.trackTimestamp(record);
-      return true;
+      if (this.run.readCallIds.has(message.toolCallId)) {
+        this.trackTimestamp(record);
+        return true;
+      }
+      const bashLine = this.run.bashLines.get(message.toolCallId);
+      if (bashLine !== undefined) {
+        if (this.options.toolResults === "summary") {
+          const text = extractTextContent(message.content);
+          bashLine.resultSummary = `${countLines(text)}L, ${Buffer.byteLength(text, "utf8")}B`;
+        }
+        this.trackTimestamp(record);
+        return true;
+      }
     }
     return false;
   }
@@ -432,12 +576,28 @@ export function formatMessageRecords(
 function formatMessageRecord(
   record: MessageStreamRecord,
   options: MessageFormatOptions,
-): string | undefined {
+): RenderedBlock | undefined {
   if (record.type === "pictl_cursor") {
-    return `[cursor: ${record.entryId ?? "null"}]`;
+    return {
+      header: undefined,
+      body: `[cursor: ${record.entryId ?? "null"}]`,
+    };
   }
   if (record.type === "control") {
-    return formatControl(record);
+    const body = formatControl(record);
+    return body === undefined ? undefined : { header: undefined, body };
   }
   return formatMessage(record.message, options);
+}
+
+/** Bracketed lines (`[...]`) are self-delimiting; any other non-blank line
+ *  is raw text whose boundary with a following same-speaker block would be
+ *  ambiguous without a header. */
+function hasRawTextLine(body: string): boolean {
+  return body
+    .split("\n")
+    .some(
+      (line) =>
+        line.trim() !== "" && !(line.startsWith("[") && line.endsWith("]")),
+    );
 }

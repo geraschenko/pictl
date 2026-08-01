@@ -46,7 +46,7 @@ test("format messages coalesces the read run and renders text and cursor", async
   assert.equal(
     output,
     "== user ==\nHello\n\n" +
-      "[thought for 1ms; read README.md]\n\n" +
+      "== assistant ==\n[thought for 1ms; read README.md]\n\n" +
       "[cursor: 0eb932a9]\n",
   );
 });
@@ -153,7 +153,7 @@ test("coalescing groups tools by first appearance and sums thinking time", async
   assert.equal(
     formatMessageRecords(await parseMessageRecords(input)),
     "== user ==\ngo\n\n" +
-      "[thought for 4.3s; read a.ts, b.ts; grep TODO]\n\n" +
+      "== assistant ==\n[thought for 4.3s; read a.ts, b.ts; grep TODO]\n\n" +
       "== user ==\ndone\n",
   );
 });
@@ -164,7 +164,7 @@ test("coalescing renders bare thought when no duration is computable", async () 
   ]);
   assert.equal(
     formatMessageRecords(await parseMessageRecords(input)),
-    "[thought]\n",
+    "== assistant ==\n[thought]\n",
   );
 });
 
@@ -182,11 +182,79 @@ test("a failed tool result breaks the run and renders normally", async () => {
   ]);
   assert.equal(
     formatMessageRecords(await parseMessageRecords(input)),
-    "[read a.ts]\n\n[read:error 1 lines, 4 bytes]\nboom\n",
+    "== assistant ==\n[read a.ts]\n\n[read:error 1 lines, 4 bytes]\nboom\n",
   );
 });
 
 test("non-read-only calls do not coalesce", async () => {
+  const input = messageJsonl([
+    assistantRecord([
+      {
+        type: "toolCall",
+        id: "call-1",
+        name: "edit",
+        arguments: { path: "a.ts" },
+      },
+    ]),
+  ]);
+  assert.equal(
+    formatMessageRecords(await parseMessageRecords(input)),
+    "== assistant ==\n[tool:edit path: a.ts]\n",
+  );
+});
+
+test("bash calls coalesce onto their own lines with aligned result summaries", async () => {
+  const input = messageJsonl([
+    userMessageRecord("go", 1000),
+    assistantRecord(
+      [
+        { type: "thinking", thinking: "..." },
+        {
+          type: "toolCall",
+          id: "call-1",
+          name: "read",
+          arguments: { path: "a.ts" },
+        },
+        {
+          type: "toolCall",
+          id: "call-2",
+          name: "bash",
+          arguments: { command: "ls" },
+        },
+        {
+          type: "toolCall",
+          id: "call-3",
+          name: "read",
+          arguments: { path: "b.ts" },
+        },
+        {
+          type: "toolCall",
+          id: "call-4",
+          name: "bash",
+          arguments: { command: "wc -l a.ts" },
+        },
+      ],
+      2000,
+    ),
+    toolResultRecord("call-1", "read", "ok", 2100),
+    toolResultRecord("call-2", "bash", "one\ntwo", 2200),
+    toolResultRecord("call-3", "read", "ok", 2300),
+    toolResultRecord("call-4", "bash", "3 a.ts", 2400),
+    userMessageRecord("done", 3000),
+  ]);
+  assert.equal(
+    formatMessageRecords(await parseMessageRecords(input)),
+    "== user ==\ngo\n\n" +
+      "== assistant ==\n" +
+      "[thought for 1.0s; read a.ts]\n" +
+      "[bash ls         → 2L, 7B]\n" +
+      "[read b.ts]\n" +
+      "[bash wc -l a.ts → 1L, 6B]\n\n" +
+      "== user ==\ndone\n",
+  );
+});
+
+test("a bash call whose result never arrives renders without a summary", async () => {
   const input = messageJsonl([
     assistantRecord([
       {
@@ -199,7 +267,61 @@ test("non-read-only calls do not coalesce", async () => {
   ]);
   assert.equal(
     formatMessageRecords(await parseMessageRecords(input)),
-    "== assistant ==\n[tool:bash command: true]\n",
+    "== assistant ==\n[bash true]\n",
+  );
+});
+
+test("toolResults none coalesces bash without result summaries", async () => {
+  const input = messageJsonl([
+    assistantRecord([
+      {
+        type: "toolCall",
+        id: "call-1",
+        name: "bash",
+        arguments: { command: "ls" },
+      },
+    ]),
+    toolResultRecord("call-1", "bash", "one\ntwo"),
+  ]);
+  assert.equal(
+    formatMessageRecords(await parseMessageRecords(input), {
+      toolResults: "none",
+    }),
+    "== assistant ==\n[bash ls]\n",
+  );
+});
+
+test("repeated assistant headers are suppressed until raw text intervenes", async () => {
+  const input = messageJsonl([
+    assistantRecord([
+      {
+        type: "toolCall",
+        id: "call-1",
+        name: "edit",
+        arguments: { path: "a.ts" },
+      },
+    ]),
+    toolResultRecord("call-1", "edit", "done"),
+    assistantRecord([{ type: "text", text: "All set" }]),
+    assistantRecord([{ type: "text", text: "More" }]),
+  ]);
+  assert.equal(
+    formatMessageRecords(await parseMessageRecords(input)),
+    "== assistant ==\n[tool:edit path: a.ts]\n\n" +
+      "[edit:ok 1 lines, 4 bytes]\n\n" +
+      "All set\n\n" +
+      "== assistant ==\nMore\n",
+  );
+});
+
+test("a tool result directly after a user message gets an assistant header", async () => {
+  const input = messageJsonl([
+    userMessageRecord("go"),
+    toolResultRecord("call-9", "bash", "hi"),
+  ]);
+  assert.equal(
+    formatMessageRecords(await parseMessageRecords(input)),
+    "== user ==\ngo\n\n== assistant ==\n[bash:ok 1 lines, 2 bytes]\n",
   );
 });
 
@@ -212,7 +334,7 @@ test("MessageFormatter holds a run back and flushes it with the breaker's block"
     "== user ==\nHello",
     "",
     "",
-    "\n\n[thought for 1ms; read README.md]\n\n[cursor: 0eb932a9]",
+    "\n\n== assistant ==\n[thought for 1ms; read README.md]\n\n[cursor: 0eb932a9]",
   ]);
   assert.equal(endChunk, "\n");
   assert.equal(chunks.join("") + endChunk, formatMessageRecords(records));
@@ -229,7 +351,7 @@ test("format messages supports get-messages JSON", async () => {
   );
   assert.equal(
     output,
-    "== user ==\nHello\n\n[thought for 1ms; read README.md]\n",
+    "== user ==\nHello\n\n== assistant ==\n[thought for 1ms; read README.md]\n",
   );
 });
 
@@ -240,7 +362,7 @@ test("format messages supports append-ordered get-entries JSON", async () => {
   assert.equal(
     output,
     "== user ==\nHelp me write a script\n\n" +
-      "[thought for 1ms; read README.md]\n",
+      "== assistant ==\n[thought for 1ms; read README.md]\n",
   );
 });
 
@@ -398,7 +520,10 @@ test("format messages includes failed result snippets in summary mode", async ()
     ),
     { maxErrorLines: 2 },
   );
-  assert.equal(output, "[bash:error 3 lines, 13 bytes]\none\ntwo\n");
+  assert.equal(
+    output,
+    "== assistant ==\n[bash:error 3 lines, 13 bytes]\none\ntwo\n",
+  );
 });
 
 test("format messages accepts raw entry JSONL like the entries document", async () => {
@@ -444,7 +569,7 @@ test("format messages writes each record's block as it arrives", async () => {
   assert.equal(proc.stderr, "");
   assert.deepEqual(proc.stdoutChunks, [
     "== user ==\nHello",
-    "\n\n[thought for 1ms; read README.md]\n\n[cursor: 0eb932a9]",
+    "\n\n== assistant ==\n[thought for 1ms; read README.md]\n\n[cursor: 0eb932a9]",
     "\n",
   ]);
 });
