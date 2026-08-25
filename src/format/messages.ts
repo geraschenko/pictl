@@ -232,7 +232,7 @@ interface CoalescedBashLine {
   readonly kind: "bash";
   readonly command: string;
   /** `"3L, 45B"` once the call's successful result is absorbed; undefined
- *  until then, or when `toolResults: "none"` asked to hide results. */
+   *  until then, or when `toolResults: "none"` asked to hide results. */
   resultSummary: string | undefined;
 }
 
