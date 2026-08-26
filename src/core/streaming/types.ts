@@ -64,6 +64,4 @@ export interface StreamControlRecord {
 }
 
 export type MessageStreamRecord =
-  | StreamMessageRecord
-  | StreamControlRecord
-  | StreamCursorRecord;
+  StreamMessageRecord | StreamControlRecord | StreamCursorRecord;

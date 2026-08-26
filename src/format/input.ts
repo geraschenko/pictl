@@ -149,9 +149,9 @@ function validateMessage(value: unknown, allowLegacyNullContent = false): void {
       if (allowLegacyNullContent && value.content == null) {
         break;
       }
-      if (
-        !(typeof value.content === "string" || Array.isArray(value.content))
-      ) {
+      if (!(
+        typeof value.content === "string" || Array.isArray(value.content)
+      )) {
         throw new UsageError("invalid session entry: invalid user content");
       }
       break;
@@ -233,13 +233,11 @@ function validateSessionEntryRecord(record: Record<string, unknown>): void {
       break;
     case "custom_message":
       requireString(record, "customType");
-      if (
-        !(
-          record.content == null ||
-          typeof record.content === "string" ||
-          Array.isArray(record.content)
-        )
-      ) {
+      if (!(
+        record.content == null ||
+        typeof record.content === "string" ||
+        Array.isArray(record.content)
+      )) {
         throw new UsageError(
           "invalid session entry: invalid custom message content",
         );
