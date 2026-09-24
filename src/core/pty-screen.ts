@@ -6,7 +6,7 @@
 import { SerializeAddon } from "@xterm/addon-serialize";
 import xterm from "@xterm/headless";
 import type { IPty } from "node-pty";
-import { cursorTo, cursorToRow, HIDE_CURSOR, SHOW_CURSOR } from "./ansi.ts";
+import { HIDE_CURSOR, SHOW_CURSOR } from "./ansi.ts";
 import { spawnPty } from "./pty.ts";
 
 const PTY_COLS = 80;
@@ -25,36 +25,6 @@ function isCursorHidden(terminal: xterm.Terminal): boolean {
     }
   )._core;
   return core?.coreService?.isCursorHidden ?? false;
-}
-
-// Reserving a row for a client hint line is an attach-client policy, so the
-// daemon arguably shouldn't bake it into every snapshot. The computation must
-// stay here — it reads the authoritative xterm buffer (cursor/bottom-row state)
-// that only the daemon has — but the "reserve one row" decision could become a
-// per-client parameter in the tty protocol instead of being hardcoded. Left as
-// a note rather than a refactor: a richer client (e.g. an embedded terminal)
-// can render its hint outside the emulated bounds and not need this at all.
-/**
- * Make the bottom row available for the attach client's hint line. When pi's
- * content reaches the bottom row, append a one-line scroll and re-park the
- * cursor one row higher, so pi's relative redraws stay aligned with the
- * scrolled content and the hint gets a row of its own below everything pi
- * drew. When the bottom row is already empty, the hint can use it as is.
- */
-export function hintRoomSequence(terminal: xterm.Terminal): string {
-  const buffer = terminal.buffer.active;
-  const bottomLine = buffer.getLine(buffer.baseY + terminal.rows - 1);
-  if (
-    bottomLine === undefined ||
-    bottomLine.translateToString().trim() === ""
-  ) {
-    return "";
-  }
-  // cursorY is 0-based relative to the visible screen, so as a 1-based row it
-  // is cursorY + 1 before the scroll and cursorY after it.
-  const parkedRow = Math.max(1, buffer.cursorY);
-  const parkedCol = buffer.cursorX + 1;
-  return `${cursorToRow(terminal.rows)}\n${cursorTo(parkedRow, parkedCol)}`;
 }
 
 /**
@@ -126,14 +96,14 @@ export class PtyScreen {
    * visibility at all, so the snapshot must append whichever sequence mirrors
    * the emulator's current state: pi normally runs cursor-hidden (omitting
    * this would show a phantom cursor), but if pi has the cursor visible at
-   * snapshot time, the attacher must show it too.
+   * snapshot time, the attacher must show it too. Preserve row coordinates:
+   * pi's subsequent absolute-addressed redraws must target the same content.
    */
   serializeScreen(): Promise<string> {
     return new Promise((resolve) => {
       this.terminal.write("", () =>
         resolve(
           this.serializeAddon.serialize() +
-            hintRoomSequence(this.terminal) +
             (isCursorHidden(this.terminal) ? HIDE_CURSOR : SHOW_CURSOR),
         ),
       );

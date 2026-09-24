@@ -1,41 +1,57 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import xterm from "@xterm/headless";
-import { hintRoomSequence } from "./pty-screen.ts";
-
-function makeTerminal(): xterm.Terminal {
-  return new xterm.Terminal({ cols: 80, rows: 10, allowProposedApi: true });
-}
+import { PtyScreen } from "./pty-screen.ts";
+import { attachHintSequence } from "./attach.ts";
 
 function write(terminal: xterm.Terminal, data: string): Promise<void> {
-  return new Promise((resolve) => terminal.write(data, () => resolve()));
+  return new Promise((resolve) => terminal.write(data, resolve));
 }
 
-test("hintRoomSequence is empty while the bottom row is free", async () => {
-  const terminal = makeTerminal();
-  await write(terminal, "line one\r\nline two");
-  assert.equal(hintRoomSequence(terminal), "");
-});
+for (const alternateScreen of [false, true]) {
+  test(
+    `snapshot preserves redraw coordinates (alternate screen: ${alternateScreen})`,
+    { timeout: 5_000 },
+    async () => {
+      const fixture =
+        (alternateScreen ? "\x1b[?1049h" : "") +
+        "\x1b[1;1Hconversation\x1b[21;1Htop border\x1b[22;1Hinput" +
+        "\x1b[23;1Hbottom border\x1b[24;1Hfooter\x1b[22;6H";
+      const screen = new PtyScreen(
+        process.execPath,
+        ["-e", `process.stdout.write(${JSON.stringify(fixture)})`],
+        { cwd: process.cwd(), env: { TERM: "xterm-256color" } },
+      );
+      const terminal = new xterm.Terminal({
+        cols: 80,
+        rows: 24,
+        allowProposedApi: true,
+      });
+      try {
+        await new Promise<void>((resolve) => screen.onExit(() => resolve()));
+        await write(
+          terminal,
+          (await screen.serializeScreen()) + attachHintSequence("test", 80),
+        );
+        const line = (row: number): string =>
+          terminal.buffer.active
+            .getLine(terminal.buffer.active.baseY + row - 1)!
+            .translateToString(true);
+        assert.equal(line(22), "input");
+        assert.equal(line(23), "bottom border");
+        assert.equal(line(24), "footer");
+        assert.equal(terminal.buffer.active.cursorY, 21);
+        assert.equal(terminal.buffer.active.cursorX, 5);
 
-test("hintRoomSequence scrolls one line and re-parks the cursor when content reaches the bottom row", async () => {
-  const terminal = makeTerminal();
-  for (let i = 1; i <= 10; i++) {
-    await write(terminal, `line-${i}${i < 10 ? "\r\n" : ""}`);
-  }
-  // Cursor sits at the end of "line-10" on the bottom row (row 10, col 8;
-  // 0-based cursorY 9, cursorX 7). After the appended scroll, the same spot
-  // in the content is one row higher: row 9, col 8.
-  assert.equal(hintRoomSequence(terminal), "\x1b[10;1H\n\x1b[9;8H");
-
-  // Applying the sequence to the emulator itself must leave the bottom row
-  // blank and the cursor on the re-parked spot.
-  await write(terminal, hintRoomSequence(terminal));
-  const buffer = terminal.buffer.active;
-  const bottomRow = buffer
-    .getLine(buffer.baseY + terminal.rows - 1)!
-    .translateToString()
-    .trim();
-  assert.equal(bottomRow, "");
-  assert.equal(buffer.cursorY, 8);
-  assert.equal(buffer.cursorX, 7);
-});
+        // Pi's alternate-screen renderer addresses changed rows absolutely.
+        await write(terminal, "\x1b[22;1H\x1b[2Kinput: hello");
+        assert.equal(line(22), "input: hello");
+        assert.equal(line(23), "bottom border");
+        assert.equal(line(24), "footer");
+      } finally {
+        screen.kill();
+        terminal.dispose();
+      }
+    },
+  );
+}

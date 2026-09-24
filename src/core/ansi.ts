@@ -12,6 +12,7 @@ export const DISABLE_MOUSE_REPORTING =
 export const RESET_SGR = "\x1b[0m";
 export const CURSOR_HOME = "\x1b[H";
 export const ERASE_SCREEN = "\x1b[2J";
+export const ERASE_LINE = "\x1b[2K";
 /** DECSC/DECRC: save/restore cursor position AND SGR attributes. */
 export const SAVE_CURSOR = "\x1b7";
 export const RESTORE_CURSOR = "\x1b8";

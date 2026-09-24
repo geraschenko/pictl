@@ -11,6 +11,7 @@ import {
   DISABLE_BRACKETED_PASTE,
   DISABLE_MOUSE_REPORTING,
   ERASE_SCREEN,
+  ERASE_LINE,
   RESET_SGR,
   RESTORE_CURSOR,
   SAVE_CURSOR,
@@ -42,6 +43,15 @@ export const TERMINAL_RESTORE_SEQUENCE = `${DISABLE_MOUSE_REPORTING}${SHOW_CURSO
 
 /** Render the snapshot from the daemon's emulator origin: home, clear. */
 const CLEAR_SCREEN_SEQUENCE = `${CURSOR_HOME}${ERASE_SCREEN}`;
+
+/** Overlay the top row without shifting pi's screen or changing its cursor/SGR. */
+export function attachHintSequence(agentId: string, columns: number): string {
+  const hint = `attached to ${agentId}; detach: ${DETACH_KEY_NAME}`.slice(
+    0,
+    Math.max(0, columns),
+  );
+  return `${SAVE_CURSOR}${CURSOR_HOME}${RESET_SGR}${ERASE_LINE}${hint}${RESTORE_CURSOR}`;
+}
 
 async function connectToTty(
   socketPath: string,
@@ -88,12 +98,6 @@ export async function attach(this: CommandContext): Promise<void> {
   stdin.setRawMode(true);
   stdin.resume();
 
-  // Drawn over the last row right after the snapshot, so it is visible on
-  // attach instead of being wiped by the snapshot's screen clear; pi's next
-  // full redraw overwrites it. DECSC/DECRC bracket it so the cursor and SGR
-  // state the snapshot established are untouched.
-  const attachHint = `${SAVE_CURSOR}${cursorToLastRow()}${RESET_SGR}attached to ${agentId}; detach: ${DETACH_KEY_NAME}${RESTORE_CURSOR}`;
-
   const finish = (exitCode: number, message: string): never => {
     stdin.setRawMode(false);
     stdin.pause();
@@ -124,7 +128,8 @@ export async function attach(this: CommandContext): Promise<void> {
           case FrameType.snapshot:
             stdout.write(CLEAR_SCREEN_SEQUENCE);
             stdout.write(frame.payload);
-            stdout.write(attachHint);
+            // Pi overwrites the hint whenever it redraws the top row.
+            stdout.write(attachHintSequence(agentId, stdout.columns));
             break;
           case FrameType.output:
             stdout.write(frame.payload);
