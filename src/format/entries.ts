@@ -1,6 +1,7 @@
 import type { SessionEntry } from "@geraschenko/pi-coding-agent";
 import type { AgentMessage } from "../core/streaming/types.ts";
 import { passesFilter } from "./filter.ts";
+import { formatSystemMessage } from "./system-message.ts";
 import type { EntriesInput, EntryFormatOptions } from "./types.ts";
 import {
   contentBlocks,
@@ -46,6 +47,8 @@ export function entryFormatOptions(
 
 export function rawMessageSummary(message: AgentMessage): string {
   switch (message.role) {
+    case "system":
+      return oneLine(formatSystemMessage(message));
     case "user":
       return oneLine(extractTextContent(message.content));
     case "assistant": {
@@ -88,6 +91,10 @@ function rawEntrySummary(entry: SessionEntry, maxChars: number): string {
   switch (entry.type) {
     case "message":
       return rawMessageSummary(entry.message);
+    case "usage":
+      return `${entry.kind}: ${entry.provider}/${entry.model}${entry.note === undefined ? "" : ` ${oneLine(entry.note)}`}`;
+    case "context_edit":
+      return `${entry.replacement === null ? "omit" : "replace"}: ${entry.targetId}`;
     case "thinking_level_change":
       return entry.thinkingLevel;
     case "model_change":

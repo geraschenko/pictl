@@ -64,6 +64,7 @@ const THINKING_LEVELS = [
   "medium",
   "high",
   "xhigh",
+  "max",
 ] as const;
 
 /**
@@ -335,6 +336,15 @@ const abortCommand = commandOneTarget<RawFlag>({
   parameters: { flags: rawFlag },
   func(flags) {
     return sendSimple(this, flags, { type: "abort" });
+  },
+});
+
+const clearQueueCommand = commandOneTarget<RawFlag>({
+  docs: { brief: "retrieve and clear queued steering and follow-up messages" },
+  audited: true,
+  parameters: { flags: rawFlag },
+  func(flags) {
+    return sendSimple(this, flags, { type: "clear_queue" });
   },
 });
 
@@ -782,6 +792,7 @@ export const rpcRoutes = {
   steer: steerCommand,
   "follow-up": followUpCommand,
   abort: abortCommand,
+  "clear-queue": clearQueueCommand,
   "new-session": newSessionCommand,
   "get-state": getStateCommand,
   "set-model": setModelCommand,

@@ -20,6 +20,7 @@ import {
   EventMessageRecordProjector,
 } from "../core/streaming/message-records.ts";
 import type {
+  AgentMessage,
   MessageStreamRecord,
   StreamCursorRecord,
 } from "../core/streaming/types.ts";
@@ -27,26 +28,31 @@ import type { CommandContext } from "../core/targets.ts";
 import { isRecord, UsageError } from "../core/util.ts";
 import type { EntriesInput } from "./types.ts";
 
-const MESSAGE_ROLES = new Set([
-  "user",
-  "assistant",
-  "toolResult",
-  "bashExecution",
-  "custom",
-  "branchSummary",
-  "compactionSummary",
-]);
-const ENTRY_TYPES = new Set([
-  "message",
-  "thinking_level_change",
-  "model_change",
-  "compaction",
-  "branch_summary",
-  "custom",
-  "custom_message",
-  "label",
-  "session_info",
-]);
+const MESSAGE_ROLE_MARKERS: Record<AgentMessage["role"], true> = {
+  system: true,
+  user: true,
+  assistant: true,
+  toolResult: true,
+  bashExecution: true,
+  custom: true,
+  branchSummary: true,
+  compactionSummary: true,
+};
+const MESSAGE_ROLES = new Set<string>(Object.keys(MESSAGE_ROLE_MARKERS));
+const ENTRY_TYPE_MARKERS: Record<SessionEntry["type"], true> = {
+  message: true,
+  thinking_level_change: true,
+  model_change: true,
+  usage: true,
+  context_edit: true,
+  compaction: true,
+  branch_summary: true,
+  custom: true,
+  custom_message: true,
+  label: true,
+  session_info: true,
+};
+const ENTRY_TYPES = new Set<string>(Object.keys(ENTRY_TYPE_MARKERS));
 const CONTROL_KINDS = new Set([
   "compaction",
   "tree_navigated",
@@ -145,6 +151,37 @@ function validateMessage(value: unknown, allowLegacyNullContent = false): void {
     );
   }
   switch (value.role) {
+    case "system":
+      if (!(
+        typeof value.content === "string" ||
+        Array.isArray(value.content) ||
+        (allowLegacyNullContent && value.content == null)
+      )) {
+        throw new UsageError("invalid session entry: invalid system content");
+      }
+      if (
+        value.sections !== undefined &&
+        (!isRecord(value.sections) ||
+          !Object.values(value.sections).every(isStringOrNull))
+      ) {
+        throw new UsageError("invalid session entry: invalid system sections");
+      }
+      for (const field of ["toolsAdded", "toolsRemoved"]) {
+        const tools = value[field];
+        if (
+          tools !== undefined &&
+          (!Array.isArray(tools) ||
+            !tools.every(
+              (tool: unknown) =>
+                isRecord(tool) && typeof tool.name === "string",
+            ))
+        ) {
+          throw new UsageError(
+            `invalid session entry: invalid system ${field}`,
+          );
+        }
+      }
+      break;
     case "user":
       if (allowLegacyNullContent && value.content == null) {
         break;
@@ -211,6 +248,30 @@ function validateSessionEntryRecord(record: Record<string, unknown>): void {
   switch (record.type) {
     case "message":
       validateMessage(record.message, true);
+      break;
+    case "usage":
+      requireString(record, "kind");
+      requireString(record, "provider");
+      requireString(record, "model");
+      if (!isRecord(record.usage)) {
+        throw new UsageError("invalid session entry: invalid usage");
+      }
+      if (record.note !== undefined) requireString(record, "note");
+      break;
+    case "context_edit":
+      requireString(record, "targetId");
+      if (
+        record.replacement !== null &&
+        (!isRecord(record.replacement) ||
+          !(
+            typeof record.replacement.content === "string" ||
+            Array.isArray(record.replacement.content)
+          ))
+      ) {
+        throw new UsageError(
+          "invalid session entry: invalid context replacement",
+        );
+      }
       break;
     case "thinking_level_change":
       requireString(record, "thinkingLevel");

@@ -63,6 +63,9 @@ export function passesFilter(
   const entry = node.entry;
   const isCurrentLeaf = entry.id === currentLeafId;
 
+  // Pi hides usage even in its "all" and "labeled-only" views.
+  if (entry.type === "usage") return false;
+
   // Adapted from pi TreeSelector filtering.
   // pi repo-relative: packages/coding-agent/src/modes/interactive/components/tree-selector.ts
   if (
@@ -95,6 +98,7 @@ export function passesFilter(
 
   const isSettingsEntry =
     entry.type === "label" ||
+    entry.type === "context_edit" ||
     entry.type === "custom" ||
     entry.type === "model_change" ||
     entry.type === "thinking_level_change" ||

@@ -153,6 +153,87 @@ test("canonical entry conversion projects compaction, branch, and custom summari
   ]);
 });
 
+test("context edits and usage preserve append history and advance the navigation cursor", () => {
+  const first = userEntry("A", null, "original");
+  const entries: SessionEntry[] = [
+    first,
+    {
+      type: "context_edit",
+      id: "edit",
+      parentId: "A",
+      timestamp: first.timestamp,
+      targetId: "A",
+      replacement: null,
+    },
+    {
+      type: "context_edit",
+      id: "replace",
+      parentId: "edit",
+      timestamp: first.timestamp,
+      targetId: "A",
+      replacement: { content: "replacement" },
+    },
+    {
+      type: "usage",
+      id: "usage",
+      parentId: "replace",
+      timestamp: first.timestamp,
+      kind: "cache_warm",
+      provider: "test",
+      model: "test",
+      usage: {
+        input: 0,
+        output: 0,
+        cacheRead: 1,
+        cacheWrite: 0,
+        totalTokens: 1,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      },
+    },
+    userEntry("B", "usage", "after bookkeeping"),
+    userEntry("C", "A", "another branch"),
+  ];
+  const records = Array.from(messageRecordsFromEntries(entries));
+  assert.deepEqual(records.map(recordSummary), [
+    "message:user",
+    "message:user",
+    "navigate:B->A",
+    "message:user",
+  ]);
+  assert.ok(first.type === "message");
+  assert.deepEqual(records[0], { type: "message", message: first.message });
+  const projector = new EventMessageRecordProjector();
+  for (const entry of entries.slice(1, 4)) {
+    assert.deepEqual(projector.project({ type: "entry_appended", entry }), []);
+  }
+});
+
+test("compaction projects its system checkpoint before the summary through pi", () => {
+  const systemMessage = {
+    role: "system" as const,
+    content: "checkpoint",
+    timestamp: 1,
+  };
+  const entries: SessionEntry[] = [
+    {
+      type: "compaction",
+      id: "compact",
+      parentId: null,
+      timestamp: "2026-01-01T00:00:00.000Z",
+      summary: "summary",
+      firstKeptEntryId: "compact",
+      tokensBefore: 100,
+      systemMessage,
+    },
+  ];
+  const records = Array.from(messageRecordsFromEntries(entries));
+  assert.deepEqual(records.map(recordSummary), [
+    "message:system",
+    "message:compactionSummary",
+  ]);
+  assert.deepEqual(records[0], { type: "message", message: systemMessage });
+});
+
 test("event projection faithfully emits direct observations", () => {
   const projector = new EventMessageRecordProjector();
   const events = [

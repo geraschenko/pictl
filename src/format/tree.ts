@@ -16,6 +16,8 @@ export const DEFAULT_TREE_FORMAT_OPTIONS: TreeFormatOptions = {
 function entrySummary(entry: SessionEntry): string {
   if (entry.type === "message") {
     switch (entry.message.role) {
+      case "system":
+        return `system: ${summarizeEntry(entry)}`;
       case "user":
         return `user: ${oneLine(extractTextContent(entry.message.content))}`;
       case "assistant":
@@ -33,6 +35,10 @@ function entrySummary(entry: SessionEntry): string {
     }
   }
   switch (entry.type) {
+    case "usage":
+      return `usage: ${summarizeEntry(entry)}`;
+    case "context_edit":
+      return `context ${summarizeEntry(entry)}`;
     case "thinking_level_change":
       return `thinking: ${entry.thinkingLevel}`;
     case "model_change":

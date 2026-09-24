@@ -3,6 +3,7 @@ import type {
   MessageStreamRecord,
 } from "../core/streaming/types.ts";
 import type { MessageFormatOptions } from "./types.ts";
+import { formatSystemMessage } from "./system-message.ts";
 import {
   contentBlocks,
   countLines,
@@ -152,6 +153,8 @@ function formatMessage(
   options: MessageFormatOptions,
 ): RenderedBlock | undefined {
   switch (message.role) {
+    case "system":
+      return { header: "== system ==", body: formatSystemMessage(message) };
     case "user":
       return {
         header: "== user ==",
