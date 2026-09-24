@@ -9,6 +9,7 @@ import {
   CURSOR_HOME,
   cursorToRow,
   DISABLE_BRACKETED_PASTE,
+  DISABLE_MOUSE_REPORTING,
   ERASE_SCREEN,
   RESET_SGR,
   RESTORE_CURSOR,
@@ -34,9 +35,10 @@ export const DETACH_KEY_NAME = "ctrl+]";
 
 /**
  * Undo what an attach session may have left in the local terminal: pi runs
- * cursor-hidden with bracketed paste on, and output may end mid-SGR.
+ * cursor-hidden with bracketed paste on, proxied output can enable mouse
+ * reporting, and output may end mid-SGR.
  */
-const TERMINAL_RESTORE_SEQUENCE = `${SHOW_CURSOR}${DISABLE_BRACKETED_PASTE}${RESET_SGR}`;
+export const TERMINAL_RESTORE_SEQUENCE = `${DISABLE_MOUSE_REPORTING}${SHOW_CURSOR}${DISABLE_BRACKETED_PASTE}${RESET_SGR}`;
 
 /** Render the snapshot from the daemon's emulator origin: home, clear. */
 const CLEAR_SCREEN_SEQUENCE = `${CURSOR_HOME}${ERASE_SCREEN}`;
