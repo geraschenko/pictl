@@ -147,7 +147,7 @@ await launchDaemon(agent.id);
 ## Non-goals
 
 - Persisting mid-session state changes (model, thinking level, ...) for
-  faithful revival — deferred; see docs/thoughts/reviving-state.md.
+  faithful revival — deferred; see docs/follow-ups/reviving-state.md.
 - Change 2 of the handoff (`wait_idle` RPC) — dropped for pictl.
 - Backward compatibility with in-flight daemons launched under the old argv
   (dormant agents are unaffected: their agent.json already has everything
@@ -176,7 +176,7 @@ clauctl agent so clauctl can mirror them (per the handoff doc).
   read/writeSpawnOptions coverage (ok/missing/corrupt).
 - Derisk findings (2026-07-04): pictl's daemon is not in the mutation path for
   session state (unlike clauctl's), so persisted-options work is deferred with
-  its open questions recorded in docs/thoughts/reviving-state.md. This change
+  its open questions recorded in docs/follow-ups/reviving-state.md. This change
   is prerequisite-friendly: agent.json stays the single revival-config source
   read by the daemon.
 

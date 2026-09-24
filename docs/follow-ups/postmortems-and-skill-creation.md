@@ -6,7 +6,7 @@ The goal is not automatic self-improvement. The safer target is a reviewable sug
 
 ## Experience report: fresh reviewer agent
 
-In the first peer-review experiment, the main agent spawned a fresh reviewer to critique `docs/thoughts/metacognition-with-pictl.md`.
+In the first peer-review experiment, the main agent spawned a fresh reviewer to critique `docs/follow-ups/metacognition-with-pictl.md`.
 
 What worked well:
 
@@ -103,7 +103,7 @@ If the suggestion involved navigation or file edits, note side effects that may 
 ### Storage options
 
 - `.pictl/suggestions/` for local, agent-generated suggestions that are not project docs yet. A suggestion-box skill could create or document this directory with a README and template.
-- `docs/thoughts/suggestions/` for suggestions worth preserving in the repository.
+- `docs/follow-ups/suggestions/` for suggestions worth preserving in the repository.
 - Issue tracker integration for accepted suggestions.
 - A JSONL append-only log for scripts, plus rendered Markdown for human review.
 

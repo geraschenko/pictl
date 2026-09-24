@@ -8,7 +8,7 @@
 > pre-experiment brief, kept for methodology.
 
 > Modeled on clauctl's `docs/derisk/resume-persistence/`. Origin:
-> `docs/thoughts/reviving-state.md` (the four empirical questions there are
+> `docs/follow-ups/reviving-state.md` (the four empirical questions there are
 > what this experiment answers).
 
 ## Why this matters

@@ -17,7 +17,7 @@
 
 `pictl prompt --and-wait` waits for completion but does not expose the activity produced by the prompt. For scripting, the more useful primitive is: send a prompt, stream the resulting activity, stop at a well-defined condition, and produce a final resumable cursor.
 
-This spec replaces the completion-only prompt behavior with a shared append-only streaming model for `prompt` and `tail`. It resolves the discussion previously captured in `docs/thoughts/old/prompt-and-tail.md`.
+This spec replaces the completion-only prompt behavior with a shared append-only streaming model for `prompt` and `tail`. It resolves the discussion previously captured in `docs/follow-ups/old/prompt-and-tail.md`.
 
 ## Goals
 
@@ -526,7 +526,7 @@ Removing `--and-wait` and changing default `prompt` behavior is intentionally br
 
 **Instructions**: Update this section during each work session. Add new tasks, mark completed ones with [x], document decisions and problems encountered.
 
-- [x] Archived prior thought document to `docs/thoughts/old/prompt-and-tail.md`.
+- [x] Archived prior thought document to `docs/follow-ups/old/prompt-and-tail.md`.
 - [x] Drafted behavioral spec for prompt/tail streaming.
 - [x] Addressed review comments from `a75df0d`: default message output for `tail`, `--type messages|entries|raw`, no `--events`, `-f` as sugar for an indefinite stream, and JSONL-only output for this spec.
 - [x] Updated follow semantics so `--follow` and `-f` are equivalent sugar for `--until killed`, and either conflicts with explicit `--until`.

@@ -199,7 +199,7 @@ optional chaining).
 
 - **State-as-shared-fold** (the other transferable finding from clauctl's
   refactor): derisked field-by-field in
-  `docs/thoughts/passive-state-tracker.md` ("Derisking findings",
+  `docs/follow-ups/passive-state-tracker.md` ("Derisking findings",
   2026-07-15); the pi-side work (missing events + the fold shipped in the pi
   package) is handed off in `../../earendil-works/pi/docs/handoff-rpc-state-fold.md`.
   A pictl client adoption spec should follow once pi ships both.

@@ -8,7 +8,7 @@
  * `streamTail`, `promptDetached`) and the flag-parsing/usage helpers stay out of
  * the surface — they are coupled to the Stricli command context and to argument
  * parsing, not to anything an SDK consumer would call. See
- * docs/thoughts/sdks-and-helpers.md for the layering this follows. `main.ts`
+ * docs/follow-ups/sdks-and-helpers.md for the layering this follows. `main.ts`
  * remains the CLI bin entry and does not depend on this file.
  *
  * @packageDocumentation

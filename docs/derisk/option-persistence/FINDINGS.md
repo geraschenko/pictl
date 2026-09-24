@@ -84,7 +84,7 @@ regardless). Restore is inferred from the mechanism, not observed.
 ## What this means for pictl
 
 1. **No persisted-options work is needed** for revival fidelity of these
-   fields. `docs/thoughts/reviving-state.md` can be resolved: pi already
+   fields. `docs/follow-ups/reviving-state.md` can be resolved: pi already
    persists everything, split across the session file and settings.json.
 2. **The settings-backed fields are global, not per-agent.** A
    `pictl set-steering-mode` on one agent silently changes the default for

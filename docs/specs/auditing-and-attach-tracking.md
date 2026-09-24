@@ -9,8 +9,8 @@ audit trail explains how an agent got into its current state, and live attach
 state is important context for scripted operations (e.g. `navigate-tree` from
 a script while a human is watching).
 
-This spec addresses `docs/thoughts/auditing.md` and
-`docs/thoughts/attach-tracking.md`. Remove those files on completion of this
+This spec addresses `docs/follow-ups/auditing.md` and
+`docs/follow-ups/attach-tracking.md`. Remove those files on completion of this
 spec.
 
 1. **Auditing**: every audited pictl CLI command targeting an agent appends a
@@ -413,7 +413,7 @@ the list.
       `recordCommandAudit` called from the target-resolving wrappers; `spawn`
       calls it directly after creating the agent dir.
 - [x] Marked the 22 RPC passthroughs + suspend/archive/purge/resume audited.
-- [x] Removed `docs/thoughts/auditing.md` and `docs/thoughts/attach-tracking.md`.
+- [x] Removed `docs/follow-ups/auditing.md` and `docs/follow-ups/attach-tracking.md`.
 - [x] `npm run presubmit` green (check, lint, fmt, 80 tests).
 - [x] End-to-end verified with a live agent: spawn + prompt audit lines share
       one manager source (a claude harness process whose comm is a version

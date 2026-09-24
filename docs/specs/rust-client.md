@@ -512,7 +512,7 @@ let mut pane = AttachPane::connect(
       panic hook chained in front of ratatui's, SIGINT/SIGTERM/SIGHUP select
       arms); example redraws drain-before-draw via biased select instead of
       per event; `send_if_modified` closures factored into a documented
-      `send_if_changed` helper; docs/thoughts/passive-state-tracker.md added.
+      `send_if_changed` helper; docs/follow-ups/passive-state-tracker.md added.
       Open items: agent fleet example redesign (with it: `TerminalState`
       adoption from muninn for undo/reapply of terminal modes, editor
       shortcut, maybe mouse scrolling)

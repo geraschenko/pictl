@@ -81,7 +81,7 @@ impl ActivityWatcher {
                     // the next activity depends on state the event doesn't
                     // carry (queued messages, compaction inside a turn).
                     // A get_state round-trip per boundary is wasteful; see
-                    // docs/thoughts/passive-state-tracker.md for the planned
+                    // docs/follow-ups/passive-state-tracker.md for the planned
                     // replacement (track RpcSessionState from the event
                     // stream after a single get_state).
                     AgentEvent::AgentEnd { .. }

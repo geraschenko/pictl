@@ -438,7 +438,7 @@ Auto-installing it into pictl-spawned agents is deferred to a follow-up spec.
 ## Recovery-packet / provenance discipline (agent-facing guidance, not extension logic)
 
 `navigate-tree` rolls back only the _conversation_ branch, not the filesystem, git,
-processes, or external effects (see `docs/thoughts/metacognition-with-pictl.md`).
+processes, or external effects (see `docs/follow-ups/metacognition-with-pictl.md`).
 The continuation becomes the agent's memory, so before a high-risk self-navigation
 the agent should record a recovery packet (entry to return to, user
 intent/constraints, state planes touched, claims-with-provenance, side effects,

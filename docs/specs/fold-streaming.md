@@ -15,7 +15,7 @@ this with a post-stop drain. clauctl's port of this engine
 event updates state, emits output, and decides whether to stop, in one step —
 and earmarked the design for hand-off back to pictl. This spec is that
 hand-off, enabled by pi fork changes (see also
-`docs/thoughts/passive-state-tracker.md`, whose "path to a complete fold"
+`docs/follow-ups/passive-state-tracker.md`, whose "path to a complete fold"
 the fork implemented):
 
 - Bump `@geraschenko/pi-coding-agent` to **0.80.10-fork.0**:
@@ -422,7 +422,7 @@ designed against it):
 ## Non-goals (deferred)
 
 - **Rust port** (`rust/pictl-rs` `ActivityWatcher` → owned folded state,
-  per `docs/thoughts/passive-state-tracker.md`): blocked upstream of pictl.
+  per `docs/follow-ups/passive-state-tracker.md`): blocked upstream of pictl.
   pi-rpc-rs tracks upstream pi (currently 0.80.6), and the inputs the fold
   needs — the `session_changed { state }` shape and the new broadcast
   events (`model_changed`, `steering_mode_changed`, `follow_up_mode_changed`,

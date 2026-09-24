@@ -8,8 +8,8 @@
 
 This spec replaces the current ad hoc parser structure with a centralized Stricli-based command layer. It also resolves the earlier CLI argument parsing and global target design thoughts, now archived at:
 
-- `docs/thoughts/old/cli-argument-parsing.md`
-- `docs/thoughts/old/global-target.md`
+- `docs/follow-ups/old/cli-argument-parsing.md`
+- `docs/follow-ups/old/global-target.md`
 
 The new CLI grammar intentionally removes positional agent arguments. Commands that operate on agents select them with `--target` / `-t`, or with the `PICTL_TARGET` environment variable as a fallback.
 
@@ -395,7 +395,7 @@ Notes:
 **Instructions**: Update this section during each work session. Add new tasks, mark completed ones with [x], document decisions and problems encountered.
 
 - [x] Created spec from design discussion.
-- [x] Moved resolved thought docs into `docs/thoughts/old/`.
+- [x] Moved resolved thought docs into `docs/follow-ups/old/`.
 - [x] Add pinned `@stricli/core` dependency.
 - [x] Implement central target selection helpers.
 - [x] Add pure tests for target selection behavior.
