@@ -1,5 +1,5 @@
 import type { SessionEntry } from "@geraschenko/pi-coding-agent";
-import { extractTextContent, hasContentBlock } from "./text.ts";
+import { extractTextContent, hasContentBlock } from "../core/text.ts";
 
 export const FILTER_MODES = [
   "conversation",

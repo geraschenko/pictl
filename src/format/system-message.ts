@@ -1,5 +1,5 @@
 import type { AgentMessage } from "../core/streaming/types.ts";
-import { extractTextContent } from "./text.ts";
+import { extractTextContent } from "../core/text.ts";
 
 export function formatSystemMessage(
   message: Extract<AgentMessage, { role: "system" }>,

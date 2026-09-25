@@ -3,7 +3,7 @@ import { DEFAULT_FORMAT_WIDTH } from "../core/constants.ts";
 import { summarizeEntry } from "./entries.ts";
 import { passesFilter, type FilterNode } from "./filter.ts";
 import { toLayoutTree, type ParentMap } from "./flat-tree.ts";
-import { extractTextContent, oneLine, truncateText } from "./text.ts";
+import { extractTextContent, oneLine, truncateText } from "../core/text.ts";
 import type { FlatLayoutNode } from "./tree-layout.ts";
 import { flattenVisibleTree, treePrefix } from "./tree-layout.ts";
 import type { EntriesInput, TreeFormatOptions } from "./types.ts";

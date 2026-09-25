@@ -1,4 +1,4 @@
-import { isRecord } from "../core/util.ts";
+import { isRecord } from "./util.ts";
 
 const DEFAULT_SUMMARY_CHARS = 80;
 

@@ -1,4 +1,9 @@
-import { buildApplication, buildRouteMap, text_en } from "@stricli/core";
+import {
+  buildApplication,
+  buildRouteMap,
+  text_en,
+  type Application,
+} from "@stricli/core";
 import { attachRoute } from "./attach.ts";
 import { type CommandContext } from "./targets.ts";
 import { completionRoute } from "./completion.ts";
@@ -23,7 +28,7 @@ const routes = {
   ...tailRoute,
   ...gcRoute,
   ...lifecycleRoutes,
-  ...completionRoute,
+  ...completionRoute(() => app),
   format: formatRoute,
   ...rpcRoutes,
   ...internalRoutes,
@@ -47,7 +52,7 @@ const root = buildRouteMap({
   },
 });
 
-export const app = buildApplication<CommandContext>(root, {
+export const app: Application<CommandContext> = buildApplication(root, {
   name: "pictl",
   versionInfo: { currentVersion: VERSION },
   scanner: {

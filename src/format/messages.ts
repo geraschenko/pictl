@@ -13,7 +13,7 @@ import {
   summarizeContentBlock,
   summarizeUnknown,
   truncateText,
-} from "./text.ts";
+} from "../core/text.ts";
 import { DEFAULT_FORMAT_WIDTH } from "../core/constants.ts";
 import { isRecord } from "../core/util.ts";
 

@@ -4,7 +4,7 @@ import { isRecord } from "../core/util.ts";
 import { rawMessageSummary } from "./entries.ts";
 import type { EventStreamRecord } from "./input.ts";
 import { optionalStringOrNumberField, stringListField } from "./messages.ts";
-import { truncateText } from "./text.ts";
+import { truncateText } from "../core/text.ts";
 
 /**
  * One line per event, stateless. Events that message mode wraps as controls
