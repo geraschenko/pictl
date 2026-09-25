@@ -6,7 +6,14 @@ import { test } from "node:test";
 import { buildApplication, buildRouteMap } from "@stricli/core";
 import { app } from "./app.ts";
 import type { AuditCommandEvent } from "./audit.ts";
-import { commandOneTarget, recordCommandAudit, runCliApp } from "./cli.ts";
+import {
+  commandNoTarget,
+  commandOneTarget,
+  optionalBooleanFlag,
+  recordCommandAudit,
+  runCliApp,
+  type InferFlags,
+} from "./cli.ts";
 import { auditLogPath } from "./registry.ts";
 import type { CommandContext } from "./targets.ts";
 import { VERSION } from "./version.ts";
@@ -42,6 +49,40 @@ async function withRegistry<T>(fn: (dir: string) => Promise<T>): Promise<T> {
     await rm(dir, { recursive: true, force: true });
   }
 }
+
+test("optional boolean flags distinguish absent, positive, and negated values", async () => {
+  const flagSpecs = { sizes: optionalBooleanFlag("Show sizes") };
+  const received: InferFlags<typeof flagSpecs>[] = [];
+  const optionalFlagApp = buildApplication<CommandContext>(
+    commandNoTarget<InferFlags<typeof flagSpecs>>({
+      docs: { brief: "optional boolean probe" },
+      parameters: { flags: flagSpecs },
+      func(flags) {
+        received.push(flags);
+      },
+    }),
+    {
+      name: "pictl-probe",
+      scanner: { caseStyle: "allow-kebab-for-camel" },
+    },
+  );
+
+  for (const argv of [[], ["--sizes"], ["--no-sizes"]]) {
+    const probe = fakeProcess();
+    await runCliApp(optionalFlagApp, argv, probe.proc);
+    assert.equal(probe.proc.exitCode, 0, probe.stderr);
+  }
+
+  const expected: InferFlags<typeof flagSpecs>[] = [
+    {},
+    { sizes: true },
+    { sizes: false },
+  ];
+  assert.deepEqual(
+    received.map((flags) => flags.sizes),
+    expected.map((flags) => flags.sizes),
+  );
+});
 
 test("help and version print key lines", async () => {
   const version = fakeProcess();
