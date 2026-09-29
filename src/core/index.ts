@@ -51,11 +51,7 @@ export {
 } from "./registry.ts";
 
 // until-conditions and the stream driver they run on
-export {
-  parseUntilCondition,
-  UntilTimeoutError,
-  type UntilCondition,
-} from "./until-engine.ts";
+export { UntilTimeoutError, type UntilCondition } from "./until-engine.ts";
 export { AsyncQueue } from "./streaming/async-queue.ts";
 export {
   runStream,
@@ -67,6 +63,7 @@ export {
 } from "./streaming/driver.ts";
 export {
   isIdle,
+  parseUntilCondition,
   untilMetAtSeed,
   untilMetByEvent,
   untilQuietMs,

@@ -141,21 +141,27 @@ New `src/core/until-engine.ts` — grammar plus generic checkers:
 
 ```ts
 export class UntilTimeoutError extends Error {}      // moved from until.ts
-export type UntilCondition = /* unchanged shape */;
-export const UNTIL_USAGE, UNTIL_COMPLETIONS;         // "killed" nowhere
-export function parseUntilCondition(value: string): UntilCondition;  // unchanged grammar
+export type UntilCondition =
+  | { kind: "turn-end" }
+  | { kind: "state"; name: string }
+  | { kind: "no-activity"; idleMs: number };
 export function secondsToTimerMs(seconds: number): number;           // new, see Conditions
 
-/** The two repo-specific judgments the checkers close over. "isIdle", not
- *  "isBusy": match the grammar's terminology instead of naming a negation. */
+/** Named state conditions and the repo-specific turn-end judgment. */
 export interface UntilPredicates<TEvent, TState> {
-  isIdle(state: TState): boolean;
+  /** Required for turn-end satisfaction at the seed. */
+  stateConditions: { idle(state: TState): boolean } &
+    Record<string, (state: TState) => boolean>;
   isTurnEnd(event: TEvent): boolean;
 }
 
 export function makeUntilCheckers<TEvent, TState>(
   predicates: UntilPredicates<TEvent, TState>,
 ): {
+  /** Derived from this instance's state condition names, in key order. */
+  usage: string;
+  completions: readonly string[];
+  parse(value: string): UntilCondition;
   /** Whether the condition already holds at the subscribe seed. */
   untilMetAtSeed(c: UntilCondition, seed: TState): boolean;
   /** Whether this event satisfies the condition; `state` is post-fold. */
@@ -233,13 +239,27 @@ Changed `src/core/until.ts` — thin instantiation of the engine:
 ```ts
 export function isIdle(state: RpcSessionState): boolean;  // see Conditions
 
-export const { untilMetAtSeed, untilMetByEvent, untilQuietMs } =
-  makeUntilCheckers<RpcSocketBroadcastEvent, RpcSessionState>({
-    isIdle,
-    isTurnEnd: (e) => e.type === "agent_end" && e.willRetry !== true,
-  });
-// Grammar consumers re-import from until-engine.ts directly.
+export const {
+  usage: UNTIL_USAGE,
+  completions: UNTIL_COMPLETIONS,
+  parse: parseUntilCondition,
+  untilMetAtSeed,
+  untilMetByEvent,
+  untilQuietMs,
+} = makeUntilCheckers<RpcSocketBroadcastEvent, RpcSessionState>({
+  stateConditions: { idle: isIdle },
+  isTurnEnd: (e) => e.type === "agent_end" && e.willRetry !== true,
+});
+// Grammar consumers import this repo's vocabulary from until.ts.
 ```
+
+The engine derives usage and completions in the order `turn-end`, named
+state conditions, `no-activity:<secs>` (`no-activity:` for completion).
+Parsing rejects unknown names against the instance's vocabulary. Pictl
+registers only `idle`, preserving `turn-end|idle|no-activity:<secs>`; other
+repos can register additional state predicates without changing pictl's
+CLI. Named conditions use their predicate at both seed and event checks;
+`turn-end` at the seed always uses `idle`.
 
 No fold adapter: the fold lives inside `PiSocketClient`, and the checkers
 speak pi's `RpcSocketBroadcastEvent` directly.

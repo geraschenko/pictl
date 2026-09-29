@@ -21,15 +21,16 @@ import {
 import { oneTarget, type CommandContext } from "./targets.ts";
 import { isPidAlive, piSocketPath } from "./registry.ts";
 import { connectWithRetry } from "./pi-socket-client.ts";
+import { secondsToTimerMs, UntilTimeoutError } from "./until-engine.ts";
+import { runStream } from "./streaming/driver.ts";
 import {
   parseUntilCondition,
-  secondsToTimerMs,
-  UntilTimeoutError,
   UNTIL_COMPLETIONS,
   UNTIL_USAGE,
-} from "./until-engine.ts";
-import { runStream } from "./streaming/driver.ts";
-import { untilMetAtSeed, untilMetByEvent, untilQuietMs } from "./until.ts";
+  untilMetAtSeed,
+  untilMetByEvent,
+  untilQuietMs,
+} from "./until.ts";
 import { SOCKET_CONNECT_DEADLINE_MS } from "./constants.ts";
 
 const waitFlags = {

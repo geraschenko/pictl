@@ -32,13 +32,19 @@ export function isIdle(state: RpcSessionState): boolean {
   );
 }
 
-export const { untilMetAtSeed, untilMetByEvent, untilQuietMs } =
-  makeUntilCheckers<RpcSocketBroadcastEvent, RpcSessionState>({
-    isIdle,
-    // pi's socket always sends the session-layer agent_end (which carries
-    // willRetry); the core variant without it exists only in the type union
-    // and counts as a turn end.
-    isTurnEnd: (event) =>
-      event.type === "agent_end" &&
-      (!("willRetry" in event) || event.willRetry !== true),
-  });
+export const {
+  usage: UNTIL_USAGE,
+  completions: UNTIL_COMPLETIONS,
+  parse: parseUntilCondition,
+  untilMetAtSeed,
+  untilMetByEvent,
+  untilQuietMs,
+} = makeUntilCheckers<RpcSocketBroadcastEvent, RpcSessionState>({
+  stateConditions: { idle: isIdle },
+  // pi's socket always sends the session-layer agent_end (which carries
+  // willRetry); the core variant without it exists only in the type union
+  // and counts as a turn end.
+  isTurnEnd: (event) =>
+    event.type === "agent_end" &&
+    (!("willRetry" in event) || event.willRetry !== true),
+});

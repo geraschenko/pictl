@@ -38,11 +38,8 @@ import {
   streamPrompt,
   STREAM_OUTPUT_TYPES,
 } from "./streaming/stream.ts";
-import {
-  parseUntilCondition,
-  secondsToTimerMs,
-  UNTIL_USAGE,
-} from "./until-engine.ts";
+import { secondsToTimerMs } from "./until-engine.ts";
+import { parseUntilCondition, UNTIL_USAGE } from "./until.ts";
 import { makeRecordWriter } from "../format/record-writer.ts";
 import { SOCKET_CONNECT_DEADLINE_MS } from "./constants.ts";
 
