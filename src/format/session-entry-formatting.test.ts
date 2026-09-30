@@ -115,6 +115,17 @@ test("system, usage, and context-edit entries reject malformed rendered fields",
       type: "message",
       message: { ...systemMessage, toolsAdded: [null] },
     },
+    {
+      ...entryBase,
+      type: "message",
+      message: { ...systemMessage, sections: [] },
+    },
+    {
+      ...entryBase,
+      type: "message",
+      message: { ...systemMessage, sections: ["not a keyed section"] },
+    },
+    { ...usageEntry, usage: [] },
     { ...usageEntry, note: 42 },
     { ...entryBase, type: "context_edit", targetId: "target", replacement: {} },
   ]) {
