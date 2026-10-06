@@ -14,9 +14,8 @@ import { gcRoute, lifecycleRoutes } from "./lifecycle.ts";
 import { rpcRoutes } from "./rpc-commands.ts";
 import { spawnRoute } from "./spawn.ts";
 import { tailRoute } from "./tail.ts";
-import { UsageError } from "./util.ts";
+import { ExitCodeError, UsageError } from "./util.ts";
 import { VERSION } from "./version.ts";
-import { UntilTimeoutError } from "./until-engine.ts";
 import { waitRoute } from "./wait.ts";
 
 const routes = {
@@ -92,9 +91,5 @@ export const app: Application<CommandContext> = buildApplication(root, {
     },
   },
   determineExitCode: (error) =>
-    error instanceof UntilTimeoutError
-      ? 3
-      : error instanceof UsageError
-        ? 2
-        : 1,
+    error instanceof ExitCodeError ? error.exitCode : 1,
 });
