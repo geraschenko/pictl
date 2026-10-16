@@ -74,12 +74,12 @@ over unchanged (no historical backlog, so `-n`/`--since` do not apply).
   formatted message path — `format messages`, `tail`, and `prompt` alike.
 - For finite inputs, output is byte-identical to today's output except where
   coalescing applies.
-- Streaming input reuses `src/core/line-reader.ts`; per-record validation
+- Streaming input uses `LineReader` from `line-follower`; per-record validation
   errors gain line numbers (today only JSON syntax errors have them).
 
 ## Input decoding design
 
-`src/format/input.ts` gains a streaming decoder built on `LineReader`,
+`src/format/input.ts` gains a streaming decoder built on `line-follower`'s `LineReader`,
 modeled on clauctl's `decodeFormatInput`:
 
 ```ts
@@ -217,7 +217,7 @@ adapted from a re-renderable screen to an append-only stream.
   run in progress therefore shows nothing until it breaks; accepted, since
   any visible activity is itself a breaker.
 - **Line shape** (aggregated over the whole run, like the TUI fold):
-  `[thought for 4.3s; read src/core/util.ts, src/core/line-reader.ts; grep TODO]`
+  `[thought for 4.3s; read src/core/util.ts, src/core/text.ts; grep TODO]`
   — one thought clause first when any coalesced message had thinking, then
   one clause per tool name in first-appearance order, that tool's args in
   call order joined by `,`; clauses joined by `;`. A clause arg is the bare
@@ -243,8 +243,8 @@ adapted from a re-renderable screen to an append-only stream.
   the same.
 - **Torn final line.** An unterminated trailing line is not a record and is
   dropped, matching `LineReader` semantics everywhere else.
-- **Blank lines** are skipped but counted, so reported line numbers match the
-  input file.
+- **Blank lines** are delivered and counted by `LineReader`, then skipped by
+  the input decoder, so reported line numbers match the input file.
 - **Empty input** renders nothing and exits 0 for all three streaming
   subcommands.
 - A block's trailing separator arrives with the next block, so a live pipe's

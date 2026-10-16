@@ -13,7 +13,7 @@ import type {
   RpcSocketBroadcastEvent,
   SessionEntry,
 } from "@geraschenko/pi-coding-agent";
-import { LineReader, type Line } from "../core/line-reader.ts";
+import { LineReader, type Line } from "line-follower";
 import { parseJsonlInput } from "../core/read-input.ts";
 import {
   EntryMessageRecordProjector,
@@ -571,7 +571,10 @@ export async function decodeFormatInput(
           ? Buffer.from(result.value)
           : result.value;
       rawChunks?.push(chunk);
-      queue.push(...lineReader.push(chunk));
+      for (const line of lineReader.push(chunk)) {
+        if (line.text.trim() === "") continue;
+        queue.push(line);
+      }
     }
     return queue.shift();
   };

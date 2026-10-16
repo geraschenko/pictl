@@ -23,7 +23,7 @@ import {
   type RpcSessionState,
   type RpcSocketBroadcastEvent,
 } from "@geraschenko/pi-coding-agent";
-import { LineReader } from "./line-reader.ts";
+import { LineReader } from "line-follower";
 import { AsyncQueue } from "./streaming/async-queue.ts";
 import type { StreamEvent, StreamSubscription } from "./streaming/driver.ts";
 
@@ -123,6 +123,7 @@ export class PiSocketClient {
     const lineReader = new LineReader();
     socket.on("data", (chunk) => {
       for (const { text } of lineReader.push(chunk)) {
+        if (text.trim() === "") continue;
         if (!helloSeen) {
           helloSeen = true;
           const error = validateHello(text);

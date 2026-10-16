@@ -32,8 +32,9 @@ interface FakePiServer {
 }
 
 /**
- * A fake pi socket: sends hello + the seeding session_changed on connect and
- * answers every request with a bare success response. Awaiting a request
+ * A fake pi socket: sends hello + the seeding session_changed on connect,
+ * with blank lines before and between records, and answers every request
+ * with a bare success response. Awaiting a request
  * after send() is the ordering barrier tests use — the response is written
  * after the sent records, and the stream is processed in order — so no test
  * ever sleeps to "let events arrive".
@@ -45,10 +46,11 @@ async function startFakePiServer(
   const socketPath = join(dir, "pi.sock");
   let connection: Socket | undefined;
   const writeJson = (record: Record<string, unknown>): void => {
-    connection!.write(`${JSON.stringify(record)}\n`);
+    connection!.write(`${JSON.stringify(record)}\n \t\r\n`);
   };
   const server: Server = createServer((socket) => {
     connection = socket;
+    socket.write("\n \t\r\n");
     writeJson({ type: "hello", protocol: "pi-rpc-socket", version: 1 });
     if (sendInitialSeed) {
       writeJson({ type: "session_changed", state: seedState("session-1") });
