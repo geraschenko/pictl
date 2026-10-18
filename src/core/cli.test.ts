@@ -12,12 +12,15 @@ import {
   optionalBooleanFlag,
   recordCommandAudit,
   runCliApp,
+  variadicParsedFlag,
+  variadicStringFlag,
   type InferFlags,
 } from "./cli.ts";
 import { auditLogPath } from "./registry.ts";
 import type { CommandContext } from "./targets.ts";
 import { VERSION } from "./version.ts";
 import { fakeProcess } from "./test-util.ts";
+import { UsageError } from "./util.ts";
 
 async function withRegistry<T>(fn: (dir: string) => Promise<T>): Promise<T> {
   const old = process.env.PICTL_DIR;
@@ -82,6 +85,61 @@ test("optional boolean flags distinguish absent, positive, and negated values", 
     received.map((flags) => flags.sizes),
     expected.map((flags) => flags.sizes),
   );
+});
+
+test("variadic parsed flags default to empty arrays and parse repeated values in order", async () => {
+  const flagSpecs = {
+    count: variadicParsedFlag(
+      "Counts",
+      (input: string): number => {
+        const count = Number(input);
+        if (!Number.isInteger(count)) {
+          throw new UsageError("expected an integer");
+        }
+        return count;
+      },
+      "integer",
+    ),
+    label: variadicStringFlag("Labels", "text"),
+  };
+  const received: InferFlags<typeof flagSpecs>[] = [];
+  const variadicFlagApp = buildApplication<CommandContext>(
+    commandNoTarget<InferFlags<typeof flagSpecs>>({
+      docs: { brief: "variadic flag probe" },
+      parameters: { flags: flagSpecs },
+      func(flags) {
+        received.push(flags);
+      },
+    }),
+    { name: "pictl-probe" },
+  );
+
+  for (const argv of [
+    [],
+    ["--count", "3", "--count", "1", "--label", "first", "--label", "last"],
+  ]) {
+    const probe = fakeProcess();
+    await runCliApp(variadicFlagApp, argv, probe.proc);
+    assert.equal(probe.proc.exitCode, 0, probe.stderr);
+  }
+  const expected: InferFlags<typeof flagSpecs>[] = [
+    { count: [], label: [] },
+    { count: [3, 1], label: ["first", "last"] },
+  ];
+  assert.deepEqual(received, expected);
+
+  const invalid = fakeProcess();
+  await runCliApp(
+    variadicFlagApp,
+    ["--count", "3", "--count", "invalid"],
+    invalid.proc,
+  );
+  assert.equal(invalid.proc.exitCode, 2);
+  assert.equal(
+    invalid.stderr,
+    'Failed to parse "invalid" for count: expected an integer\n',
+  );
+  assert.equal(received.length, 2);
 });
 
 test("help and version print key lines", async () => {

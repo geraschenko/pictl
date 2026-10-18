@@ -136,6 +136,7 @@ export type RequiredFlagKeys<TFlags extends Record<string, unknown>> = Exclude<
 // - booleanFlag(...) becomes `name: boolean`
 // - optionalBooleanFlag(...) becomes `name?: boolean`
 // - variadicStringFlag(...) becomes `name: readonly string[]`
+// - variadicParsedFlag<T>(...) becomes `name: readonly T[]`
 // - stringFlag(...) becomes `name?: string`
 // The runtime flag specs remain ordinary Stricli parameters; the phantom type
 // information only exists to make this mapped type possible.
@@ -209,17 +210,26 @@ export function variadicStringFlag(
   readonly string[],
   TypedFlagParameter<readonly string[], CommandContext>
 > {
+  return variadicParsedFlag(brief, String, placeholder, proposeCompletions);
+}
+
+export function variadicParsedFlag<T>(
+  brief: string,
+  parse: (input: string) => T,
+  placeholder: string,
+  proposeCompletions?: CompletionFn,
+): CliFlag<readonly T[], TypedFlagParameter<readonly T[], CommandContext>> {
   return {
     kind: "parsed",
-    parse: String,
+    parse,
     brief,
     placeholder,
     variadic: true,
     default: [],
     proposeCompletions,
   } as unknown as CliFlag<
-    readonly string[],
-    TypedFlagParameter<readonly string[], CommandContext>
+    readonly T[],
+    TypedFlagParameter<readonly T[], CommandContext>
   >;
 }
 
