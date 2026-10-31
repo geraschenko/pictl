@@ -9,10 +9,11 @@
  * rpc-types.ts in the pi repo.
  *
  * The client owns the session-state fold: it seeds from the first
- * `session_changed` after hello (never delivered as an event) and folds every
- * subsequent broadcast through `nextSessionState` at dispatch. Once subscribed,
- * it queues each event with its post-fold state for one async consumer. Events
- * before subscribe are reflected in the seed rather than replayed.
+ * `session_changed` after hello (never delivered as an event), classifies every
+ * subsequent broadcast as a SocketEvent, and folds the known ones
+ * through `nextSessionState` at dispatch. Once subscribed, it queues each event
+ * with its post-fold state for one async consumer. Events before subscribe are
+ * reflected in the seed rather than replayed.
  */
 
 import { connect, type Socket } from "node:net";
@@ -21,17 +22,15 @@ import {
   type RpcCommand,
   type RpcResponse,
   type RpcSessionState,
-  type RpcSocketBroadcastEvent,
 } from "@geraschenko/pi-coding-agent";
 import { LineReader } from "line-follower";
 import { AsyncQueue } from "./streaming/async-queue.ts";
 import type { StreamEvent, StreamSubscription } from "./streaming/driver.ts";
-
-/** Any parsed JSONL record off the socket, before classification. Non-response
- *  records are cast to pi's RpcSocketBroadcastEvent at dispatch — the one
- *  transport-boundary cast; safe because that union is what pi sends and the
- *  fold returns state unchanged for unknown event types. */
-type SocketRecord = { type: string } & Record<string, unknown>;
+import {
+  socketEvent,
+  type RawSocketEvent,
+  type SocketEvent,
+} from "./streaming/socket-event.ts";
 
 /** The pi RPC socket protocol version this client speaks; bump alongside
  *  protocol-affecting changes to the pi fork. A mismatched hello only warns —
@@ -49,7 +48,7 @@ interface SeedWaiter {
 }
 
 export type RpcEventSubscription = StreamSubscription<
-  RpcSocketBroadcastEvent,
+  SocketEvent,
   RpcSessionState
 >;
 
@@ -61,7 +60,7 @@ export class PiSocketClient {
   private closed = false;
 
   /** The folded session state, seeded by the first session_changed after
-   *  hello and advanced by every subsequent broadcast; undefined until the
+   *  hello and advanced by every subsequent known broadcast; undefined until the
    *  seed arrives. */
   private state: RpcSessionState | undefined;
   private seedWaiter: SeedWaiter | undefined;
@@ -69,8 +68,7 @@ export class PiSocketClient {
 
   /** Installed by subscribe(); until then broadcasts only advance the fold. */
   private events:
-    | AsyncQueue<StreamEvent<RpcSocketBroadcastEvent, RpcSessionState>>
-    | undefined;
+    AsyncQueue<StreamEvent<SocketEvent, RpcSessionState>> | undefined;
 
   private constructor(socket: Socket) {
     this.socket = socket;
@@ -150,9 +148,9 @@ export class PiSocketClient {
   }
 
   private dispatchLine(line: string): void {
-    let record: SocketRecord;
+    let record: RawSocketEvent;
     try {
-      record = JSON.parse(line) as SocketRecord;
+      record = JSON.parse(line) as RawSocketEvent;
     } catch {
       return;
     }
@@ -178,8 +176,10 @@ export class PiSocketClient {
       }
       return;
     }
-    const event = record as unknown as RpcSocketBroadcastEvent;
-    this.state = nextSessionState(this.state, event);
+    const event = socketEvent(record);
+    if (event.type !== "pictl_unknown_event") {
+      this.state = nextSessionState(this.state, event);
+    }
     this.events?.push({ event, state: this.state });
   }
 

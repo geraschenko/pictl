@@ -137,7 +137,9 @@ export async function attach(this: CommandContext): Promise<void> {
           case FrameType.exit:
             finish(0, `agent exited: ${decodeExit(frame.payload).reason}`);
             break;
-          default:
+          case FrameType.input:
+          case FrameType.resize:
+          case FrameType.hello:
             throw new Error(
               `unexpected server-to-client frame type ${frame.type}`,
             );

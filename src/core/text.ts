@@ -20,6 +20,10 @@ export function oneLine(text: string): string {
 }
 
 /**
+ * Not finished output: it never appends `…`, so pair it with
+ * truncateText(…, maxChars), and cut a bracketed annotation's text inside
+ * its brackets.
+ *
  * oneLine's incremental form: collapses whitespace runs to one space while
  * walking `text`, stopping once `maxChars + 1` characters are emitted (so a
  * following truncateText still sees "too long" and appends `…`). Leading

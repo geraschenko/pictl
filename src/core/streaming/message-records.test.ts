@@ -292,3 +292,14 @@ test("event projection faithfully emits direct observations", () => {
   );
   assert.deepEqual(projector.finish(), []);
 });
+
+test("event projection drops event types unknown to pictl", () => {
+  const projector = new EventMessageRecordProjector();
+  assert.deepEqual(
+    projector.project({
+      type: "pictl_unknown_event",
+      rawEvent: { type: "future_event", message: { role: "user" } },
+    }),
+    [],
+  );
+});

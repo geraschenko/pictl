@@ -7,7 +7,7 @@
 import { RpcCommand } from '@geraschenko/pi-coding-agent';
 import { RpcResponse } from '@geraschenko/pi-coding-agent';
 import { RpcSessionState } from '@geraschenko/pi-coding-agent';
-import { RpcSocketBroadcastEvent } from '@geraschenko/pi-coding-agent';
+import type { RpcSocketBroadcastEvent } from '@geraschenko/pi-coding-agent';
 
 // @public (undocumented)
 export interface AgentRecord {
@@ -41,6 +41,8 @@ export class AsyncQueue<T> implements AsyncIterable<T> {
     close(): boolean;
     onPush(handler: () => void): () => void;
     push(value: T): void;
+    // (undocumented)
+    get pushedCount(): number;
 }
 
 // @public
@@ -131,7 +133,7 @@ export function loadAgent(agentIdPrefix: string): Promise<AgentRecord>;
 export const MAX_PAYLOAD_BYTES: number;
 
 // @public (undocumented)
-export function parseUntilCondition(value: string): UntilCondition;
+export const parseUntilCondition: (value: string) => UntilCondition;
 
 // @public (undocumented)
 export class PiSocketClient {
@@ -149,6 +151,14 @@ export class PiSocketClient {
 // @public (undocumented)
 export function piSocketPath(agentDir: string): string;
 
+// @public
+export type RawSocketEvent = Readonly<{
+    type: string;
+} & Record<string, unknown>>;
+
+// @public
+export function rawSocketEvent(event: SocketEvent): RpcSocketBroadcastEvent | RawSocketEvent;
+
 // @public (undocumented)
 export interface ResizePayload {
     // (undocumented)
@@ -158,7 +168,7 @@ export interface ResizePayload {
 }
 
 // @public (undocumented)
-export type RpcEventSubscription = StreamSubscription<RpcSocketBroadcastEvent, RpcSessionState>;
+export type RpcEventSubscription = StreamSubscription<SocketEvent, RpcSessionState>;
 
 // @public (undocumented)
 export function runStream<TEvent, TState>(client: StreamClient<TEvent, TState>, handler: StreamHandler<TEvent, TState>, timeoutMs: number | undefined): Promise<StreamResult<TState>>;
@@ -170,6 +180,12 @@ export interface SessionHistoryEntry {
     // (undocumented)
     sessionId: string;
 }
+
+// @public
+export type SocketEvent = RpcSocketBroadcastEvent | UnknownSocketEvent;
+
+// @public
+export function socketEvent(rawEvent: RawSocketEvent): SocketEvent;
 
 // @public (undocumented)
 export interface StreamClient<TEvent, TState> {
@@ -218,11 +234,20 @@ export interface StreamSubscription<TEvent, TState> {
 // @public (undocumented)
 export function ttySocketPath(agentDir: string): string;
 
+// @public
+export interface UnknownSocketEvent {
+    // (undocumented)
+    readonly rawEvent: RawSocketEvent;
+    // (undocumented)
+    readonly type: "pictl_unknown_event";
+}
+
 // @public (undocumented)
 export type UntilCondition = {
     kind: "turn-end";
 } | {
-    kind: "idle";
+    kind: "state";
+    name: string;
 } | {
     kind: "no-activity";
     idleMs: number;
@@ -232,13 +257,17 @@ export type UntilCondition = {
 export const untilMetAtSeed: (condition: UntilCondition, seed: RpcSessionState) => boolean;
 
 // @public (undocumented)
-export const untilMetByEvent: (condition: UntilCondition, event: RpcSocketBroadcastEvent, state: RpcSessionState) => boolean;
+export const untilMetByEvent: (condition: UntilCondition, event: SocketEvent, state: RpcSessionState) => boolean;
 
 // @public (undocumented)
 export const untilQuietMs: (condition: UntilCondition) => number | undefined;
 
+// Warning: (ae-forgotten-export) The symbol "ExitCodeError" needs to be exported by the entry point index.d.ts
+//
 // @public
-export class UntilTimeoutError extends Error {
+export class UntilTimeoutError extends ExitCodeError {
+    // (undocumented)
+    readonly exitCode = 3;
 }
 
 ```

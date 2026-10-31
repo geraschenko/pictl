@@ -9,16 +9,18 @@
  */
 
 import { createReadStream } from "node:fs";
-import type {
-  RpcSocketBroadcastEvent,
-  SessionEntry,
-} from "@geraschenko/pi-coding-agent";
+import type { SessionEntry } from "@geraschenko/pi-coding-agent";
 import { LineReader, type Line } from "line-follower";
 import { parseJsonlInput } from "../core/read-input.ts";
 import {
   EntryMessageRecordProjector,
   EventMessageRecordProjector,
 } from "../core/streaming/message-records.ts";
+import {
+  socketEvent,
+  type RawSocketEvent,
+  type SocketEvent,
+} from "../core/streaming/socket-event.ts";
 import type {
   AgentMessage,
   MessageStreamRecord,
@@ -61,47 +63,6 @@ const CONTROL_KINDS = new Set([
   "model_changed",
 ]);
 const MESSAGE_RECORD_TYPES = new Set(["message", "control"]);
-
-/** Runtime mirror of `RpcSocketBroadcastEvent["type"]`; the Record type makes
- *  tsc enforce exact agreement with the pi union. Only a stream's first
- *  record is checked against this list — later records in an events stream
- *  need only a `type` outside the entry/message space, so event types newer
- *  than this pictl are not rejected mid-stream. */
-const EVENT_TYPE_MARKERS: Record<RpcSocketBroadcastEvent["type"], true> = {
-  agent_start: true,
-  agent_end: true,
-  agent_settled: true,
-  turn_start: true,
-  turn_end: true,
-  message_start: true,
-  message_update: true,
-  message_end: true,
-  tool_execution_start: true,
-  tool_execution_update: true,
-  tool_execution_end: true,
-  bash_execution_update: true,
-  queue_update: true,
-  compaction_start: true,
-  compaction_end: true,
-  entry_appended: true,
-  model_changed: true,
-  steering_mode_changed: true,
-  follow_up_mode_changed: true,
-  auto_compaction_changed: true,
-  tree_navigated: true,
-  session_info_changed: true,
-  thinking_level_changed: true,
-  auto_retry_start: true,
-  auto_retry_end: true,
-  summarization_retry_scheduled: true,
-  summarization_retry_attempt_start: true,
-  summarization_retry_finished: true,
-  ui_wait_start: true,
-  ui_wait_end: true,
-  session_changed: true,
-  extension_error: true,
-};
-const EVENT_TYPES = new Set<string>(Object.keys(EVENT_TYPE_MARKERS));
 
 function isStringOrNull(value: unknown): value is string | null {
   return typeof value === "string" || value === null;
@@ -409,7 +370,20 @@ function decodeMessagesInput(
 
 /** What an events stream yields: socket events plus the `pictl_cursor`
  *  records a finite `tail --json` run appends. */
-export type EventStreamRecord = RpcSocketBroadcastEvent | StreamCursorRecord;
+export type EventStreamRecord = SocketEvent | StreamCursorRecord;
+
+/** Classifies one raw events-stream record. Only a stream's first record is
+ *  gated on a known event type (see decodeFormatInput); later records need
+ *  only a string `type`, so event types newer than this pictl are not
+ *  rejected mid-stream. Payloads are rendered defensively, so structural
+ *  validation beyond classification would only reject newer events. */
+export function decodeEventStreamRecord(
+  record: RawSocketEvent,
+): EventStreamRecord {
+  return record.type === "pictl_cursor"
+    ? (record as unknown as StreamCursorRecord)
+    : socketEvent(record);
+}
 
 export type FormatInput =
   | Readonly<{
@@ -442,7 +416,7 @@ type RecordShape = "entry" | "message" | "event" | "cursor" | undefined;
  *  missing field) unless it could be a stream record. Cursors get their own
  *  shape because both message and events streams contain them. "event" is
  *  any other string type — decodeFormatInput additionally gates a stream's
- *  FIRST record on EVENT_TYPES. */
+ *  FIRST record on being a known event type. */
 function classifyRecord(value: unknown): RecordShape {
   if (!isRecord(value) || typeof value.type !== "string") {
     return undefined;
@@ -630,7 +604,7 @@ export async function decodeFormatInput(
   const knownEventType =
     isRecord(parsed) &&
     typeof parsed.type === "string" &&
-    EVENT_TYPES.has(parsed.type);
+    socketEvent(parsed as RawSocketEvent).type !== "pictl_unknown_event";
   if (shape === undefined || (shape === "event" && !knownEventType)) {
     // Could still be a one-line minified document.
     return await decodeDocument(crossPointer(first.lineNumber, undefined));
@@ -676,12 +650,8 @@ export async function decodeFormatInput(
     case "event":
       return {
         kind: "events",
-        // Event payloads are rendered defensively, so structural validation
-        // beyond classification would only reject events newer than this
-        // pictl.
-        records: records(
-          ["event", "cursor"],
-          (value) => value as EventStreamRecord,
+        records: records(["event", "cursor"], (value) =>
+          decodeEventStreamRecord(value as RawSocketEvent),
         ),
       };
   }
@@ -719,11 +689,11 @@ async function* projectedEventRecords(
   events: AsyncIterable<EventStreamRecord>,
 ): AsyncGenerator<MessageStreamRecord> {
   const projector = new EventMessageRecordProjector();
-  for await (const event of events) {
-    if (event.type === "pictl_cursor") {
-      yield event;
+  for await (const record of events) {
+    if (record.type === "pictl_cursor") {
+      yield record;
     } else {
-      yield* projector.project(event);
+      yield* projector.project(record);
     }
   }
   yield* projector.finish();

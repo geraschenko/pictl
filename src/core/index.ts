@@ -62,6 +62,13 @@ export {
   type StreamResult,
 } from "./streaming/driver.ts";
 export {
+  rawSocketEvent,
+  socketEvent,
+  type RawSocketEvent,
+  type SocketEvent,
+  type UnknownSocketEvent,
+} from "./streaming/socket-event.ts";
+export {
   isIdle,
   parseUntilCondition,
   untilMetAtSeed,

@@ -2,9 +2,9 @@ import type {
   RpcCommand,
   RpcResponse,
   RpcSessionState,
-  RpcSocketBroadcastEvent,
 } from "@geraschenko/pi-coding-agent";
 import { EventMessageRecordProjector } from "./message-records.ts";
+import { rawSocketEvent, type SocketEvent } from "./socket-event.ts";
 import type { StreamCursorRecord } from "./types.ts";
 import { oneTarget, type CommandContext } from "../targets.ts";
 import { ensureAgentRunning } from "../lifecycle.ts";
@@ -189,13 +189,11 @@ async function runModeStream(options: {
         };
   const metAtSeed = (seed: RpcSessionState): boolean =>
     options.checkSeed && until !== undefined && untilMetAtSeed(until, seed);
-  const metByEvent = (
-    event: RpcSocketBroadcastEvent,
-    state: RpcSessionState,
-  ): boolean => until !== undefined && untilMetByEvent(until, event, state);
+  const metByEvent = (event: SocketEvent, state: RpcSessionState): boolean =>
+    until !== undefined && untilMetByEvent(until, event, state);
   const quietMs = until === undefined ? undefined : untilQuietMs(until);
 
-  let handler: StreamHandler<RpcSocketBroadcastEvent, RpcSessionState>;
+  let handler: StreamHandler<SocketEvent, RpcSessionState>;
   if (options.outputType === "messages") {
     const projector = new EventMessageRecordProjector();
     handler = {
@@ -241,7 +239,7 @@ async function runModeStream(options: {
     handler = {
       onSeed: metAtSeed,
       onEvent: (event, state) => {
-        writer.writeRecord(event);
+        writer.writeRecord(rawSocketEvent(event));
         return metByEvent(event, state);
       },
       onStop: captureCutoffEntries,

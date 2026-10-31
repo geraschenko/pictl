@@ -278,7 +278,9 @@ export class TtyServer {
               this.applyMinSize();
               this.hooks.onAttachmentsChanged(this.attachmentsSnapshot());
               break;
-            default:
+            case FrameType.snapshot:
+            case FrameType.output:
+            case FrameType.exit:
               throw new Error(
                 `unexpected client-to-server frame type ${frame.type}`,
               );

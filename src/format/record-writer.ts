@@ -15,7 +15,8 @@ import type {
 import { MessageFormatter } from "./messages.ts";
 import { DEFAULT_ENTRY_FORMAT_OPTIONS, formatEntry } from "./entries.ts";
 import { formatEvent } from "./events.ts";
-import type { EventStreamRecord } from "./input.ts";
+import { decodeEventStreamRecord } from "./input.ts";
+import type { RawSocketEvent } from "../core/streaming/socket-event.ts";
 
 export class StdoutJsonlWriter implements RecordWriter {
   private readonly context: CommandContext;
@@ -77,6 +78,8 @@ export class FormattedEntryWriter implements RecordWriter {
   end(): void {}
 }
 
+/** Receives raw socket events and cursors (what `--json` would print) and
+ *  decodes them as `pictl format events` does, so both render identically. */
 export class FormattedEventWriter implements RecordWriter {
   private readonly context: CommandContext;
 
@@ -86,7 +89,7 @@ export class FormattedEventWriter implements RecordWriter {
 
   writeRecord(record: unknown): void {
     this.context.process.stdout.write(
-      `${formatEvent(record as EventStreamRecord)}\n`,
+      `${formatEvent(decodeEventStreamRecord(record as RawSocketEvent))}\n`,
     );
   }
 

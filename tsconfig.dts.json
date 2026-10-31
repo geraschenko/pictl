@@ -3,6 +3,10 @@
   "compilerOptions": {
     "declaration": true,
     "emitDeclarationOnly": true,
+    // pi-ai's declarations import JSON model data (e.g. amazon-bedrock.json);
+    // resolving it puts a .json file in the program, which API Extractor
+    // rejects (ae-wrong-input-file-type). pictl's API doesn't use its types.
+    "resolveJsonModule": false,
     "outDir": "dist/dts"
   },
   "include": ["src/core/index.ts"]

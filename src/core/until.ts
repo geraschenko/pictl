@@ -18,10 +18,8 @@
  *   the stream driver's quiet timer, never by an event.
  */
 
-import type {
-  RpcSessionState,
-  RpcSocketBroadcastEvent,
-} from "@geraschenko/pi-coding-agent";
+import type { RpcSessionState } from "@geraschenko/pi-coding-agent";
+import type { SocketEvent } from "./streaming/socket-event.ts";
 import { makeUntilCheckers } from "./until-engine.ts";
 
 /** Compacting counts as working, even when triggered manually on an
@@ -39,7 +37,7 @@ export const {
   untilMetAtSeed,
   untilMetByEvent,
   untilQuietMs,
-} = makeUntilCheckers<RpcSocketBroadcastEvent, RpcSessionState>({
+} = makeUntilCheckers<SocketEvent, RpcSessionState>({
   stateConditions: { idle: isIdle },
   // pi's socket always sends the session-layer agent_end (which carries
   // willRetry); the core variant without it exists only in the type union

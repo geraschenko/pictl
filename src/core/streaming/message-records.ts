@@ -1,12 +1,12 @@
 import {
   sessionEntryToContextMessages,
-  type RpcSocketBroadcastEvent,
   type SessionEntry,
 } from "@geraschenko/pi-coding-agent";
+import type { SocketEvent } from "./socket-event.ts";
 import type { MessageStreamRecord } from "./types.ts";
 
 export class EventMessageRecordProjector {
-  project(event: RpcSocketBroadcastEvent): readonly MessageStreamRecord[] {
+  project(event: SocketEvent): readonly MessageStreamRecord[] {
     switch (event.type) {
       case "message_end":
         return [{ type: "message", message: event.message }];
@@ -25,7 +25,32 @@ export class EventMessageRecordProjector {
         return [{ type: "control", control: { kind: "queue_update", event } }];
       case "model_changed":
         return [{ type: "control", control: { kind: "model_changed", event } }];
-      default:
+      case "agent_start":
+      case "agent_end":
+      case "agent_settled":
+      case "turn_start":
+      case "turn_end":
+      case "message_start":
+      case "message_update":
+      case "tool_execution_start":
+      case "tool_execution_update":
+      case "tool_execution_end":
+      case "entry_appended":
+      case "steering_mode_changed":
+      case "follow_up_mode_changed":
+      case "auto_compaction_changed":
+      case "session_info_changed":
+      case "thinking_level_changed":
+      case "auto_retry_start":
+      case "auto_retry_end":
+      case "summarization_retry_scheduled":
+      case "summarization_retry_attempt_start":
+      case "summarization_retry_finished":
+      case "bash_execution_update":
+      case "ui_wait_start":
+      case "ui_wait_end":
+      case "extension_error":
+      case "pictl_unknown_event":
         return [];
     }
   }

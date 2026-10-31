@@ -157,6 +157,35 @@ test("each event is delivered paired with its post-fold state", async () => {
   }
 });
 
+test("an event type unknown to pictl is delivered as unknown and leaves the fold unchanged", async () => {
+  const server = await startFakePiServer();
+  try {
+    const client = await PiSocketClient.connect(server.socketPath);
+    try {
+      const subscription = await client.subscribe();
+      const iterator = subscription.events[Symbol.asyncIterator]();
+      server.send({ type: "agent_start" });
+      server.send({ type: "future_event", detail: 1 });
+      await flush(client);
+      const [started, future] = await Promise.all([
+        iterator.next(),
+        iterator.next(),
+      ]);
+      assert.deepEqual(future.value, {
+        event: {
+          type: "pictl_unknown_event",
+          rawEvent: { type: "future_event", detail: 1 },
+        },
+        state: started.value!.state,
+      });
+    } finally {
+      client.close();
+    }
+  } finally {
+    await server.close();
+  }
+});
+
 test("a UTF-8 code point split across socket chunks survives intact", async () => {
   const server = await startFakePiServer();
   try {

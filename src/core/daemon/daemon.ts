@@ -21,7 +21,6 @@ import {
   ProjectTrustStore,
   SettingsManager,
   type RpcSessionState,
-  type RpcSocketBroadcastEvent,
 } from "@geraschenko/pi-coding-agent";
 import {
   commandNoTarget,
@@ -30,6 +29,7 @@ import {
   type InferFlags,
 } from "../cli.ts";
 import { type CommandContext } from "../targets.ts";
+import type { SocketEvent } from "../streaming/socket-event.ts";
 import {
   type AgentRecord,
   agentDirPath,
@@ -325,7 +325,7 @@ async function daemon(this: CommandContext, flags: DaemonFlags): Promise<void> {
     });
     queueRecordWrite();
   };
-  const handleEvent = (event: RpcSocketBroadcastEvent): void => {
+  const handleEvent = (event: SocketEvent): void => {
     if (event.type === "session_changed") {
       recordSession(event.state);
     }

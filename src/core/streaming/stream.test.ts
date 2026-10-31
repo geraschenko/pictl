@@ -145,6 +145,8 @@ async function withFakePiSocket<T>(
                 type: "message_end",
                 message: assistantMessage,
               });
+              // A type newer than this pictl, so every mode meets one.
+              writeJson(socket, { type: "future_event", detail: 1 });
               writeJson(socket, {
                 type: "agent_end",
                 messages: [userMessage, assistantMessage],
@@ -546,6 +548,36 @@ test("tail prints formatted messages by default", async () => {
       // Historical user message, then the final cursor; formatted, not JSON.
       assert.match(process.stdout, /^== user ==\n/);
       assert.match(process.stdout, /\[cursor: user-entry\]\n$/);
+    });
+  });
+});
+
+test("prompt events stream renders and passes through event types unknown to pictl", async () => {
+  await withFakeRegistry(async (agentId, agentDir) => {
+    await withFakePiSocket(agentDir, async () => {
+      const formatted = fakeProcess({ PICTL_TARGET: agentId });
+      await runCliApp(
+        app,
+        ["prompt", "--type", "events", "hi"],
+        formatted.proc,
+      );
+      assert.equal(formatted.proc.exitCode, 0);
+      assert.equal(formatted.stderr, "");
+      assert.match(formatted.stdout, /^\[future_event\]$/mu);
+
+      const json = fakeProcess({ PICTL_TARGET: agentId });
+      await runCliApp(
+        app,
+        ["prompt", "--type", "events", "--json", "hi"],
+        json.proc,
+      );
+      assert.equal(json.proc.exitCode, 0);
+      assert.deepEqual(
+        jsonlLines(json.stdout).find(
+          (record) => record.type === "future_event",
+        ),
+        { type: "future_event", detail: 1 },
+      );
     });
   });
 });
