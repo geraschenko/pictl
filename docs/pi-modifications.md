@@ -32,7 +32,6 @@ The fork also expands the RPC surface in small ways so external clients can obse
 - `session_changed` visibility so one client can learn that another client, or the human in the TUI, replaced the active session;
 - `navigate_tree` plus `tree_navigated` so RPC clients can perform `/tree`-style navigation and other clients can observe that the active branch moved;
 - `get_entries` and `get_tree` for durable session-entry cursors and tree visibility;
-- RPC image validation/resizing parity with CLI file arguments, moving RPC behavior closer to the interactive and CLI ingestion paths;
 - internal runtime/session rebinding hooks so interactive mode and the socket server can both stay attached to the current session after `/new`, `/resume`, `fork`, `clone`, and similar replacements.
 
 ## Why `--mode rpc` is not the chosen path
@@ -264,21 +263,6 @@ Why this was needed:
 
 This is infrastructure for `--rpc-socket`, but it is also a useful example of the fork's bias: make the smallest change that lets interactive mode and side-channel clients coexist.
 
-## RPC image validation parity
-
-The fork also fixes RPC-supplied images for `prompt`, `steer`, and `follow_up`.
-
-Before the change, images supplied through RPC bypassed pi's normal image sniffing, validation, and resizing path. A bad image could be accepted into the session and then poison future model requests because providers validate images in the full conversation history.
-
-The fork runs RPC images through the same preparation pipeline as CLI file arguments:
-
-- sniff actual MIME type from bytes;
-- resize according to pi's auto-resize setting;
-- drop unsupported or unshrinkable images;
-- append a visible note to the message instead of persisting an invalid image.
-
-This is not specific to socket mode, but pictl is an RPC client and needs RPC ingestion paths to be safe without reimplementing pi's image rules.
-
 ## Relationship to pictl
 
 These pi changes are what let pictl stay relatively small and honest about protocol boundaries.
@@ -309,8 +293,7 @@ The problems pictl needs solved are:
 3. reliable session replacement visibility;
 4. durable session-entry access for cursor-based orchestration;
 5. RPC control over tree navigation with corresponding visibility events;
-6. safe RPC image ingestion;
-7. runtime lifecycle hooks that allow interactive and side-channel owners to coexist.
+6. runtime lifecycle hooks that allow interactive and side-channel owners to coexist.
 
 The exact fork implementation is not assumed to be the final upstream design. If pi maintainers prefer a different transport, event shape, lifecycle hook, or command organization that solves these problems cleanly, pictl should adapt.
 
@@ -323,7 +306,6 @@ Current fork references:
 - `docs/pi-rpc-socket-mode.md` in the pi fork: detailed socket-mode spec and implementation notes.
 - `docs/rpc-session-tree-commands.md`: `get_entries` / `get_tree` motivation and spec.
 - `docs/rpc-navigate-tree.md`: `navigate_tree` and `tree_navigated` motivation and spec.
-- `docs/rpc-image-validation.md`: RPC image validation problem and fix.
 - `packages/coding-agent/src/modes/rpc/rpc-socket-mode.ts`: socket server implementation.
 - `packages/coding-agent/src/modes/rpc/rpc-command-handler.ts`: shared RPC command execution.
 - `packages/coding-agent/src/modes/rpc/rpc-types.ts`: command, response, and socket record types.

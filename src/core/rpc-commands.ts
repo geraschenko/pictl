@@ -97,6 +97,9 @@ const rawImageFlags = {
 };
 type RawImageFlags = InferFlags<typeof rawImageFlags>;
 
+/** Checks only the extension: pi normalizes user-message images at
+ *  `message_start` (sniffing, resizing, dropping with a text hint) before they
+ *  are persisted or reach a provider. */
 async function imagesFromFlags(
   imagePaths: readonly string[],
 ): Promise<{ images?: ImageContent[] }> {

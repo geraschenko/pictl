@@ -25,9 +25,12 @@ export class EventMessageRecordProjector {
         return [{ type: "control", control: { kind: "queue_update", event } }];
       case "model_changed":
         return [{ type: "control", control: { kind: "model_changed", event } }];
+      case "agent_settled":
+        return event.aborted
+          ? [{ type: "control", control: { kind: "run_aborted", event } }]
+          : [];
       case "agent_start":
       case "agent_end":
-      case "agent_settled":
       case "turn_start":
       case "turn_end":
       case "message_start":

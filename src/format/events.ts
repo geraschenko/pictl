@@ -66,9 +66,12 @@ export function formatEvent(record: EventStreamRecord): string {
         ? "[message_end]"
         : `[message_end] ${message.role}: ${truncateText(summary, DEFAULT_FORMAT_WIDTH)}`;
     }
+    case "agent_settled":
+      return "aborted" in record && record.aborted === true
+        ? "[agent_settled: aborted]"
+        : "[agent_settled]";
     case "agent_start":
     case "agent_end":
-    case "agent_settled":
     case "turn_start":
     case "turn_end":
     case "message_start":

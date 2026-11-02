@@ -6,7 +6,12 @@
 import { SerializeAddon } from "@xterm/addon-serialize";
 import xterm from "@xterm/headless";
 import type { IPty } from "node-pty";
-import { HIDE_CURSOR, SHOW_CURSOR } from "./ansi.ts";
+import {
+  ENABLE_SGR_MOUSE_ENCODING,
+  ENABLE_SGR_PIXEL_MOUSE_ENCODING,
+  HIDE_CURSOR,
+  SHOW_CURSOR,
+} from "./ansi.ts";
 import { spawnPty } from "./pty.ts";
 
 const PTY_COLS = 80;
@@ -25,6 +30,31 @@ function isCursorHidden(terminal: xterm.Terminal): boolean {
     }
   )._core;
   return core?.coreService?.isCursorHidden ?? false;
+}
+
+/**
+ * The sequence that re-enables the emulated terminal's mouse coordinate
+ * encoding, or "" for the default. `terminal.modes` exposes only the tracking
+ * mode, which the serialize addon reproduces; the encoding lives in the
+ * internal mouse service. Guarded so an xterm internals change degrades to
+ * the default encoding, not a crash.
+ */
+function mouseEncodingSequence(terminal: xterm.Terminal): string {
+  const encoding = (
+    terminal as unknown as {
+      _core?: { coreMouseService?: { activeEncoding?: string } };
+    }
+  )._core?.coreMouseService?.activeEncoding;
+  // xterm's encoding names are an internal, open set of strings.
+  switch (encoding) {
+    case "SGR":
+      return ENABLE_SGR_MOUSE_ENCODING;
+    case "SGR_PIXELS":
+      return ENABLE_SGR_PIXEL_MOUSE_ENCODING;
+    case undefined:
+    default:
+      return "";
+  }
 }
 
 /**
@@ -92,11 +122,13 @@ export class PtyScreen {
    * TtyServerHooks.serializeScreen: terminal.write("") is the parse barrier;
    * serializing inside its callback (not in a then() after it) keeps the
    * snapshot exactly at the barrier — xterm may parse further queued chunks
-   * before a microtask runs. The serialize addon does not capture cursor
-   * visibility at all, so the snapshot must append whichever sequence mirrors
-   * the emulator's current state: pi normally runs cursor-hidden (omitting
-   * this would show a phantom cursor), but if pi has the cursor visible at
-   * snapshot time, the attacher must show it too. Preserve row coordinates:
+   * before a microtask runs. The serialize addon captures neither the mouse
+   * encoding nor cursor visibility, so the snapshot appends sequences
+   * mirroring the emulator's current state. pi's fullscreen TUI enables SGR
+   * mouse encoding (without it the attacher would report mouse events in the
+   * default encoding), and normally runs cursor-hidden (omitting this would
+   * show a phantom cursor), but if pi has the cursor visible at snapshot
+   * time, the attacher must show it too. Preserve row coordinates:
    * pi's subsequent absolute-addressed redraws must target the same content.
    */
   serializeScreen(): Promise<string> {
@@ -104,6 +136,7 @@ export class PtyScreen {
       this.terminal.write("", () =>
         resolve(
           this.serializeAddon.serialize() +
+            mouseEncodingSequence(this.terminal) +
             (isCursorHidden(this.terminal) ? HIDE_CURSOR : SHOW_CURSOR),
         ),
       );

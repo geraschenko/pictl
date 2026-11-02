@@ -277,6 +277,8 @@ test("event projection faithfully emits direct observations", () => {
       steering: [],
       followUp: [],
     },
+    { type: "agent_settled", aborted: false },
+    { type: "agent_settled", aborted: true },
   ] as unknown as readonly RpcSocketBroadcastEvent[];
 
   assert.deepEqual(
@@ -288,6 +290,7 @@ test("event projection faithfully emits direct observations", () => {
       "navigate:null->new-leaf",
       "model:anthropic/claude-sonnet",
       "control:queue_update",
+      "control:run_aborted",
     ],
   );
   assert.deepEqual(projector.finish(), []);

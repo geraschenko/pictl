@@ -9,6 +9,8 @@ export const DISABLE_BRACKETED_PASTE = "\x1b[?2004l";
 /** Disable mouse tracking and extended coordinate encodings. */
 export const DISABLE_MOUSE_REPORTING =
   "\x1b[?9l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1005l\x1b[?1006l\x1b[?1015l\x1b[?1016l";
+export const ENABLE_SGR_MOUSE_ENCODING = "\x1b[?1006h";
+export const ENABLE_SGR_PIXEL_MOUSE_ENCODING = "\x1b[?1016h";
 export const RESET_SGR = "\x1b[0m";
 export const CURSOR_HOME = "\x1b[H";
 export const ERASE_SCREEN = "\x1b[2J";

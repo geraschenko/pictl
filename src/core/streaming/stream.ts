@@ -178,6 +178,8 @@ async function runModeStream(options: {
   /** Entries mode: continue the incremental drain after this cursor
    *  (undefined = from the session start); unused for other modes. */
   entriesSince?: string | undefined;
+  /** See runStream's `cutoffSignal`. */
+  cutoffSignal?: AbortSignal;
 }): Promise<ModeStreamResult> {
   const { client, writer, until } = options;
   let cutoffEntries: GetEntriesData | undefined;
@@ -247,7 +249,12 @@ async function runModeStream(options: {
     };
   }
 
-  const result = await runStream(client, handler, options.timeoutMs);
+  const result = await runStream(
+    client,
+    handler,
+    options.timeoutMs,
+    options.cutoffSignal,
+  );
   if (result.outcome === "closed") {
     throw new Error("pi socket closed");
   }
@@ -319,6 +326,7 @@ export async function streamPrompt(
       options.type === "entries"
         ? (await getEntries(client, undefined)).entries.at(-1)?.id
         : undefined;
+    const promptCutoff = new AbortController();
     const streamPromise = runModeStream({
       client,
       outputType: options.type,
@@ -327,19 +335,32 @@ export async function streamPrompt(
       timeoutMs: options.timeoutMs,
       checkSeed: false,
       entriesSince,
+      cutoffSignal: promptCutoff.signal,
     });
     // Mark handled while the prompt RPC is in flight: a handler can reject
     // first, which must not raise an unhandled rejection before the await
     // below attaches.
     streamPromise.catch(() => undefined);
+    let response: RpcResponse;
     try {
-      await client.request(buildPromptCommand(options));
+      response = await client.request(buildPromptCommand(options));
     } catch (error) {
       // The stream only settles once the socket closes; close it so the
       // prompt failure surfaces instead of hanging.
       client.close();
       await streamPromise.catch(() => undefined);
       throw error;
+    }
+    // A handled prompt (an extension command, or an input hook that consumed
+    // it) starts no turn for `turn-end` to wait for; the stream ends at the
+    // response, after the events pi sent before it.
+    if (
+      options.until.kind === "turn-end" &&
+      response.command === "prompt" &&
+      response.success &&
+      response.data.disposition === "handled"
+    ) {
+      promptCutoff.abort();
     }
     const result = await streamPromise;
     // Entries already include entryId, so a cursor is redundant.

@@ -11,6 +11,9 @@
  * connect), `output` (raw PTY output bytes), `exit` (JSON, the agent is
  * shutting down).
  *
+ * Each `encodeX` returns a complete frame, ready to write; each `decodeX`
+ * takes the payload of a frame that `FrameDecoder` has already split off.
+ *
  * Keep this file free of pictl-specific imports: it defines the wire
  * protocol and nothing else.
  */

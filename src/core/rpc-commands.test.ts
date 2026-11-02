@@ -13,7 +13,7 @@ import { runCliApp } from "./cli.ts";
 import { auditLogPath } from "./registry.ts";
 import { fakeProcess } from "./test-util.ts";
 
-test("clear-queue and max thinking route typed requests and audit mutations", async () => {
+test("clear-queue, max thinking, and queued-input dispositions route typed requests and audit mutations", async () => {
   const previousRegistry = process.env.PICTL_DIR;
   const registryDir = await mkdtemp(join(tmpdir(), "pictl-rpc-"));
   const agentId = "agent-1";
@@ -35,6 +35,9 @@ test("clear-queue and max thinking route typed requests and audit mutations", as
           command: command.type,
           success: true,
           ...(command.type === "clear_queue" ? { data: cleared } : {}),
+          ...(command.type === "steer" || command.type === "follow_up"
+            ? { data: { disposition: "queued" } }
+            : {}),
         })}\n`,
       );
     });
@@ -115,6 +118,19 @@ test("clear-queue and max thinking route typed requests and audit mutations", as
         ["set-thinking-level", "-t", agentId, "max"],
       ],
     );
+
+    // pi reports how queued input was dispatched; pictl prints it like any
+    // other response data.
+    for (const [subcommand, type] of [
+      ["steer", "steer"],
+      ["follow-up", "follow_up"],
+    ] as const) {
+      const captured = fakeProcess();
+      await runCliApp(app, [subcommand, "-t", agentId, "hi"], captured.proc);
+      assert.equal(captured.proc.exitCode, 0, captured.stderr);
+      assert.equal(requests.at(-1)!.type, type);
+      assert.deepEqual(JSON.parse(captured.stdout), { disposition: "queued" });
+    }
   } finally {
     if (previousRegistry === undefined) delete process.env.PICTL_DIR;
     else process.env.PICTL_DIR = previousRegistry;

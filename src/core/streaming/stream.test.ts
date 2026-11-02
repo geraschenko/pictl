@@ -124,12 +124,30 @@ async function withFakePiSocket<T>(
         if (line.trim() !== "") {
           const request = JSON.parse(line) as JsonRecord;
           const id = request.id as string | undefined;
-          if (request.type === "prompt") {
+          if (
+            request.type === "prompt" &&
+            (request.message as string).startsWith("/")
+          ) {
+            // An extension command: pi runs it and starts no turn.
+            writeJson(socket, {
+              type: "queue_update",
+              steering: [],
+              followUp: [],
+            });
             writeJson(socket, {
               id,
               type: "response",
               command: "prompt",
               success: true,
+              data: { disposition: "handled" },
+            });
+          } else if (request.type === "prompt") {
+            writeJson(socket, {
+              id,
+              type: "response",
+              command: "prompt",
+              success: true,
+              data: { disposition: "started" },
             });
             writeJson(socket, { type: "message_end", message: userMessage });
             setTimeout(() => {
@@ -258,6 +276,26 @@ test("prompt fails if transport closure prevents the final cursor request", asyn
     assert.equal(process.proc.exitCode, 1);
     assert.match(process.stderr, /pi socket closed/u);
     assert.doesNotMatch(process.stdout, /\[cursor:/u);
+  });
+});
+
+test("a handled prompt ends turn-end streaming at its response, after the events before it", async () => {
+  await withFakeRegistry(async (agentId, agentDir) => {
+    await withFakePiSocket(agentDir, async () => {
+      const process = fakeProcess({ PICTL_TARGET: agentId });
+      await runCliApp(
+        app,
+        ["prompt", "--type", "events", "--json", "/some-command"],
+        process.proc,
+      );
+
+      assert.equal(process.proc.exitCode, 0);
+      assert.equal(process.stderr, "");
+      assert.deepEqual(jsonlLines(process.stdout), [
+        { type: "queue_update", steering: [], followUp: [] },
+        { type: "pictl_cursor", sessionId: "session-1", entryId: "user-entry" },
+      ]);
+    });
   });
 });
 

@@ -45,6 +45,10 @@ export async function runStream<TEvent, TState>(
   client: StreamClient<TEvent, TState>,
   handler: StreamHandler<TEvent, TState>,
   timeoutMs: number | undefined,
+  /** Aborting ends the stream as `done` once the events already received are
+   *  handled: a cutoff at a point in the stream the caller learns of out of
+   *  band. */
+  cutoffSignal?: AbortSignal,
 ): Promise<StreamResult<TState>> {
   const subscription = await client.subscribe();
   let lastState = subscription.seed;
@@ -134,6 +138,15 @@ export async function runStream<TEvent, TState>(
     );
   }
   resetQuietTimer();
+  if (cutoffSignal?.aborted === true) {
+    establishSourceCutoff("done");
+  } else {
+    cutoffSignal?.addEventListener(
+      "abort",
+      () => establishSourceCutoff("done"),
+      { once: true },
+    );
+  }
 
   try {
     for await (const streamEvent of subscription.events) {

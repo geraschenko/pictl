@@ -75,8 +75,8 @@ function signalReady(
 
 /**
  * Pick the session to revive: the most recent entry whose file exists on
- * disk. pi defers writing a session file until the first assistant message,
- * so newer entries may have no file yet — skip those.
+ * disk. pi defers writing a session file until the first user or assistant
+ * message, so newer entries may have no file yet — skip those.
  */
 async function revivalSessionArgs(
   sessions: SessionHistoryEntry[],

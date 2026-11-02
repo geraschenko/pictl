@@ -68,6 +68,8 @@ Run the repository's current type, lint, formatting, test, and build checks from
 
 Exercise the installed bundled executable, not a global pi or an unnoticed `PICTL_PI_BIN` override. Propose isolated real-process checks for spawn → socket readiness → subscribe/state → shutdown and persisted-session revival, plus cases implicated by the diff. Await observable conditions with deadlines rather than fixed sleeps.
 
+Start from `smoke.sh` beside this file (`npm run build`, then `timeout 150 skills/update-pi/smoke.sh`). It runs the provider-free baseline in isolated state, and its output is for review rather than self-asserting. Extend it with the cases the diff implicates. A same-session revive needs a provider: pi writes a session file only from the first user or assistant message.
+
 Use temporary pictl/pi state and a controlled working directory with extensions disabled unless they are the subject of the test. Ask before provider calls, credential copying, or tests that can spend money or affect existing agents. State assertions and time/cost limits; report skipped checks and their residual risks. Keep credentials and private transcripts out of reports.
 
 Update the report with implemented/deferred decisions, checks and outcomes, and remaining uncertainty. Leave git staging and commits to the user unless explicitly requested.

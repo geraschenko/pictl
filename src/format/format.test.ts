@@ -491,6 +491,13 @@ test("format messages renders control event details from real pi event fields", 
             },
           },
         },
+        {
+          type: "control",
+          control: {
+            kind: "run_aborted",
+            event: { type: "agent_settled", aborted: true },
+          },
+        },
       ]
         .map((record) => `${JSON.stringify(record)}\n`)
         .join(""),
@@ -502,7 +509,8 @@ test("format messages renders control event details from real pi event fields", 
       "[control: tree navigated to only-new-leaf]\n\n" +
       "[model: anthropic/claude-sonnet]\n\n" +
       "[control: session changed to session-1 /tmp/session.jsonl]\n\n" +
-      "[control: queue update steering=1 follow-up=2]\n",
+      "[control: queue update steering=1 follow-up=2]\n\n" +
+      "[control: run aborted]\n",
   );
 });
 
@@ -637,6 +645,8 @@ test("format events renders control-kind fields, message summaries, cursors, and
         stopReason: "stop",
       },
     },
+    { type: "agent_settled", aborted: false },
+    { type: "agent_settled", aborted: true },
     { type: "totally_new_event", payload: { anything: true } },
     { type: "pictl_cursor", sessionId: "s", entryId: "leaf1234" },
   ];
@@ -656,6 +666,8 @@ test("format events renders control-kind fields, message summaries, cursors, and
       "[model_changed: anthropic/claude-sonnet]\n" +
       "[session_changed: session-1 /tmp/s.jsonl]\n" +
       "[message_end] assistant: Sure — looking now\n" +
+      "[agent_settled]\n" +
+      "[agent_settled: aborted]\n" +
       "[totally_new_event]\n" +
       "[cursor: leaf1234]\n",
   );

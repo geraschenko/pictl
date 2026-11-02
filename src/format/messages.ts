@@ -131,6 +131,8 @@ function formatControl(record: MessageStreamRecord): string | undefined {
       const followUpCount = stringListField(event, "followUp").length;
       return `[control: queue update steering=${steeringCount} follow-up=${followUpCount}]`;
     }
+    case "run_aborted":
+      return "[control: run aborted]";
     case "model_changed": {
       const model = "model" in event ? event.model : undefined;
       const provider =

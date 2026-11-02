@@ -49,6 +49,11 @@ export type StreamControl =
       readonly event: RpcEventOf<"queue_update">;
     }
   | {
+      /** A run that settled after a cancel; ordinary settles carry no record. */
+      readonly kind: "run_aborted";
+      readonly event: RpcEventOf<"agent_settled">;
+    }
+  | {
       readonly kind: "model_changed";
       readonly event: {
         readonly type: "model_changed";

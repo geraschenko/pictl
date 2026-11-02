@@ -171,7 +171,8 @@ export interface ResizePayload {
 export type RpcEventSubscription = StreamSubscription<SocketEvent, RpcSessionState>;
 
 // @public (undocumented)
-export function runStream<TEvent, TState>(client: StreamClient<TEvent, TState>, handler: StreamHandler<TEvent, TState>, timeoutMs: number | undefined): Promise<StreamResult<TState>>;
+export function runStream<TEvent, TState>(client: StreamClient<TEvent, TState>, handler: StreamHandler<TEvent, TState>, timeoutMs: number | undefined,
+cutoffSignal?: AbortSignal): Promise<StreamResult<TState>>;
 
 // @public
 export interface SessionHistoryEntry {

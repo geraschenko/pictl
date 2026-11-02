@@ -60,6 +60,7 @@ const CONTROL_KINDS = new Set([
   "tree_navigated",
   "session_changed",
   "queue_update",
+  "run_aborted",
   "model_changed",
 ]);
 const MESSAGE_RECORD_TYPES = new Set(["message", "control"]);
